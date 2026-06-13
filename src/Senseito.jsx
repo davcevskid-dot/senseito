@@ -73,6 +73,36 @@ const THEMES = {
   cyan: { p: "#0891B2", pg: "rgba(8,145,178,0.18)", ps: "rgba(8,145,178,0.09)", a: "#22D3EE", as_: "rgba(34,211,238,0.12)", hi: "#A5F3FC", ba: "rgba(8,145,178,0.4)", gr: "linear-gradient(135deg,rgba(8,145,178,0.22) 0%,rgba(34,211,238,0.08) 100%)", label: "Sanctuary" },
 };
 
+// Output font presets the creator can pick (applies to whole school, incl. published view).
+const FONTS = {
+  inter:   { label: "Inter (default)", stack: "'Inter',-apple-system,sans-serif" },
+  grotesk: { label: "Space Grotesk",   stack: "'Space Grotesk',sans-serif" },
+  poppins: { label: "Poppins",         stack: "'Poppins',sans-serif" },
+  lora:    { label: "Lora (serif)",    stack: "'Lora',Georgia,serif" },
+  serif:   { label: "Georgia (serif)", stack: "Georgia,'Times New Roman',serif" },
+  system:  { label: "System UI",       stack: "system-ui,-apple-system,sans-serif" },
+};
+function fontStack(school) { return FONTS[school?.font]?.stack || FONTS.inter.stack; }
+
+// Shared global CSS (fonts + keyframes + resets) — used by BOTH the app shell
+// and the standalone public student view so published schools look identical.
+const GLOBAL_CSS = `
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&family=Inter:wght@400;500;600;700&family=Poppins:wght@400;500;600;700&family=Lora:wght@400;500;600;700&display=swap');
+  @keyframes spin{to{transform:rotate(360deg)}}
+  @keyframes pulse{0%,80%,100%{transform:translateY(0)}40%{transform:translateY(-5px)}}
+  @keyframes shimmer{to{background-position:-200% 0}}
+  @keyframes blink{0%,100%{opacity:1}50%{opacity:0.3}}
+  @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+  *{box-sizing:border-box;margin:0;padding:0}
+  textarea,input,select{outline:none}
+  textarea::placeholder,input::placeholder{color:#55556E;font-style:italic}
+  ::-webkit-scrollbar{width:7px;height:7px}
+  ::-webkit-scrollbar-thumb{background:rgba(124,58,237,0.28);border-radius:4px}
+  ::-webkit-scrollbar-track{background:transparent}
+  button:active{transform:scale(0.98)}
+`;
+function GlobalStyle() { return <style>{GLOBAL_CSS}</style>; }
+
 const TM = {
   Dialogue: { c: "#A78BFA", bg: "rgba(167,139,250,0.1)", icon: "💬" },
   RolePlay: { c: "#22D3EE", bg: "rgba(34,211,238,0.1)", icon: "🎭" },
@@ -486,6 +516,11 @@ function LessonView({ school, lesson, T, onClose, onPass }) {
   const blocksPassed = blocks.length > 0 && outputs[blocks.length - 1]?.passed === true;
   const passed = chatPassed || blocksPassed;
 
+  // Record the pass the moment it happens (unlocks the next lesson + saves progress),
+  // so the student advances even if they close with ✕ instead of clicking Complete.
+  const passFired = useRef(false);
+  useEffect(() => { if (passed && !passFired.current) { passFired.current = true; onPass?.(); } }, [passed]); // eslint-disable-line
+
   async function send() {
     if (!input.trim() || loading || chatPassed) return;
     const userMsg = input.trim(); setInput("");
@@ -522,7 +557,7 @@ function LessonView({ school, lesson, T, onClose, onPass }) {
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             {passed && <div style={{ background: "rgba(74,222,128,0.12)", border: "1px solid rgba(74,222,128,0.35)", borderRadius: 100, padding: "4px 12px", fontSize: 12, fontWeight: 700, color: "#4ADE80" }}>✓ PASSED</div>}
-            {passed && <button onClick={() => { onPass(); onClose(); }} style={{ background: T.p, border: "none", borderRadius: 8, color: "white", padding: "7px 14px", cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit" }}>Complete →</button>}
+            {passed && <button onClick={onClose} style={{ background: T.p, border: "none", borderRadius: 8, color: "white", padding: "7px 14px", cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit" }}>Complete →</button>}
             <button onClick={onClose} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "7px 12px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>✕</button>
           </div>
         </div>
@@ -1583,7 +1618,7 @@ function LessonRow({ lesson, idx, T, progress, onEnter }) {
 // ─────────────────────────────────────────────────────────────
 // ITERATE PANEL
 // ─────────────────────────────────────────────────────────────
-function IteratePanel({ school, history, loading, onApply, onTheme, onGami, onVoice, onClose, advisorChat, onAdvisorChat, onBuildTool, buildingTool }) {
+function IteratePanel({ school, history, loading, onApply, onTheme, onGami, onVoice, onFont, onClose, advisorChat, onAdvisorChat, onBuildTool, buildingTool }) {
   const [mode, setMode] = useState("edits");
   const [prompt, setPrompt] = useState("");
   const [advInput, setAdvInput] = useState("");
@@ -1638,7 +1673,8 @@ function IteratePanel({ school, history, loading, onApply, onTheme, onGami, onVo
         </div>
       </div>
 
-      {mode === "edits" && (<>
+      {mode === "edits" && (
+        <div style={{ flex: 1, overflowY: "auto", minHeight: 0 }}>
         <div style={{ padding: "14px 16px", borderBottom: `1px solid ${B.border}` }}>
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
             <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.5, color: B.muted }}>Instant swaps</span>
@@ -1655,6 +1691,12 @@ function IteratePanel({ school, history, loading, onApply, onTheme, onGami, onVo
             <select value={school.voicePreset || "sage"} onChange={e => onVoice && onVoice(e.target.value)} style={selStyle}>
               {["sage", "drill", "socratic", "scientist", "storyteller", "trickster"].map(v => <option key={v} value={v}>{v[0].toUpperCase() + v.slice(1)}</option>)}
               {school.voicePreset === "custom" && <option value="custom">Custom</option>}
+            </select>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
+            <label style={{ fontSize: 10, color: B.muted }}>🔤 Font</label>
+            <select value={school.font || "inter"} onChange={e => onFont && onFont(e.target.value)} style={selStyle}>
+              {Object.entries(FONTS).map(([k, f]) => <option key={k} value={k}>{f.label}</option>)}
             </select>
           </div>
           <div style={{ fontSize: 10, color: B.muted, marginBottom: 5 }}>🎮 Gamification</div>
@@ -1733,7 +1775,7 @@ function IteratePanel({ school, history, loading, onApply, onTheme, onGami, onVo
             {loading ? <><div style={{ width: 14, height: 14, borderRadius: "50%", border: "2px solid rgba(255,255,255,0.3)", borderTopColor: "white", animation: "spin 0.8s linear infinite" }} />Applying...</> : "⚡ Apply Change"}
           </button>
         </div>
-        <div style={{ flex: 1, overflowY: "auto", padding: "14px 16px" }}>
+        <div style={{ padding: "14px 16px" }}>
           <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.5, color: B.muted, marginBottom: 10 }}>Change history</div>
           {history.length === 0 && <div style={{ fontSize: 13, color: B.muted, textAlign: "center", paddingTop: 20 }}>No changes yet</div>}
           {history.map((h, i) => (
@@ -1743,7 +1785,8 @@ function IteratePanel({ school, history, loading, onApply, onTheme, onGami, onVo
             </div>
           ))}
         </div>
-      </>)}
+        </div>
+      )}
 
       {mode === "advisor" && (<>
         <div style={{ flex: 1, overflowY: "auto", padding: "16px" }}>
@@ -1817,6 +1860,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   }, [rec.revision]); // eslint-disable-line
 
   function handlePass(lessonNumber) {
+    if (progress[lessonNumber] === "passed") return; // already passed — don't re-award XP on revisit
     const nextXp = xp + (school.gamification?.xpPerLesson || 100);
     const next = { ...progress, [lessonNumber]: "passed" };
     let found = false;
@@ -1844,10 +1888,19 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
     setIterating(true); setIterateHistory(h => [{ instruction: inst, status: "working" }, ...h]);
     try {
       const payload = `CURRENT SCHOOL:\n${JSON.stringify(contentOnly(school))}\n\nEDIT INSTRUCTION: ${inst}`;
-      const parsed = await apiJSON(ITERATE_SYS, [{ role: "user", content: payload }], 8000);
-      if (parsed.appAction === "unlockAll") { unlockAll(); setIterateHistory(h => h.map((e, i) => i === 0 ? { ...e, status: "done" } : e)); showToast("✓ All lessons unlocked"); setIterating(false); return; }
-      const content = parsed.school || parsed;
-      if (!content?.name || !Array.isArray(content.semesters) || content.semesters.length === 0) throw new Error("Editor returned an incomplete school — try rephrasing");
+      // Schools with full block data are large — give the editor room and retry once on a
+      // truncated/incomplete response (the usual cause of "incomplete school" errors).
+      let content = null, lastErr = null;
+      for (let attempt = 0; attempt < 2 && !content; attempt++) {
+        try {
+          const parsed = await apiJSON(ITERATE_SYS, [{ role: "user", content: payload }], 16000);
+          if (parsed.appAction === "unlockAll") { unlockAll(); setIterateHistory(h => h.map((e, i) => i === 0 ? { ...e, status: "done" } : e)); showToast("✓ All lessons unlocked"); setIterating(false); return; }
+          const c = parsed.school || parsed;
+          if (!c?.name || !Array.isArray(c.semesters) || c.semesters.length === 0) throw new Error("incomplete");
+          content = c;
+        } catch (e) { lastErr = e; }
+      }
+      if (!content) throw new Error(lastErr?.message === "incomplete" || /JSON|structured/i.test(lastErr?.message || "") ? "The editor's response was too large to apply — try a smaller, more specific change." : (lastErr?.message || "Edit failed — try rephrasing"));
       onUpdate({ data: composeSchool(content, school.knowledgeDNA), revision: (rec.revision || 0) + 1 });
       setIterateHistory(h => h.map((e, i) => i === 0 ? { ...e, status: "done" } : e)); showToast("✓ Change applied — school updated");
     } catch (err) {
@@ -1875,7 +1928,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const TABS = [["lessons", "📚 Lessons"], ["mentor", "🎓 Mentor"], ["tools", `🛠️ Tools${rec.tools?.length ? ` (${rec.tools.length})` : ""}`]];
 
   return (
-    <div style={{ position: "relative" }}>
+    <div style={{ position: "relative", fontFamily: fontStack(school) }}>
       <Toast toast={toast} />
       {activeLesson && <LessonView school={school} lesson={activeLesson} T={T} onClose={() => setActiveLesson(null)} onPass={() => handlePass(activeLesson.number)} />}
       {showIterate && !readOnly && (
@@ -1883,6 +1936,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
           onTheme={(k) => { onUpdate({ data: { ...school, theme: k } }); showToast(`✓ Theme: ${THEMES[k].label}`); }}
           onGami={(gid) => { onUpdate({ data: composeSchool({ ...contentOnly(school), gamiPreset: gid, theme: school.theme }, school.knowledgeDNA) }); showToast(`✓ Gamification: ${GAMI[gid].name}`); }}
           onVoice={(vp) => { onUpdate({ data: composeSchool({ ...contentOnly(school), voicePreset: vp, systemVoice: undefined, theme: school.theme }, school.knowledgeDNA) }); showToast(`✓ Mentor voice: ${vp[0].toUpperCase() + vp.slice(1)}`); }}
+          onFont={(fk) => { onUpdate({ data: { ...school, font: fk } }); showToast(`✓ Font: ${FONTS[fk]?.label || fk}`); }}
           onClose={() => setShowIterate(false)} advisorChat={rec.advisorChat || []} onAdvisorChat={(msgs) => onUpdate({ advisorChat: msgs })} onBuildTool={buildTool} buildingTool={buildingTool} />
       )}
 
@@ -2025,7 +2079,7 @@ function Home({ onCreated }) {
       let vision = full; let dna = null;
       if (full.length > DNA_THRESHOLD) { dna = await api(DISTILL_SYS, [{ role: "user", content: full.slice(0, 30000) }], 1200); vision = prompt.slice(0, 600); }
       const userMsg = `Build a school for this concept: ${vision}${dna ? `\n\nKNOWLEDGE DNA (distilled from the creator's pasted material — teach THIS):\n${dna}` : ""}`;
-      const parsed = await apiJSON(ARCHITECT_SYS, [{ role: "user", content: userMsg }], 5000);
+      const parsed = await apiJSON(ARCHITECT_SYS, [{ role: "user", content: userMsg }], 8000);
       if (parsed.needMoreInfo) { setClarifyQ(parsed.needMoreInfo); setClarifyA(""); setPhase("clarify"); return; }
       onCreated(composeSchool(parsed.school || parsed, dna));
     } catch (e) { setError(e.message || "Build failed — try again."); setPhase("error"); }
@@ -2132,8 +2186,14 @@ function AccountModal({ session, syncState, schoolCount, onSignOut, onClose }) {
 function PublicSchool({ slug }) {
   const [rec, setRec] = useState(null);
   const [status, setStatus] = useState("loading");
-  // local-only progress for anonymous students (kept in memory)
-  const [localState, setLocalState] = useState({ progress: {}, xp: 0, toolStates: {}, mentorChat: [] });
+  const lsKey = `senseito_progress_${slug}`;
+  // local-only progress for anonymous students — persisted in localStorage so
+  // they can leave and continue where they left off.
+  const [localState, setLocalState] = useState(() => {
+    try { const saved = localStorage.getItem(`senseito_progress_${slug}`); if (saved) return JSON.parse(saved); } catch { }
+    return { progress: {}, xp: 0, toolStates: {}, mentorChat: [] };
+  });
+  useEffect(() => { try { localStorage.setItem(lsKey, JSON.stringify(localState)); } catch { } }, [localState, lsKey]);
 
   useEffect(() => {
     (async () => {
@@ -2159,7 +2219,8 @@ function PublicSchool({ slug }) {
 
   const merged = { ...rec, ...localState };
   return (
-    <div style={{ background: B.bg, minHeight: "100vh" }}>
+    <div style={{ background: B.bg, minHeight: "100vh", color: B.white, fontFamily: fontStack(rec.data) }}>
+      <GlobalStyle />
       <div style={{ borderBottom: `1px solid ${B.border}`, padding: "12px 20px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 16, fontWeight: 700, color: B.white }}>Sensei<span style={{ background: "linear-gradient(135deg,#7C3AED,#06B6D4)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>to</span></div>
         <a href="/" style={{ fontSize: 12.5, color: "#A78BFA", textDecoration: "none", border: "1px solid rgba(124,58,237,0.35)", borderRadius: 8, padding: "6px 13px", fontWeight: 600 }}>Build your own →</a>
@@ -2205,33 +2266,42 @@ export default function Senseito() {
     })();
   }, []);
 
-  // load cloud schools on sign-in
+  // load cloud schools on sign-in.
+  // IMPORTANT: filter by user_id. The "select published" RLS policy would
+  // otherwise return EVERY published school to every account (cross-account leak),
+  // and autosaving those other-owned rows triggers RLS errors ("Sync error").
   useEffect(() => {
     if (!session) return;
+    const uid_ = session.user.id;
     (async () => {
       try {
-        const rows = await supaFetch(`/rest/v1/schools?select=*&order=created_at.desc`, { token: session.token });
+        const rows = await supaFetch(`/rest/v1/schools?select=*&user_id=eq.${uid_}&order=created_at.desc`, { token: session.token });
         setSchools(local => {
           const cloudRecs = (rows || []).map(r => ({
             id: r.id, data: r.data, tools: r.tools || [], toolStates: r.tool_states || {}, progress: r.progress || {}, xp: r.xp || 0,
             revision: r.revision || 0, mentorChat: r.mentor_chat || [], advisorChat: r.advisor_chat || [],
-            published: r.published, published_slug: r.published_slug, createdAt: new Date(r.created_at).getTime(),
+            published: r.published, published_slug: r.published_slug, createdAt: new Date(r.created_at).getTime(), _owner: uid_,
           }));
           const ids = new Set(cloudRecs.map(c => c.id));
-          return [...cloudRecs, ...local.filter(l => !ids.has(l.id))];
+          // Keep ONLY anonymous local schools (built before sign-in) and migrate them to this user.
+          // Drop any leftover schools owned by a different account.
+          const anon = local.filter(l => !ids.has(l.id) && !l._owner).map(l => ({ ...l, _owner: uid_ }));
+          return [...cloudRecs, ...anon];
         });
       } catch (e) { console.warn("Cloud load failed:", e.message); }
     })();
   }, [session]);
 
-  // debounced autosave
+  // debounced autosave — only persist schools owned by (or being migrated to) the current user.
   useEffect(() => {
-    if (!session || !schools.length) return;
+    if (!session) return;
+    const mine = schools.filter(r => !r._owner || r._owner === session.user.id);
+    if (!mine.length) return;
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(async () => {
       try {
         setSyncState("saving");
-        const rows = schools.map(r => ({
+        const rows = mine.map(r => ({
           id: r.id, user_id: session.user.id, data: r.data, tools: r.tools || [], tool_states: r.toolStates || {}, progress: r.progress || {}, xp: r.xp || 0,
           revision: r.revision || 0, mentor_chat: r.mentorChat || [], advisor_chat: r.advisorChat || [],
           published: !!r.published, published_slug: r.published_slug || null, updated_at: new Date().toISOString(),
@@ -2244,7 +2314,7 @@ export default function Senseito() {
   }, [schools, session]);
 
   function createSchool(composed) {
-    const rec = { id: uid(), data: composed, tools: [], toolStates: {}, progress: {}, xp: 0, revision: 0, mentorChat: [], advisorChat: [], published: false, published_slug: null, createdAt: Date.now() };
+    const rec = { id: uid(), data: composed, tools: [], toolStates: {}, progress: {}, xp: 0, revision: 0, mentorChat: [], advisorChat: [], published: false, published_slug: null, createdAt: Date.now(), _owner: session?.user?.id || null };
     setSchools(s => [rec, ...s]); setView(rec.id);
   }
   function updateSchool(id, patch) { setSchools(s => s.map(r => r.id === id ? { ...r, ...patch } : r)); }
@@ -2274,19 +2344,8 @@ export default function Senseito() {
 
   return (
     <div style={{ background: B.bg, minHeight: "100vh", fontFamily: "'Inter',-apple-system,sans-serif", color: B.white, display: "flex" }}>
+      <GlobalStyle />
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&family=Inter:wght@400;500;600;700&display=swap');
-        @keyframes spin{to{transform:rotate(360deg)}}
-        @keyframes pulse{0%,80%,100%{transform:translateY(0)}40%{transform:translateY(-5px)}}
-        @keyframes shimmer{to{background-position:-200% 0}}
-        @keyframes blink{0%,100%{opacity:1}50%{opacity:0.3}}
-        @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
-        *{box-sizing:border-box;margin:0;padding:0}
-        textarea,input{outline:none}
-        textarea::placeholder,input::placeholder{color:#55556E;font-style:italic}
-        ::-webkit-scrollbar{width:5px}
-        ::-webkit-scrollbar-thumb{background:rgba(124,58,237,0.22);border-radius:3px}
-        button:active{transform:scale(0.98)}
         .ol-side{width:236px;flex-shrink:0;background:#0B0B16;border-right:1px solid rgba(255,255,255,0.07);display:flex;flex-direction:column;height:100vh;position:sticky;top:0}
         .ol-burger{display:none}
         @media(max-width:820px){
