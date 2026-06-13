@@ -121,14 +121,164 @@ const CHIP_PROMPTS = {
 };
 
 // ─────────────────────────────────────────────────────────────
+// BLOCK LIBRARY METADATA (28 interactive block types)
+// ─────────────────────────────────────────────────────────────
+const BLOCK_META = {
+  // Theory & knowledge
+  flashcard:           { label: "Flashcards",          icon: "🃏", cat: "Knowledge" },
+  reading:             { label: "Reading + Highlight", icon: "📖", cat: "Knowledge" },
+  mindmap:             { label: "Mind-Map",            icon: "🕸️", cat: "Knowledge" },
+  essay:               { label: "Essay",               icon: "✍️", cat: "Knowledge" },
+  debate:              { label: "Debate",              icon: "⚔️", cat: "Knowledge" },
+  // Hands-on practice
+  code_sandbox:        { label: "Code Sandbox",        icon: "💻", cat: "Practice" },
+  terminal:            { label: "Terminal",            icon: "⌨️", cat: "Practice" },
+  sequencer:           { label: "Sequencer",           icon: "🔢", cat: "Practice" },
+  // Reflection & introspection
+  journal:             { label: "Journal",             icon: "📓", cat: "Reflection" },
+  branching_scenario:  { label: "Branching Scenario",  icon: "🌿", cat: "Reflection" },
+  voice_journal:       { label: "Voice Journal",       icon: "🎙️", cat: "Reflection" },
+  reflection_timer:    { label: "Reflection Timer",    icon: "🧘", cat: "Reflection" },
+  // Measurement & accountability
+  macro_tracker:       { label: "Macro Tracker",       icon: "🥗", cat: "Tracking" },
+  heatmap:             { label: "Heatmap",             icon: "🟩", cat: "Tracking" },
+  habit_checker:       { label: "Habit Checker",       icon: "📆", cat: "Tracking" },
+  metric_tracker:      { label: "Metric Tracker",      icon: "📈", cat: "Tracking" },
+  weekly_planner:      { label: "Weekly Planner",      icon: "🗓️", cat: "Tracking" },
+  mood_quadrant:       { label: "Mood Quadrant",       icon: "🎯", cat: "Tracking" },
+  // Roleplay & simulation
+  roleplay:            { label: "Roleplay Chat",       icon: "🎭", cat: "Roleplay" },
+  objection_handler:   { label: "Objection Handler",   icon: "🛡️", cat: "Roleplay" },
+  interview_simulator: { label: "Interview Simulator", icon: "🧑‍💼", cat: "Roleplay" },
+  audio_pitcher:       { label: "Audio Pitcher",       icon: "🎤", cat: "Roleplay" },
+  // Proof of work
+  image_gate:          { label: "Image Gate",          icon: "📷", cat: "Proof" },
+  video_gate:          { label: "Video Gate",          icon: "🎬", cat: "Proof" },
+  // Information & context
+  reading_plain:       { label: "Reading",             icon: "📄", cat: "Info" },
+  video_embed:         { label: "Video Embed",         icon: "▶️", cat: "Info" },
+  quiz:                { label: "Quiz",                icon: "❓", cat: "Info" },
+  calculator:          { label: "Calculator",          icon: "🧮", cat: "Info" },
+};
+const ALL_BLOCKS = Object.keys(BLOCK_META);
+
+// Compact data-shape reference handed to the architect/editor AI.
+const BLOCK_SCHEMA_GUIDE = `BLOCK DATA SHAPES (each lesson block is { type, data }):
+- flashcard: { cards:[{front,back}] (5-10) }
+- reading: { passage (200-400 words), keyPhrases:[3-6 exact phrases from passage] }
+- mindmap: { center, nodes:[{label, detail}] (4-8) }
+- essay: { prompt, minWords (e.g. 150) }
+- debate: { topic, aiPosition (the side the AI defends) }
+- code_sandbox: { language ("javascript"|"python"|"html"), starter, instructions }
+- terminal: { scenario, expected:[ordered shell commands] }
+- sequencer: { prompt, items:[steps IN CORRECT ORDER] (4-7) }
+- journal: { prompts:[2-4 deep prompts], minWords }
+- branching_scenario: { start:"n1", nodes:{ n1:{text, choices:[{label,next}]}, ... , end nodes:{text, outcome:"pass"|"fail"} } }
+- voice_journal: { prompt, minWords }
+- reflection_timer: { seconds, prompts:[2-4 short cues] }
+- macro_tracker: { goals:{calories,protein,carbs,fat} }
+- heatmap: { goalDays (e.g. 30), label }
+- habit_checker: { habits:[3-5 short habits] }
+- metric_tracker: { label, unit, target }
+- weekly_planner: { } (student writes 3-5 goals)
+- mood_quadrant: { } (mood x energy plot)
+- roleplay: { character, scenario, goal }
+- objection_handler: { product, objections:[3-5 tough objections] }
+- interview_simulator: { role, questions:[4-6 questions] }
+- audio_pitcher: { prompt, criteria }
+- image_gate: { instruction, criteria }
+- video_gate: { instruction }
+- reading_plain: { content (markdown) }
+- video_embed: { url, title }
+- quiz: { questions:[{q, options:[4], answer (0-3), explain}] (3-6) }
+- calculator: { title, fields:[{label,key}], expression (JS using keys, e.g. "weight/(height*height)"), unit }`;
+
+// ─────────────────────────────────────────────────────────────
+// LEARNING PATH RULES (33 paths) — what is being learned drives
+// which blocks are allowed and how lessons are laid out.
+// ─────────────────────────────────────────────────────────────
+const LEARNING_PATH_RULES = {
+  theory:        { keywords: ["philosophy","theory","history","concept","understand","explain","ideas","stoic","ethics","logic"], allowedBlocks: ["reading","flashcard","mindmap","essay","debate","quiz","reading_plain","video_embed"], forbiddenBlocks: ["code_sandbox","terminal","macro_tracker","heatmap"], layout: "chronological" },
+  coding:        { keywords: ["code","coding","python","javascript","programming","develop","build app","api","git","software","algorithm","react"], allowedBlocks: ["reading_plain","code_sandbox","terminal","sequencer","quiz","video_embed"], forbiddenBlocks: ["macro_tracker","heatmap","roleplay","essay","mood_quadrant"], layout: "project-based" },
+  language:      { keywords: ["language","spanish","french","mandarin","german","japanese","speak","fluent","grammar","conversation","vocabulary"], allowedBlocks: ["flashcard","audio_pitcher","roleplay","branching_scenario","quiz","video_embed","reading"], forbiddenBlocks: ["code_sandbox","terminal","macro_tracker"], layout: "progressive" },
+  creative:      { keywords: ["design","art","drawing","painting","writing","creative","photography","music production","craft","illustration"], allowedBlocks: ["video_embed","image_gate","reading","essay","sequencer","journal"], forbiddenBlocks: ["code_sandbox","terminal","macro_tracker"], layout: "project-based" },
+  physical:      { keywords: ["sport","movement","athletic","skill drill","dance","martial","yoga pose","technique"], allowedBlocks: ["video_embed","image_gate","video_gate","habit_checker","heatmap","reflection_timer"], forbiddenBlocks: ["code_sandbox","terminal","essay"], layout: "weekly-milestones" },
+  fitness:       { keywords: ["fitness","workout","gym","muscle","strength","transformation","body","training","reps","lift"], allowedBlocks: ["heatmap","habit_checker","macro_tracker","image_gate","weekly_planner","metric_tracker","video_embed"], forbiddenBlocks: ["code_sandbox","terminal","essay","debate"], layout: "weekly-milestones" },
+  nutrition:     { keywords: ["nutrition","diet","food","eating","macros","calories","meal","cooking"], allowedBlocks: ["macro_tracker","habit_checker","metric_tracker","journal","quiz","reading"], forbiddenBlocks: ["code_sandbox","terminal","debate"], layout: "weekly-milestones" },
+  habits:        { keywords: ["habit","routine","discipline","consistency","streak","daily","atomic"], allowedBlocks: ["habit_checker","heatmap","journal","metric_tracker","weekly_planner","reflection_timer"], forbiddenBlocks: ["code_sandbox","terminal","macro_tracker"], layout: "weekly-milestones" },
+  mindset:       { keywords: ["mindset","belief","identity","reprogram","neuroscience","limiting belief","growth mindset"], allowedBlocks: ["journal","reflection_timer","essay","mood_quadrant","reading","branching_scenario"], forbiddenBlocks: ["code_sandbox","terminal","macro_tracker"], layout: "progressive" },
+  therapy:       { keywords: ["therapy","anxiety","trauma","healing","emotion","meditation","mental health","grief","depression","cbt"], allowedBlocks: ["journal","voice_journal","reflection_timer","mood_quadrant","branching_scenario","reading"], forbiddenBlocks: ["code_sandbox","terminal","macro_tracker","debate"], layout: "progressive" },
+  coaching:      { keywords: ["coaching","coach","life coach","accountability","goal","clarity"], allowedBlocks: ["journal","weekly_planner","roleplay","reflection_timer","habit_checker","mood_quadrant"], forbiddenBlocks: ["code_sandbox","terminal","macro_tracker"], layout: "progressive" },
+  sales:         { keywords: ["sales","selling","objection","close","prospect","pitch","cold call","negotiation deal"], allowedBlocks: ["roleplay","objection_handler","interview_simulator","audio_pitcher","quiz","metric_tracker"], forbiddenBlocks: ["code_sandbox","terminal","macro_tracker","heatmap"], layout: "progressive" },
+  business:      { keywords: ["business","startup","entrepreneur","revenue","online business","product","saas","marketing","brand"], allowedBlocks: ["roleplay","interview_simulator","essay","metric_tracker","weekly_planner","sequencer","quiz"], forbiddenBlocks: ["code_sandbox","terminal","macro_tracker","heatmap"], layout: "project-based" },
+  leadership:    { keywords: ["leadership","manager","team","lead","executive","management","delegate"], allowedBlocks: ["roleplay","interview_simulator","journal","essay","weekly_planner","branching_scenario"], forbiddenBlocks: ["code_sandbox","terminal","macro_tracker","heatmap"], layout: "progressive" },
+  finance:      { keywords: ["finance","money","invest","stocks","budget","wealth","trading","crypto","retirement"], allowedBlocks: ["calculator","metric_tracker","quiz","reading","essay","journal"], forbiddenBlocks: ["code_sandbox","terminal","macro_tracker","roleplay"], layout: "chronological" },
+  relationships: { keywords: ["relationship","dating","marriage","communication","boundaries","attachment","connection","conflict"], allowedBlocks: ["roleplay","journal","branching_scenario","reflection_timer","mood_quadrant","reading"], forbiddenBlocks: ["code_sandbox","terminal","macro_tracker"], layout: "progressive" },
+  parenting:     { keywords: ["parenting","parent","child","kids","toddler","raising","family"], allowedBlocks: ["roleplay","journal","branching_scenario","reading","weekly_planner","reflection_timer"], forbiddenBlocks: ["code_sandbox","terminal","macro_tracker"], layout: "progressive" },
+  certification: { keywords: ["certification","exam","certify","license","test prep","credential","pmp","aws cert"], allowedBlocks: ["flashcard","quiz","reading","mindmap","sequencer","essay"], forbiddenBlocks: ["macro_tracker","heatmap","roleplay"], layout: "chronological" },
+  interview:     { keywords: ["interview","job interview","hiring","behavioral","leetcode interview","get hired"], allowedBlocks: ["interview_simulator","roleplay","quiz","essay","code_sandbox","audio_pitcher"], forbiddenBlocks: ["macro_tracker","heatmap"], layout: "progressive" },
+  debate:        { keywords: ["debate","argue","rhetoric","persuasion","critical thinking","argument"], allowedBlocks: ["debate","essay","reading","roleplay","quiz","mindmap"], forbiddenBlocks: ["code_sandbox","terminal","macro_tracker","heatmap"], layout: "progressive" },
+  problem_solving:{ keywords: ["problem solving","algorithms","puzzle","reasoning","math","data structures","logic puzzle"], allowedBlocks: ["code_sandbox","sequencer","quiz","reading_plain","essay","terminal"], forbiddenBlocks: ["macro_tracker","heatmap","roleplay"], layout: "project-based" },
+  sprint:        { keywords: ["challenge","sprint","30-day","7-day","bootcamp","intensive","daily challenge"], allowedBlocks: ["habit_checker","weekly_planner","journal","heatmap","essay","metric_tracker"], forbiddenBlocks: ["code_sandbox","terminal"], layout: "weekly-milestones" },
+  community:     { keywords: ["community","group","cohort","membership","forum","network"], allowedBlocks: ["journal","weekly_planner","roleplay","reading_plain","quiz"], forbiddenBlocks: ["code_sandbox","terminal","macro_tracker"], layout: "flexible" },
+  apprenticeship:{ keywords: ["apprentice","mentorship","craft","trade","hands-on","shadowing"], allowedBlocks: ["video_gate","image_gate","sequencer","journal","weekly_planner","reading"], forbiddenBlocks: ["macro_tracker","debate"], layout: "project-based" },
+  discovery:     { keywords: ["discover","explore","curiosity","intro to","overview","beginner guide"], allowedBlocks: ["reading","video_embed","quiz","mindmap","flashcard","journal"], forbiddenBlocks: ["code_sandbox","terminal","macro_tracker"], layout: "chronological" },
+  survival:      { keywords: ["survival","prepping","emergency","wilderness","first aid","self-defense"], allowedBlocks: ["video_gate","image_gate","sequencer","quiz","checklist","reading"], forbiddenBlocks: ["code_sandbox","terminal","macro_tracker","debate"], layout: "project-based" },
+  music:         { keywords: ["music","guitar","piano","singing","instrument","theory music","tabs","chords"], allowedBlocks: ["video_embed","audio_pitcher","sequencer","reading","habit_checker","quiz"], forbiddenBlocks: ["code_sandbox","terminal","macro_tracker"], layout: "progressive" },
+  academic:      { keywords: ["academic","university","study","biology","chemistry","physics","science course","lecture"], allowedBlocks: ["reading","flashcard","quiz","essay","mindmap","video_embed","calculator"], forbiddenBlocks: ["macro_tracker","heatmap","roleplay"], layout: "chronological" },
+  case_study:    { keywords: ["case study","case-based","scenario analysis","real-world cases","mba case"], allowedBlocks: ["reading","branching_scenario","essay","debate","quiz","roleplay"], forbiddenBlocks: ["code_sandbox","terminal","macro_tracker"], layout: "chronological" },
+  mental_game:   { keywords: ["mental game","performance","focus","flow","peak performance","sports psychology","clutch"], allowedBlocks: ["journal","reflection_timer","mood_quadrant","metric_tracker","habit_checker","reading"], forbiddenBlocks: ["code_sandbox","terminal","macro_tracker"], layout: "progressive" },
+  spirituality:  { keywords: ["spiritual","meditation","mindfulness","faith","purpose","consciousness","awakening","zen"], allowedBlocks: ["reflection_timer","journal","voice_journal","reading","mood_quadrant","branching_scenario"], forbiddenBlocks: ["code_sandbox","terminal","macro_tracker","debate"], layout: "progressive" },
+  wellness:      { keywords: ["wellness","wellbeing","sleep","stress","self-care","balance","recovery","longevity"], allowedBlocks: ["habit_checker","journal","reflection_timer","metric_tracker","mood_quadrant","reading"], forbiddenBlocks: ["code_sandbox","terminal","debate"], layout: "weekly-milestones" },
+  mixed:         { keywords: [], allowedBlocks: "all", forbiddenBlocks: [], layout: "flexible" },
+};
+
+// Classify a creator prompt into a learning path by keyword scoring (used as
+// a hint / fallback; the architect AI makes the final call).
+function classifyPath(text = "") {
+  const t = text.toLowerCase();
+  let best = "mixed", bestScore = 0;
+  for (const [key, rule] of Object.entries(LEARNING_PATH_RULES)) {
+    const score = (rule.keywords || []).reduce((a, kw) => a + (t.includes(kw) ? 1 : 0), 0);
+    if (score > bestScore) { bestScore = score; best = key; }
+  }
+  return best;
+}
+function allowedBlocksFor(path) {
+  const rule = LEARNING_PATH_RULES[path] || LEARNING_PATH_RULES.mixed;
+  return rule.allowedBlocks === "all" ? ALL_BLOCKS : rule.allowedBlocks;
+}
+
+// Serialized, compact path guide injected into the architect prompt.
+const PATH_GUIDE = Object.entries(LEARNING_PATH_RULES).map(([k, v]) =>
+  `${k} [layout:${v.layout}] allowed: ${v.allowedBlocks === "all" ? "ANY" : v.allowedBlocks.join(",")}${(v.forbiddenBlocks || []).length ? ` | forbidden: ${v.forbiddenBlocks.join(",")}` : ""}`
+).join("\n");
+
+// ─────────────────────────────────────────────────────────────
 // PROMPTS
 // ─────────────────────────────────────────────────────────────
 const ARCHITECT_SYS = `You are the Senseito School Architect AI — the best curriculum designer alive. Generate a complete school as a JSON object.
 
 If the request is critically ambiguous OR references external content you cannot access (a URL with no pasted content), return ONLY: {"needMoreInfo": "one specific, friendly question asking for exactly what you need"}. Use this sparingly — only when you truly cannot build something great.
 
+STEP 1 — CLASSIFY THE LEARNING PATH (what is being learned).
+Pick ONE primary learningPath from this list (use "mixed" only if truly cross-domain):
+${PATH_GUIDE}
+The learningPath determines which interactive blocks you may use and how lessons are laid out.
+
+STEP 2 — PICK THE MENTOR VOICE, INDEPENDENTLY.
+voicePreset is a SEPARATE dimension from learningPath. A "language" school can have any voice (drill, socratic, storyteller…). Choose the voice that best fits the creator's request; if they named a persona, match it.
+
+STEP 3 — SELECT BLOCKS PER LESSON.
+Each lesson gets 1-3 blocks from the chosen path's ALLOWED list ONLY. NEVER use a block from that path's forbidden list. Order blocks pedagogically (e.g. reading → practice → check). The LAST block should be the one that proves mastery.
+${BLOCK_SCHEMA_GUIDE}
+
+STEP 4 — LAY OUT BY THE PATH'S LAYOUT RULE.
+chronological = foundations→deep; project-based = mini projects→capstone; progressive = beginner→expert; weekly-milestones = week-by-week goals; flexible = your call.
+
 Otherwise return an object with these fields:
 - name, tagline (one punchy line), description (2 sentences on the transformation), duration (honor the implied length), category, emoji (one emoji)
+- learningPath: one key from the list above (REQUIRED)
 - theme: one of violet, cyan, amber, rose, emerald (match the mood)
 - voicePreset: one of sage, drill, socratic, scientist, storyteller, trickster, custom
 - mentorName: if the creator named a specific mentor/character/persona, USE EXACTLY THAT; else invent a fitting name
@@ -136,9 +286,9 @@ Otherwise return an object with these fields:
 - systemVoice: ONLY if voicePreset is custom — 3-4 sentences capturing exactly how they speak, vocabulary, catchphrases, what they'd NEVER say. Else omit.
 - transformation: vivid before/after of the student
 - gamiPreset: one of xp (default), belts (discipline/martial), quest (adventure/story), none
-- semesters: array of { number, title, theme, weeks, lessons: [ { number, title, type (Dialogue|RolePlay|Mission|Reflection|SkillTest|Quiz|Debate|Journal), concept (1-2 sentences), openingLine (exact first thing the mentor says, in voice), mission, passCriteria (specific, measurable) } ] }
+- semesters: array of { number, title, theme, weeks, lessons: [ { number, title, type (Dialogue|RolePlay|Mission|Reflection|SkillTest|Quiz|Debate|Journal), concept (1-2 sentences), openingLine (exact first thing the mentor says, in voice), mission, passCriteria (specific, measurable), blocks: [ { type, data } ] (1-3 blocks, allowed for the learningPath, data per the shapes above) } ] }
 - suggestions: 3-4 short, SPECIFIC improvement ideas for THIS school
-- toolIdeas: 2-3 of { name, why (one line), type (checklist|habit|journal|timer|counter|quiz) }
+- toolIdeas: 2-3 of { name, why (one line), type (any block type that fits this school) }
 
 QUALITY BAR — must feel like a $500 course on first generation:
 - 2-3 semesters, 3-4 lessons each (scale to implied duration). Lesson "number" globally sequential.
@@ -147,7 +297,8 @@ QUALITY BAR — must feel like a $500 course on first generation:
 - openingLines must hook instantly, in the mentor's exact voice — no two alike.
 - Missions: doable in 1-3 days, concrete, slightly uncomfortable.
 - passCriteria: evidence-based — what the student must SHOW, not feel.
-- If KNOWLEDGE DNA is provided, ground every lesson in its principles, frameworks, vocabulary.
+- Every lesson MUST include a blocks array (1-3) using ONLY allowed block types for the chosen learningPath. Fill each block's data fully per the schema.
+- If KNOWLEDGE DNA is provided, ground every lesson AND every block in its principles, frameworks, vocabulary.
 - Be specific, vivid, powerful. Zero filler.`;
 
 const DISTILL_SYS = `You are the Senseito Knowledge Distiller. The text below is source material a creator wants taught. Produce a compact KNOWLEDGE DNA in markdown — the minimum a mentor AI needs to teach this material authentically. Max ~600 words.
@@ -162,18 +313,25 @@ Format exactly:
 Output only the markdown. No preamble.`;
 
 const ITERATE_SYS = `You are the Senseito School Editor AI. You receive an existing school JSON and an edit instruction.
-Return the FULL updated school as a JSON object with the EXACT same structure and field names as the input. Apply ONLY the requested changes; preserve everything else exactly, including all lesson "number" values and the voicePreset/gamiPreset/theme fields (change those only if asked). Also update "suggestions" to 3-4 NEW specific ideas that make sense after this change.
+Return the FULL updated school as a JSON object with the EXACT same structure and field names as the input. Apply ONLY the requested changes; preserve everything else exactly, including all lesson "number" values, every lesson's "blocks" array, and the learningPath/voicePreset/gamiPreset/theme fields (change those only if asked). Also update "suggestions" to 3-4 NEW specific ideas that make sense after this change.
+BLOCKS: every lesson has a blocks array of { type, data }. When adding or regenerating lessons, include 1-3 blocks using ONLY block types allowed for this school's learningPath. Respect these data shapes:
+${BLOCK_SCHEMA_GUIDE}
 SPECIAL CASE: lesson locking/unlocking and progress are managed by the app. If the instruction is purely about unlocking lessons or progress, return ONLY: {"appAction": "unlockAll"}.`;
 
-const TOOLBUILDER_SYS = `You are the Senseito Tool Builder AI. Build ONE interactive learning tool as a JSON object.
-Pick the single best matching type and fill its spec:
+const TOOLBUILDER_SYS = `You are the Senseito Tool Builder AI. Build ONE interactive learning tool as a JSON object: { type, title, description, data }.
+Pick the SINGLE best block type for what the creator asked. Prefer a type allowed for the school's learningPath when one fits.
+Legacy tool types (data fields live at the top level, NOT under "data"):
 - checklist: { type, title, description, items: [5-8 specific actionable items] }
 - habit: { type, title, description, habits: [3-5 daily habits, short] }
 - journal: { type, title, description, prompts: [3-5 deep journaling prompts] }
 - timer: { type, title, description, presets: [{label, seconds}] (2-4) }
 - counter: { type, title, description, metrics: [{label, target}] (2-4) }
 - quiz: { type, title, description, questions: [{q, options:[4], answer:0-3, explain}] (4-6) }
-Make every item/prompt/question SPECIFIC to the school's content and mentor's voice — never generic.`;
+Block tool types — put the block's fields under a "data" object per these shapes:
+${BLOCK_SCHEMA_GUIDE}
+CUSTOM: if NOTHING above fits the request, return type "custom" with:
+{ type:"custom", title, description, data: { intro (markdown), sections:[{label, key}] (1-6 input fields the student fills), rubric (how the AI should evaluate / give feedback), aiFeedback: true } }
+Make every item/prompt/field SPECIFIC to the school's content and mentor's voice — never generic. Output ONLY the JSON object.`;
 
 const ADVISOR_SYS = (school) => `You are the Senseito Learning Experience Advisor for "${school.name}" — ${school.description}
 Lessons: ${school.semesters?.flatMap(s => s.lessons?.map(l => l.title)).join("; ")}
@@ -227,8 +385,10 @@ The student can ask you ANYTHING related to this subject. Stay fully in characte
 function composeSchool(content, dna) {
   const voice = content.systemVoice || VOICES[content.voicePreset] || VOICES.sage;
   const preset = GAMI[content.gamiPreset] || GAMI.xp;
+  const learningPath = LEARNING_PATH_RULES[content.learningPath] ? content.learningPath : "mixed";
   return {
     ...content,
+    learningPath,
     theme: THEMES[content.theme] ? content.theme : "violet",
     mentor: {
       name: content.mentorName || "The Mentor",
@@ -310,17 +470,24 @@ function Toast({ toast }) {
 // ─────────────────────────────────────────────────────────────
 // MENTOR LESSON CHAT
 // ─────────────────────────────────────────────────────────────
-function MentorChat({ school, lesson, T, onClose, onPass }) {
+function LessonView({ school, lesson, T, onClose, onPass }) {
+  const blocks = lesson.blocks || [];
+  const [tab, setTab] = useState(blocks.length ? "activities" : "mentor");
+  const [outputs, setOutputs] = useState({});
   const [msgs, setMsgs] = useState([{ role: "assistant", content: lesson.openingLine || `Let's begin. ${lesson.concept}` }]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [passed, setPassed] = useState(false);
+  const [chatPassed, setChatPassed] = useState(false);
   const [missionShown, setMissionShown] = useState(false);
   const bottomRef = useRef(null);
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs]);
 
+  // The LAST block determines whether the activities are passed.
+  const blocksPassed = blocks.length > 0 && outputs[blocks.length - 1]?.passed === true;
+  const passed = chatPassed || blocksPassed;
+
   async function send() {
-    if (!input.trim() || loading || passed) return;
+    if (!input.trim() || loading || chatPassed) return;
     const userMsg = input.trim(); setInput("");
     const convo = [...msgs.filter(m => m.role !== "system"), { role: "user", content: userMsg }];
     setMsgs(m => [...m, { role: "user", content: userMsg }]); setLoading(true);
@@ -329,12 +496,12 @@ function MentorChat({ school, lesson, T, onClose, onPass }) {
       setMsgs(m => [...m, { role: "assistant", content: reply }]);
       if (!missionShown && reply.toLowerCase().includes("mission")) setMissionShown(true);
       const transcript = [...convo, { role: "assistant", content: reply }];
-      if (transcript.filter(m => m.role === "user").length >= 2 && !passed) {
+      if (transcript.filter(m => m.role === "user").length >= 2 && !chatPassed) {
         const serialized = transcript.map(m => `${m.role === "user" ? "STUDENT" : "MENTOR"}: ${m.content}`).join("\n\n");
         const verdict = await api(EVAL_SYS(lesson), [{ role: "user", content: serialized }], 80);
         if (/VERDICT:\s*PASS/i.test(verdict)) {
           const reason = (verdict.match(/REASON:\s*([\s\S]*)/i)?.[1] || "").trim();
-          setPassed(true);
+          setChatPassed(true);
           setTimeout(() => setMsgs(m => [...m, { role: "system", content: `✅ Lesson complete. ${reason || "You've earned this one."}` }]), 500);
         }
       }
@@ -342,9 +509,11 @@ function MentorChat({ school, lesson, T, onClose, onPass }) {
     setLoading(false);
   }
 
+  const TABS = [...(blocks.length ? [["activities", `🧩 Activities${blocks.length ? ` (${blocks.length})` : ""}`]] : []), ["mentor", "💬 Mentor"]];
+
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(0,0,0,0.82)", backdropFilter: "blur(10px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onClose}>
-      <div style={{ background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 20, width: "100%", maxWidth: 680, height: "82vh", maxHeight: 720, display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: `0 0 80px ${T.pg}` }} onClick={e => e.stopPropagation()}>
+      <div style={{ background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 20, width: "100%", maxWidth: 680, height: "86vh", maxHeight: 760, display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: `0 0 80px ${T.pg}` }} onClick={e => e.stopPropagation()}>
         <div style={{ padding: "16px 22px", borderBottom: `1px solid ${B.border}`, background: B.surface2, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div>
             <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.5, color: T.p, marginBottom: 3 }}>{TM[lesson.type]?.icon} {lesson.type} · {lesson.title}</div>
@@ -357,32 +526,53 @@ function MentorChat({ school, lesson, T, onClose, onPass }) {
             <button onClick={onClose} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "7px 12px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>✕</button>
           </div>
         </div>
-        <div style={{ flex: 1, overflowY: "auto", padding: "18px 22px", display: "flex", flexDirection: "column", gap: 12 }}>
-          {msgs.map((m, i) => {
-            if (m.role === "system") return <div key={i} style={{ textAlign: "center", padding: "10px 14px", background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.25)", borderRadius: 10, fontSize: 13, color: "#4ADE80", fontWeight: 600 }}>{m.content}</div>;
-            const isU = m.role === "user";
-            return (
-              <div key={i} style={{ display: "flex", justifyContent: isU ? "flex-end" : "flex-start" }}>
-                {!isU && <div style={{ width: 28, height: 28, borderRadius: "50%", background: T.ps, border: `1px solid ${T.ba}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, flexShrink: 0, marginRight: 10, marginTop: 2 }}>🎓</div>}
-                <div style={{ maxWidth: "76%", background: isU ? T.ps : B.surface2, border: `1px solid ${isU ? T.ba : B.border}`, borderRadius: isU ? "16px 4px 16px 16px" : "4px 16px 16px 16px", padding: "11px 15px", fontSize: 14, lineHeight: 1.65, color: B.white, whiteSpace: "pre-wrap" }}>{m.content}</div>
+
+        {TABS.length > 1 && (
+          <div style={{ display: "flex", gap: 4, padding: "8px 14px 0", background: B.surface2, borderBottom: `1px solid ${B.border}` }}>
+            {TABS.map(([k, l]) => (
+              <button key={k} onClick={() => setTab(k)} style={{ padding: "8px 14px", background: "none", border: "none", borderBottom: `2px solid ${tab === k ? T.p : "transparent"}`, color: tab === k ? B.white : B.muted, fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>{l}</button>
+            ))}
+          </div>
+        )}
+
+        {tab === "activities" && (
+          <div style={{ flex: 1, overflowY: "auto", padding: "18px 22px", display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ fontSize: 13, color: B.mutedMid, lineHeight: 1.6 }}>{lesson.concept}</div>
+            {blocks.map((blk, i) => (
+              <BlockRenderer key={i} block={blk} T={T} school={school} onOutput={(o) => setOutputs(s => ({ ...s, [i]: o }))} />
+            ))}
+            {blocksPassed && <div style={{ textAlign: "center", padding: "12px 14px", background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.25)", borderRadius: 10, fontSize: 13, color: "#4ADE80", fontWeight: 600 }}>✅ Activities complete — hit "Complete →" above, or talk it through with your mentor.</div>}
+          </div>
+        )}
+
+        {tab === "mentor" && (<>
+          <div style={{ flex: 1, overflowY: "auto", padding: "18px 22px", display: "flex", flexDirection: "column", gap: 12 }}>
+            {msgs.map((m, i) => {
+              if (m.role === "system") return <div key={i} style={{ textAlign: "center", padding: "10px 14px", background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.25)", borderRadius: 10, fontSize: 13, color: "#4ADE80", fontWeight: 600 }}>{m.content}</div>;
+              const isU = m.role === "user";
+              return (
+                <div key={i} style={{ display: "flex", justifyContent: isU ? "flex-end" : "flex-start" }}>
+                  {!isU && <div style={{ width: 28, height: 28, borderRadius: "50%", background: T.ps, border: `1px solid ${T.ba}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, flexShrink: 0, marginRight: 10, marginTop: 2 }}>🎓</div>}
+                  <div style={{ maxWidth: "76%", background: isU ? T.ps : B.surface2, border: `1px solid ${isU ? T.ba : B.border}`, borderRadius: isU ? "16px 4px 16px 16px" : "4px 16px 16px 16px", padding: "11px 15px", fontSize: 14, lineHeight: 1.65, color: B.white, whiteSpace: "pre-wrap" }}>{m.content}</div>
+                </div>
+              );
+            })}
+            {loading && (
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ width: 28, height: 28, borderRadius: "50%", background: T.ps, border: `1px solid ${T.ba}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12 }}>🎓</div>
+                <div style={{ display: "flex", gap: 4 }}>{[0, 1, 2].map(i => <div key={i} style={{ width: 6, height: 6, borderRadius: "50%", background: T.p, animation: `pulse 1s ${i * 0.2}s infinite` }} />)}</div>
               </div>
-            );
-          })}
-          {loading && (
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <div style={{ width: 28, height: 28, borderRadius: "50%", background: T.ps, border: `1px solid ${T.ba}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12 }}>🎓</div>
-              <div style={{ display: "flex", gap: 4 }}>{[0, 1, 2].map(i => <div key={i} style={{ width: 6, height: 6, borderRadius: "50%", background: T.p, animation: `pulse 1s ${i * 0.2}s infinite` }} />)}</div>
-            </div>
-          )}
-          <div ref={bottomRef} />
-        </div>
-        {missionShown && !passed && <div style={{ margin: "0 18px 10px", padding: "9px 13px", background: T.as_, border: `1px solid ${T.ba}`, borderRadius: 8, fontSize: 12, color: T.a }}>⚡ Mission active — complete it, then report back with specifics</div>}
-        <div style={{ padding: "14px 18px", borderTop: `1px solid ${B.border}`, background: B.surface2, display: "flex", gap: 10, alignItems: "flex-end" }}>
-          <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} placeholder={passed ? "Lesson complete" : "Reply to your mentor… (Enter to send)"} disabled={passed} rows={2}
-            style={{ flex: 1, background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 10, color: B.white, fontFamily: "inherit", fontSize: 14, lineHeight: 1.5, padding: "9px 13px", resize: "none", outline: "none", opacity: passed ? 0.4 : 1 }} />
-          <button onClick={send} disabled={loading || !input.trim() || passed}
-            style={{ background: T.p, border: "none", borderRadius: 10, padding: "10px 16px", color: "white", fontFamily: "inherit", fontSize: 15, fontWeight: 700, cursor: "pointer", flexShrink: 0, alignSelf: "flex-end", opacity: (loading || passed) ? 0.5 : 1 }}>↑</button>
-        </div>
+            )}
+            <div ref={bottomRef} />
+          </div>
+          {missionShown && !chatPassed && <div style={{ margin: "0 18px 10px", padding: "9px 13px", background: T.as_, border: `1px solid ${T.ba}`, borderRadius: 8, fontSize: 12, color: T.a }}>⚡ Mission active — complete it, then report back with specifics</div>}
+          <div style={{ padding: "14px 18px", borderTop: `1px solid ${B.border}`, background: B.surface2, display: "flex", gap: 10, alignItems: "flex-end" }}>
+            <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} placeholder={chatPassed ? "Lesson complete" : "Reply to your mentor… (Enter to send)"} disabled={chatPassed} rows={2}
+              style={{ flex: 1, background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 10, color: B.white, fontFamily: "inherit", fontSize: 14, lineHeight: 1.5, padding: "9px 13px", resize: "none", outline: "none", opacity: chatPassed ? 0.4 : 1 }} />
+            <button onClick={send} disabled={loading || !input.trim() || chatPassed}
+              style={{ background: T.p, border: "none", borderRadius: 10, padding: "10px 16px", color: "white", fontFamily: "inherit", fontSize: 15, fontWeight: 700, cursor: "pointer", flexShrink: 0, alignSelf: "flex-end", opacity: (loading || chatPassed) ? 0.5 : 1 }}>↑</button>
+          </div>
+        </>)}
       </div>
     </div>
   );
@@ -449,10 +639,691 @@ function MentorOffice({ school, T, chat, onChat }) {
   );
 }
 
+// ═════════════════════════════════════════════════════════════
+// BLOCKS — 28 interactive learning components + BlockRenderer.
+// Each block: ({ data, onOutput, T, disabled, state, onState, school }).
+//  - onOutput({type, passed, ...}) fires when the student completes it.
+//  - state/onState (optional) make a block controlled → persists as a tool.
+//  - Colors come from B (base) + T (theme) — never hardcoded.
+// ═════════════════════════════════════════════════════════════
+const bx = {
+  input: { width: "100%", background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 10, color: B.white, fontFamily: "inherit", fontSize: 14, lineHeight: 1.6, padding: "10px 12px", resize: "vertical", outline: "none" },
+};
+function pBtn(T, on = true) { return { background: on ? T.p : B.surface2, border: on ? "none" : `1px solid ${B.borderMid}`, borderRadius: 9, padding: "9px 16px", color: on ? "white" : B.mutedMid, fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer" }; }
+function pBtnLite() { return { background: "linear-gradient(135deg,#7C3AED,#6D28D9)", border: "none", borderRadius: 8, padding: "8px 12px", color: "white", fontFamily: "inherit", fontSize: 12, fontWeight: 700, cursor: "pointer" }; }
+function PassPill({ passed }) { return passed ? <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "rgba(74,222,128,0.12)", border: "1px solid rgba(74,222,128,0.35)", borderRadius: 100, padding: "3px 11px", fontSize: 11, fontWeight: 700, color: "#4ADE80", flexShrink: 0 }}>✓ Passed</div> : null; }
+
+// Controlled-or-local state so a block persists when used as a tool.
+function useBlockState(initial, state, onState) {
+  const [local, setLocal] = useState(state ?? initial);
+  const s = onState ? (state ?? initial) : local;
+  const set = (patch) => {
+    const next = typeof patch === "function" ? patch(s) : { ...s, ...patch };
+    if (onState) onState(next); else setLocal(next);
+  };
+  return [s, set];
+}
+
+// Tiny markdown → HTML (our own AI-generated content only).
+function mdLite(t = "") {
+  let h = String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  h = h.replace(/^###\s?(.+)$/gm, "<h4>$1</h4>").replace(/^##\s?(.+)$/gm, "<h3>$1</h3>").replace(/^#\s?(.+)$/gm, "<h2>$1</h2>");
+  h = h.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>").replace(/`([^`]+)`/g, "<code>$1</code>");
+  h = h.replace(/^[-*]\s+(.+)$/gm, "<li>$1</li>").replace(/(<li>[\s\S]*?<\/li>)/g, "<ul style='margin:6px 0 6px 18px'>$1</ul>");
+  return h.replace(/\n{2,}/g, "<br/><br/>").replace(/\n/g, "<br/>");
+}
+function Markdown({ text }) { return <div style={{ fontSize: 13.5, lineHeight: 1.7, color: B.white }} dangerouslySetInnerHTML={{ __html: mdLite(text) }} />; }
+
+function blockMentor(school) { return school?.mentor ? `Speak as ${school.mentor.name}. ${school.mentor.systemVoice || ""}` : "You are a sharp, fair, encouraging evaluator."; }
+
+// Score a transcript against criteria (used by chat-style blocks).
+async function scoreTranscript(transcript, criteria, minUser = 2) {
+  if (transcript.filter(m => m.role === "user").length < minUser) return null;
+  const ser = transcript.map(m => `${m.role === "user" ? "STUDENT" : "OTHER"}: ${m.content}`).join("\n\n");
+  const out = await api(`You are a strict, fair examiner. Decide if the STUDENT met this criteria: "${criteria}". Concrete evidence in the student's words only. Reply EXACTLY:\nSCORE: <0-10>\nVERDICT: PASS or NOTYET\nREASON: one sentence`, [{ role: "user", content: ser }], 90);
+  return { score: parseFloat(out.match(/SCORE:\s*([\d.]+)/i)?.[1] || "0"), passed: /VERDICT:\s*PASS/i.test(out), reason: (out.match(/REASON:\s*([\s\S]*)/i)?.[1] || "").trim() };
+}
+
+function BlockShell({ type, sub, passed, children, foot }) {
+  const m = BLOCK_META[type] || { icon: "🧩", label: "Activity" };
+  return (
+    <div style={{ background: B.surface2, border: `1px solid ${passed ? "rgba(74,222,128,0.3)" : B.border}`, borderRadius: 14, padding: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, marginBottom: 12 }}>
+        <div><div style={{ fontSize: 13, fontWeight: 700, color: B.white }}>{m.icon} {m.label}</div>{sub && <div style={{ fontSize: 12, color: B.muted, marginTop: 3, lineHeight: 1.5 }}>{sub}</div>}</div>
+        <PassPill passed={passed} />
+      </div>
+      {children}
+      {foot}
+    </div>
+  );
+}
+
+function ChatBubble({ m, T }) {
+  if (m.role === "system") return <div style={{ textAlign: "center", padding: "8px 12px", background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.25)", borderRadius: 10, fontSize: 12, color: "#4ADE80", fontWeight: 600 }}>{m.content}</div>;
+  const isU = m.role === "user";
+  return <div style={{ display: "flex", justifyContent: isU ? "flex-end" : "flex-start" }}><div style={{ maxWidth: "82%", background: isU ? T.ps : B.surface, border: `1px solid ${isU ? T.ba : B.border}`, borderRadius: isU ? "14px 4px 14px 14px" : "4px 14px 14px 14px", padding: "9px 13px", fontSize: 13.5, lineHeight: 1.6, color: B.white, whiteSpace: "pre-wrap" }}>{m.content}</div></div>;
+}
+
+// Reusable evaluated chat for roleplay / debate.
+function EvalChat({ system, opener, criteria, minUser, T, disabled, placeholder, onPassed, height = 240 }) {
+  const [msgs, setMsgs] = useState(opener ? [{ role: "assistant", content: opener }] : []);
+  const [input, setInput] = useState(""); const [loading, setLoading] = useState(false); const [done, setDone] = useState(false);
+  const bottom = useRef(null);
+  useEffect(() => { bottom.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs, loading]);
+  async function send() {
+    if (!input.trim() || loading || done || disabled) return;
+    const um = input.trim(); setInput("");
+    const convo = [...msgs, { role: "user", content: um }]; setMsgs(convo); setLoading(true);
+    try {
+      const reply = await api(system, toApiMessages(convo), 500);
+      let next = [...convo, { role: "assistant", content: reply }];
+      const r = await scoreTranscript(next, criteria, minUser || 2);
+      if (r && r.passed) { next = [...next, { role: "system", content: `✓ ${r.reason || "You passed."} (${r.score}/10)` }]; setDone(true); onPassed?.(r); }
+      setMsgs(next);
+    } catch (e) { setMsgs(m => [...m, { role: "assistant", content: "Error: " + e.message }]); }
+    setLoading(false);
+  }
+  return (<div>
+    <div style={{ maxHeight: height, minHeight: 130, overflowY: "auto", display: "flex", flexDirection: "column", gap: 10, padding: "4px 2px", marginBottom: 10 }}>
+      {msgs.map((m, i) => <ChatBubble key={i} m={m} T={T} />)}
+      {loading && <div style={{ display: "flex", gap: 4, paddingLeft: 6 }}>{[0, 1, 2].map(i => <div key={i} style={{ width: 6, height: 6, borderRadius: "50%", background: T.p, animation: `pulse 1s ${i * 0.2}s infinite` }} />)}</div>}
+      <div ref={bottom} />
+    </div>
+    {!done && <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+      <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} placeholder={placeholder || "Type your reply…"} disabled={disabled} rows={2} style={{ ...bx.input, fontSize: 13 }} />
+      <button onClick={send} disabled={loading || !input.trim() || disabled} style={{ ...pBtn(T), padding: "10px 14px", opacity: (loading || !input.trim()) ? 0.5 : 1 }}>↑</button>
+    </div>}
+  </div>);
+}
+
+// Browser speech-to-text helper (optional, Chrome/Edge).
+function getSpeech() { return typeof window !== "undefined" ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null; }
+function MicButton({ onText, T }) {
+  const SR = getSpeech(); const [on, setOn] = useState(false); const recRef = useRef(null);
+  if (!SR) return null;
+  function toggle() {
+    if (on) { recRef.current?.stop(); setOn(false); return; }
+    const r = new SR(); r.lang = "en-US"; r.interimResults = false; r.continuous = true;
+    r.onresult = (e) => { let t = ""; for (let i = e.resultIndex; i < e.results.length; i++) t += e.results[i][0].transcript; onText(t); };
+    r.onend = () => setOn(false); recRef.current = r; r.start(); setOn(true);
+  }
+  return <button onClick={toggle} style={{ background: on ? "rgba(248,113,113,0.15)" : B.surface3, border: `1px solid ${on ? "rgba(248,113,113,0.4)" : B.borderMid}`, borderRadius: 8, color: on ? "#F87171" : B.mutedMid, padding: "6px 11px", cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>{on ? "■ Stop" : "🎤 Speak"}</button>;
+}
+
+// ── 1. Flashcards ──
+function FlashcardBlock({ data = {}, onOutput, T, disabled }) {
+  const cards = data.cards || []; const [i, setI] = useState(0); const [flip, setFlip] = useState(false);
+  const [rev, setRev] = useState([]); const [passed, setPassed] = useState(false);
+  if (!cards.length) return <BlockShell type="flashcard" sub="No cards." />;
+  function rate(d) {
+    const next = [...rev, d]; setRev(next); setFlip(false);
+    if (next.length >= cards.length) { const ok = next.filter(x => x !== "again").length >= cards.length * 0.8; setPassed(true); onOutput?.({ type: "flashcard", cardsReviewed: next.length, passed: ok }); }
+    else setI(i + 1);
+  }
+  const c = cards[Math.min(i, cards.length - 1)];
+  return (<BlockShell type="flashcard" passed={passed} sub={`Card ${Math.min(i + 1, cards.length)} of ${cards.length}`}>
+    {!passed ? (<>
+      <div onClick={() => setFlip(f => !f)} style={{ minHeight: 120, display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 12, padding: 20, cursor: "pointer", fontSize: 15, color: B.white, lineHeight: 1.6 }}>
+        {flip ? c.back : c.front}
+      </div>
+      <div style={{ fontSize: 11, color: B.muted, textAlign: "center", margin: "8px 0" }}>{flip ? "Answer — rate yourself" : "Tap card to reveal"}</div>
+      {flip && <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+        {[["again", "Again", "#F87171"], ["good", "Good", T.p], ["easy", "Easy", "#4ADE80"]].map(([k, l, col]) => (
+          <button key={k} disabled={disabled} onClick={() => rate(k)} style={{ background: B.surface, border: `1px solid ${col}`, borderRadius: 9, color: col, padding: "8px 16px", cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit" }}>{l}</button>
+        ))}
+      </div>}
+    </>) : <div style={{ textAlign: "center", color: B.mutedMid, fontSize: 13 }}>Deck complete — {rev.filter(x => x !== "again").length}/{cards.length} known.</div>}
+  </BlockShell>);
+}
+
+// ── 2. Reading + Highlight ──
+function ReadingBlock({ data = {}, onOutput, T, disabled, school }) {
+  const phrases = data.keyPhrases || []; const [found, setFound] = useState({});
+  const [exp, setExp] = useState(""); const [loading, setLoading] = useState(false); const [passed, setPassed] = useState(false);
+  const all = phrases.length > 0 && phrases.every((_, i) => found[i]);
+  async function finish() {
+    setLoading(true);
+    try { const e = await api(`${blockMentor(school)} In 3 short bullet lines, explain why these phrases are the key insights of the passage. Be concise.`, [{ role: "user", content: `PASSAGE:\n${data.passage}\n\nKEY PHRASES:\n${phrases.join("\n")}` }], 350); setExp(e); }
+    catch { setExp(""); }
+    setPassed(true); onOutput?.({ type: "reading", highlightCount: phrases.length, explanations: exp, passed: true }); setLoading(false);
+  }
+  return (<BlockShell type="reading" passed={passed} sub="Read, then tap each key phrase you'd highlight.">
+    <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 10, padding: "12px 14px", fontSize: 14, lineHeight: 1.75, color: B.white, marginBottom: 12 }}>{data.passage}</div>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 12 }}>
+      {phrases.map((p, i) => (
+        <button key={i} disabled={disabled || passed} onClick={() => setFound(f => ({ ...f, [i]: !f[i] }))} style={{ background: found[i] ? T.pg : B.surface, border: `1px solid ${found[i] ? T.ba : B.borderMid}`, borderRadius: 100, padding: "5px 12px", fontSize: 12, color: found[i] ? T.hi : B.mutedMid, cursor: "pointer", fontFamily: "inherit" }}>{found[i] ? "✓ " : ""}{p}</button>
+      ))}
+    </div>
+    {exp && <div style={{ background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 10, padding: "10px 13px", marginBottom: 10 }}><Markdown text={exp} /></div>}
+    {!passed && <button disabled={!all || loading || disabled} onClick={finish} style={{ ...pBtn(T), opacity: (!all || loading) ? 0.5 : 1 }}>{loading ? "Explaining…" : "Done highlighting →"}</button>}
+  </BlockShell>);
+}
+
+// ── 3. Mind-Map ──
+function MindMapBlock({ data = {}, onOutput, T, disabled }) {
+  const nodes = data.nodes || []; const [open, setOpen] = useState({}); const [passed, setPassed] = useState(false);
+  function toggle(i) { const o = { ...open, [i]: !open[i] }; setOpen(o); if (nodes.every((_, j) => o[j] || open[j]) && nodes.length && !passed) { setPassed(true); onOutput?.({ type: "mindmap", explored: nodes.length, passed: true }); } }
+  return (<BlockShell type="mindmap" passed={passed} sub="Tap each node to explore the connected ideas.">
+    <div style={{ textAlign: "center", marginBottom: 14 }}><span style={{ background: T.gr, border: `1px solid ${T.ba}`, borderRadius: 100, padding: "8px 18px", fontSize: 14, fontWeight: 700, color: B.white }}>{data.center || "Core Idea"}</span></div>
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(150px,1fr))", gap: 8 }}>
+      {nodes.map((n, i) => (
+        <div key={i} onClick={() => !disabled && toggle(i)} style={{ background: open[i] ? T.ps : B.surface, border: `1px solid ${open[i] ? T.ba : B.border}`, borderRadius: 10, padding: "10px 12px", cursor: "pointer" }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: B.white }}>{open[i] ? "▾" : "▸"} {n.label}</div>
+          {open[i] && <div style={{ fontSize: 12, color: B.mutedMid, marginTop: 6, lineHeight: 1.55 }}>{n.detail}</div>}
+        </div>
+      ))}
+    </div>
+  </BlockShell>);
+}
+
+// ── 4. Essay ──
+function EssayBlock({ data = {}, onOutput, T, disabled, school }) {
+  const [text, setText] = useState(""); const [fb, setFb] = useState(""); const [loading, setLoading] = useState(false); const [passed, setPassed] = useState(false);
+  const words = text.trim() ? text.trim().split(/\s+/).length : 0; const min = data.minWords || 120;
+  async function submit() {
+    setLoading(true);
+    try {
+      const out = await api(`${blockMentor(school)} Evaluate this essay against the prompt. Reply EXACTLY:\nVERDICT: PASS or NOTYET\nFEEDBACK: 2-3 sentences of specific, useful feedback.`, [{ role: "user", content: `PROMPT: ${data.prompt}\n\nESSAY:\n${text}` }], 300);
+      const ok = /VERDICT:\s*PASS/i.test(out); const f = (out.match(/FEEDBACK:\s*([\s\S]*)/i)?.[1] || out).trim();
+      setFb(f); setPassed(ok); onOutput?.({ type: "essay", essayText: text, wordCount: words, passed: ok, feedback: f });
+    } catch (e) { setFb("Error: " + e.message); }
+    setLoading(false);
+  }
+  return (<BlockShell type="essay" passed={passed} sub={data.prompt}>
+    <textarea value={text} onChange={e => setText(e.target.value)} disabled={disabled} rows={6} placeholder="Write your essay…" style={bx.input} />
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
+      <span style={{ fontSize: 11, color: words >= min ? "#4ADE80" : B.muted }}>{words}/{min} words</span>
+      <button disabled={words < min || loading || disabled} onClick={submit} style={{ ...pBtn(T), opacity: (words < min || loading) ? 0.5 : 1 }}>{loading ? "Evaluating…" : passed ? "Resubmit" : "Submit essay"}</button>
+    </div>
+    {fb && <div style={{ marginTop: 10, background: passed ? "rgba(74,222,128,0.08)" : T.ps, border: `1px solid ${passed ? "rgba(74,222,128,0.3)" : T.ba}`, borderRadius: 10, padding: "10px 13px", fontSize: 13, color: B.white, lineHeight: 1.6 }}>{fb}</div>}
+  </BlockShell>);
+}
+
+// ── 5. Debate ──
+function DebateBlock({ data = {}, onOutput, T, disabled, school }) {
+  const sys = `${blockMentor(school)} You are in a DEBATE. You firmly hold this position: "${data.aiPosition}". Topic: "${data.topic}". Argue hard against the student, attack the weakest part of their reasoning, stay under 90 words. Never concede easily.`;
+  return (<BlockShell type="debate" sub={`Topic: ${data.topic} — defend your side against the mentor.`}>
+    <EvalChat system={sys} opener={`I'll defend this: ${data.aiPosition}. Convince me otherwise.`} criteria={`Student argued their position cogently and rebutted the AI on the topic: ${data.topic}`} minUser={2} T={T} disabled={disabled} placeholder="Make your argument…" onPassed={(r) => onOutput?.({ type: "debate", studentScore: r.score, passed: true })} />
+  </BlockShell>);
+}
+
+// ── 6. Code Sandbox ──
+function CodeSandboxBlock({ data = {}, onOutput, T, disabled, school }) {
+  const lang = (data.language || "javascript").toLowerCase();
+  const [code, setCode] = useState(data.starter || ""); const [out, setOut] = useState(""); const [html, setHtml] = useState("");
+  const [fb, setFb] = useState(""); const [passed, setPassed] = useState(false); const [loading, setLoading] = useState(false);
+  function run() {
+    setFb("");
+    if (lang === "html") { setHtml(code); setOut(""); return; }
+    if (lang === "javascript" || lang === "js") {
+      const logs = []; const cl = { log: (...a) => logs.push(a.map(x => typeof x === "object" ? JSON.stringify(x) : String(x)).join(" ")), error: (...a) => logs.push("Error: " + a.join(" ")) };
+      try { new Function("console", code)(cl); } catch (e) { logs.push("Error: " + e.message); }
+      setOut(logs.join("\n") || "(no output)"); setHtml("");
+    } else { setOut(`▶ ${lang} can't run in-browser. Use "Submit for review" and the mentor will check your code.`); setHtml(""); }
+  }
+  async function review() {
+    setLoading(true);
+    try { const r = await api(`${blockMentor(school)} Review this ${lang} code for the task. Reply EXACTLY:\nVERDICT: PASS or NOTYET\nFEEDBACK: 1-2 sentences.`, [{ role: "user", content: `TASK: ${data.instructions}\n\nCODE:\n${code}\n\nOUTPUT:\n${out}` }], 200); const ok = /VERDICT:\s*PASS/i.test(r); const f = (r.match(/FEEDBACK:\s*([\s\S]*)/i)?.[1] || r).trim(); setFb(f); setPassed(ok); onOutput?.({ type: "code_sandbox", code, output: out, errors: out.includes("Error"), passed: ok }); }
+    catch (e) { setFb("Error: " + e.message); }
+    setLoading(false);
+  }
+  return (<BlockShell type="code_sandbox" passed={passed} sub={data.instructions || `Write ${lang} and run it.`}>
+    <textarea value={code} onChange={e => setCode(e.target.value)} disabled={disabled} rows={7} spellCheck={false} style={{ ...bx.input, fontFamily: "ui-monospace,Menlo,monospace", fontSize: 12.5, whiteSpace: "pre", background: "#0A0A12" }} />
+    <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+      <button onClick={run} disabled={disabled} style={pBtn(T)}>▶ Run</button>
+      <button onClick={review} disabled={loading || disabled} style={{ ...pBtn(T, false), opacity: loading ? 0.5 : 1 }}>{loading ? "Reviewing…" : "Submit for review"}</button>
+    </div>
+    {out && <pre style={{ marginTop: 8, background: "#0A0A12", border: `1px solid ${B.border}`, borderRadius: 8, padding: "10px 12px", fontSize: 12, color: "#9FE88D", whiteSpace: "pre-wrap", fontFamily: "ui-monospace,monospace" }}>{out}</pre>}
+    {html && <iframe title="preview" srcDoc={html} sandbox="allow-scripts" style={{ marginTop: 8, width: "100%", height: 180, background: "#fff", border: `1px solid ${B.border}`, borderRadius: 8 }} />}
+    {fb && <div style={{ marginTop: 8, fontSize: 13, color: passed ? "#4ADE80" : "#F87171", lineHeight: 1.6 }}>{fb}</div>}
+  </BlockShell>);
+}
+
+// ── 7. Terminal ──
+function TerminalBlock({ data = {}, onOutput, T, disabled }) {
+  const expected = data.expected || []; const [hist, setHist] = useState([]); const [cmd, setCmd] = useState(""); const [passed, setPassed] = useState(false);
+  function enter() {
+    if (!cmd.trim()) return; const ran = [...hist, cmd.trim()]; setHist(ran); setCmd("");
+    const norm = (s) => s.replace(/\s+/g, " ").trim();
+    const matched = expected.filter((e, i) => ran[i] && norm(ran[i]) === norm(e)).length;
+    if (matched >= expected.length && expected.length) { setPassed(true); onOutput?.({ type: "terminal", commandsRun: ran.length, passed: true }); }
+  }
+  return (<BlockShell type="terminal" passed={passed} sub={data.scenario}>
+    <div style={{ background: "#0A0A12", border: `1px solid ${B.border}`, borderRadius: 8, padding: "10px 12px", fontFamily: "ui-monospace,monospace", fontSize: 12.5, minHeight: 90 }}>
+      {hist.map((h, i) => <div key={i} style={{ color: B.mutedMid }}><span style={{ color: T.a }}>$</span> {h}</div>)}
+      {!passed && <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
+        <span style={{ color: T.a }}>$</span>
+        <input value={cmd} onChange={e => setCmd(e.target.value)} onKeyDown={e => { if (e.key === "Enter") enter(); }} disabled={disabled} placeholder="type a command…" style={{ flex: 1, background: "transparent", border: "none", color: B.white, fontFamily: "ui-monospace,monospace", fontSize: 12.5, outline: "none" }} />
+      </div>}
+    </div>
+    {!passed && <div style={{ fontSize: 11, color: B.muted, marginTop: 6 }}>{hist.length}/{expected.length} correct commands</div>}
+  </BlockShell>);
+}
+
+// ── 8. Sequencer ──
+function SequencerBlock({ data = {}, onOutput, T, disabled }) {
+  const correct = data.items || [];
+  const [order, setOrder] = useState(() => [...correct].map((v, i) => i).sort(() => Math.random() - 0.5));
+  const [passed, setPassed] = useState(false); const [checked, setChecked] = useState(false);
+  function move(idx, dir) { const j = idx + dir; if (j < 0 || j >= order.length) return; const o = [...order];[o[idx], o[j]] = [o[j], o[idx]]; setOrder(o); setChecked(false); }
+  function check() { const ok = order.every((v, i) => v === i); setChecked(true); if (ok) { setPassed(true); onOutput?.({ type: "sequencer", studentOrder: order, passed: true }); } }
+  return (<BlockShell type="sequencer" passed={passed} sub={data.prompt || "Put these in the correct order."}>
+    {order.map((v, i) => (
+      <div key={v} style={{ display: "flex", alignItems: "center", gap: 8, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 9, padding: "8px 10px", marginBottom: 6 }}>
+        <span style={{ fontSize: 11, fontWeight: 700, color: T.p, width: 16 }}>{i + 1}</span>
+        <span style={{ flex: 1, fontSize: 13, color: B.white }}>{correct[v]}</span>
+        {!passed && <span style={{ display: "flex", gap: 4 }}>
+          <button onClick={() => move(i, -1)} disabled={disabled} style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 6, color: B.mutedMid, width: 24, height: 24, cursor: "pointer" }}>↑</button>
+          <button onClick={() => move(i, 1)} disabled={disabled} style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 6, color: B.mutedMid, width: 24, height: 24, cursor: "pointer" }}>↓</button>
+        </span>}
+      </div>
+    ))}
+    {!passed && <button onClick={check} disabled={disabled} style={{ ...pBtn(T), marginTop: 4 }}>Check order</button>}
+    {checked && !passed && <div style={{ fontSize: 12, color: "#F87171", marginTop: 8 }}>Not quite — keep reordering.</div>}
+  </BlockShell>);
+}
+
+// ── 9. Journal ──
+function JournalBlock({ data = {}, onOutput, T, disabled, school }) {
+  const prompts = data.prompts || []; const [ans, setAns] = useState({}); const [fb, setFb] = useState(""); const [loading, setLoading] = useState(false); const [passed, setPassed] = useState(false);
+  const text = prompts.map((p, i) => `${p}\n${ans[i] || ""}`).join("\n\n"); const words = text.trim().split(/\s+/).filter(Boolean).length; const min = data.minWords || 80;
+  async function submit() {
+    setLoading(true);
+    try { const r = await api(`${blockMentor(school)} The student journaled. Reflect back one genuine insight in 2 sentences, then reply VERDICT: PASS or NOTYET on whether they engaged honestly.`, [{ role: "user", content: text }], 250); setFb(r.replace(/VERDICT:.*/is, "").trim()); const ok = /VERDICT:\s*PASS/i.test(r) || words >= min; setPassed(ok); onOutput?.({ type: "journal", entryText: text, wordCount: words, passed: ok, reflection: r }); }
+    catch (e) { setFb("Error: " + e.message); }
+    setLoading(false);
+  }
+  return (<BlockShell type="journal" passed={passed}>
+    {prompts.map((p, i) => (
+      <div key={i} style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 13, color: T.hi, fontStyle: "italic", marginBottom: 6, lineHeight: 1.5 }}>“{p}”</div>
+        <textarea value={ans[i] || ""} onChange={e => setAns(a => ({ ...a, [i]: e.target.value }))} disabled={disabled} rows={3} placeholder="Write honestly…" style={{ ...bx.input, fontSize: 13 }} />
+      </div>
+    ))}
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <span style={{ fontSize: 11, color: words >= min ? "#4ADE80" : B.muted }}>{words}/{min} words</span>
+      <button disabled={words < min || loading || disabled} onClick={submit} style={{ ...pBtn(T), opacity: (words < min || loading) ? 0.5 : 1 }}>{loading ? "Reflecting…" : "Submit entry"}</button>
+    </div>
+    {fb && <div style={{ marginTop: 10, background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 10, padding: "10px 13px", fontSize: 13, color: B.white, lineHeight: 1.6 }}>{fb}</div>}
+  </BlockShell>);
+}
+
+// ── 10. Branching Scenario ──
+function BranchingScenarioBlock({ data = {}, onOutput, T, disabled }) {
+  const nodes = data.nodes || {}; const [id, setId] = useState(data.start || Object.keys(nodes)[0]); const [path, setPath] = useState([]); const [passed, setPassed] = useState(null);
+  const node = nodes[id] || {};
+  function choose(ch) { setPath(p => [...p, ch.label]); const nx = nodes[ch.next]; setId(ch.next); if (nx && nx.outcome) { const ok = nx.outcome === "pass"; setPassed(ok); onOutput?.({ type: "branching_scenario", pathTaken: [...path, ch.label], passedLesson: ok }); } }
+  return (<BlockShell type="branching_scenario" passed={passed === true} sub="Choose your path. Decisions have consequences.">
+    <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 10, padding: "12px 14px", fontSize: 14, lineHeight: 1.65, color: B.white, marginBottom: 10 }}>{node.text}</div>
+    {node.outcome ? (
+      <div style={{ fontSize: 13, color: node.outcome === "pass" ? "#4ADE80" : "#F87171", fontWeight: 600 }}>{node.outcome === "pass" ? "✓ Good outcome." : "✗ That path didn't work out."}{node.outcome !== "pass" && <button onClick={() => { setId(data.start); setPath([]); setPassed(null); }} style={{ marginLeft: 10, ...pBtn(T, false), padding: "5px 12px" }}>Try again</button>}</div>
+    ) : (node.choices || []).map((ch, i) => (
+      <button key={i} disabled={disabled} onClick={() => choose(ch)} style={{ display: "block", width: "100%", textAlign: "left", background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 10, padding: "10px 13px", marginBottom: 6, fontSize: 13, color: B.white, cursor: "pointer", fontFamily: "inherit" }}>→ {ch.label}</button>
+    ))}
+  </BlockShell>);
+}
+
+// ── 11. Voice Journal ── (speech-to-text where available, else type)
+function VoiceJournalBlock({ data = {}, onOutput, T, disabled, school }) {
+  const [text, setText] = useState(""); const [fb, setFb] = useState(""); const [loading, setLoading] = useState(false); const [passed, setPassed] = useState(false);
+  const words = text.trim().split(/\s+/).filter(Boolean).length; const min = data.minWords || 60;
+  async function submit() {
+    setLoading(true);
+    try { const r = await api(`${blockMentor(school)} The student spoke this reflection aloud. Respond with 2 sentences of genuine feedback, then VERDICT: PASS or NOTYET.`, [{ role: "user", content: `PROMPT: ${data.prompt}\n\nSPOKEN:\n${text}` }], 250); setFb(r.replace(/VERDICT:.*/is, "").trim()); const ok = /VERDICT:\s*PASS/i.test(r) || words >= min; setPassed(ok); onOutput?.({ type: "voice_journal", audioUrl: null, transcript: text, passed: ok, feedback: r }); }
+    catch (e) { setFb("Error: " + e.message); }
+    setLoading(false);
+  }
+  return (<BlockShell type="voice_journal" passed={passed} sub={data.prompt}>
+    <div style={{ display: "flex", gap: 8, marginBottom: 8 }}><MicButton onText={t => setText(t)} T={T} /><span style={{ fontSize: 11, color: B.muted, alignSelf: "center" }}>{getSpeech() ? "Speak or type below." : "Type your reflection."}</span></div>
+    <textarea value={text} onChange={e => setText(e.target.value)} disabled={disabled} rows={4} placeholder="Your spoken reflection…" style={{ ...bx.input, fontSize: 13 }} />
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
+      <span style={{ fontSize: 11, color: words >= min ? "#4ADE80" : B.muted }}>{words}/{min} words</span>
+      <button disabled={words < min || loading || disabled} onClick={submit} style={{ ...pBtn(T), opacity: (words < min || loading) ? 0.5 : 1 }}>{loading ? "Reflecting…" : "Submit"}</button>
+    </div>
+    {fb && <div style={{ marginTop: 10, background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 10, padding: "10px 13px", fontSize: 13, color: B.white, lineHeight: 1.6 }}>{fb}</div>}
+  </BlockShell>);
+}
+
+// ── 12. Reflection Timer ──
+function ReflectionTimerBlock({ data = {}, onOutput, T, disabled }) {
+  const total = data.seconds || 300; const prompts = data.prompts || [];
+  const [left, setLeft] = useState(total); const [running, setRunning] = useState(false); const [notes, setNotes] = useState(""); const [passed, setPassed] = useState(false);
+  useEffect(() => { if (!running) return; const t = setInterval(() => setLeft(l => { if (l <= 1) { setRunning(false); setPassed(true); onOutput?.({ type: "reflection_timer", completed: true, notes }); return 0; } return l - 1; }), 1000); return () => clearInterval(t); }, [running]); // eslint-disable-line
+  const cueIdx = prompts.length ? Math.min(prompts.length - 1, Math.floor(((total - left) / total) * prompts.length)) : -1;
+  const mm = String(Math.floor(left / 60)).padStart(2, "0"), ss = String(left % 60).padStart(2, "0");
+  return (<BlockShell type="reflection_timer" passed={passed} sub="Sit with each prompt. Stay until the timer ends.">
+    <div style={{ textAlign: "center", fontFamily: "'Space Grotesk',sans-serif", fontSize: 40, fontWeight: 700, color: left === 0 ? "#4ADE80" : B.white, marginBottom: 8 }}>{left === 0 ? "Done" : `${mm}:${ss}`}</div>
+    {cueIdx >= 0 && left > 0 && <div style={{ textAlign: "center", fontSize: 14, color: T.hi, fontStyle: "italic", marginBottom: 12, lineHeight: 1.6 }}>“{prompts[cueIdx]}”</div>}
+    {!passed && <div style={{ textAlign: "center", marginBottom: 12 }}><button onClick={() => setRunning(r => !r)} disabled={disabled} style={pBtn(T)}>{running ? "Pause" : left === total ? "Begin" : "Resume"}</button></div>}
+    <textarea value={notes} onChange={e => setNotes(e.target.value)} disabled={disabled} rows={2} placeholder="Notes after reflecting (optional)…" style={{ ...bx.input, fontSize: 13 }} />
+  </BlockShell>);
+}
+
+// ── 13. Macro Tracker ──
+function MacroTrackerBlock({ data = {}, onOutput, T, disabled, state, onState }) {
+  const goals = data.goals || { calories: 2000, protein: 150, carbs: 200, fat: 60 };
+  const [s, set] = useBlockState({ foods: [] }, state, onState);
+  const [f, setF] = useState({ name: "", calories: "", protein: "", carbs: "", fat: "" });
+  const tot = (s.foods || []).reduce((a, x) => ({ calories: a.calories + (+x.calories || 0), protein: a.protein + (+x.protein || 0), carbs: a.carbs + (+x.carbs || 0), fat: a.fat + (+x.fat || 0) }), { calories: 0, protein: 0, carbs: 0, fat: 0 });
+  function add() { if (!f.name) return; const foods = [...(s.foods || []), f]; set({ foods }); setF({ name: "", calories: "", protein: "", carbs: "", fat: "" }); const passed = tot.calories + (+f.calories || 0) >= goals.calories * 0.8; if (passed) onOutput?.({ type: "macro_tracker", foodsLogged: foods.length, totals: tot, passed: true }); }
+  return (<BlockShell type="macro_tracker" passed={tot.calories >= goals.calories * 0.8} sub={`Goal: ${goals.calories} kcal · ${goals.protein}p / ${goals.carbs}c / ${goals.fat}f`}>
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 6, marginBottom: 10 }}>
+      {[["Cal", tot.calories, goals.calories], ["P", tot.protein, goals.protein], ["C", tot.carbs, goals.carbs], ["F", tot.fat, goals.fat]].map(([l, v, g]) => (
+        <div key={l} style={{ background: B.surface, borderRadius: 9, padding: "8px", textAlign: "center" }}><div style={{ fontSize: 10, color: B.muted }}>{l}</div><div style={{ fontSize: 15, fontWeight: 700, color: v >= g * 0.8 ? "#4ADE80" : B.white }}>{Math.round(v)}<span style={{ fontSize: 10, color: B.muted }}>/{g}</span></div></div>
+      ))}
+    </div>
+    {(s.foods || []).map((x, i) => <div key={i} style={{ fontSize: 12, color: B.mutedMid, padding: "4px 0", borderBottom: `1px solid ${B.border}` }}>{x.name} — {x.calories || 0} kcal</div>)}
+    {!disabled && <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
+      <input value={f.name} onChange={e => setF({ ...f, name: e.target.value })} placeholder="Food" style={{ ...bx.input, flex: "2 1 120px", padding: "7px 10px", fontSize: 12 }} />
+      {["calories", "protein", "carbs", "fat"].map(k => <input key={k} value={f[k]} onChange={e => setF({ ...f, [k]: e.target.value })} placeholder={k[0].toUpperCase()} type="number" style={{ ...bx.input, width: 56, flex: "0 0 56px", padding: "7px 8px", fontSize: 12 }} />)}
+      <button onClick={add} style={pBtn(T)}>+ Log</button>
+    </div>}
+  </BlockShell>);
+}
+
+// ── 14. Heatmap ──
+function HeatmapBlock({ data = {}, onOutput, T, disabled, state, onState }) {
+  const DAYS_N = 84; const goal = data.goalDays || 30;
+  const [s, set] = useBlockState({ days: {} }, state, onState);
+  const days = s.days || {}; const done = Object.values(days).filter(Boolean).length;
+  let cur = 0; for (let i = DAYS_N - 1; i >= 0; i--) { if (days[i]) cur++; else break; }
+  let longest = 0, run = 0; for (let i = 0; i < DAYS_N; i++) { if (days[i]) { run++; longest = Math.max(longest, run); } else run = 0; }
+  function toggle(i) { const d = { ...days, [i]: !days[i] }; set({ days: d }); const nd = Object.values(d).filter(Boolean).length; if (nd >= goal) onOutput?.({ type: "heatmap", daysCompleted: nd, currentStreak: cur, longestStreak: longest, passed: true }); }
+  return (<BlockShell type="heatmap" passed={done >= goal} sub={`${data.label || "Daily completion"} — goal ${goal} days · 🔥 ${cur} streak`}>
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(14,1fr)", gap: 4 }}>
+      {Array.from({ length: DAYS_N }).map((_, i) => (
+        <button key={i} onClick={() => !disabled && toggle(i)} title={`Day ${i + 1}`} style={{ aspectRatio: "1", borderRadius: 4, border: "none", background: days[i] ? T.p : B.surface3, cursor: disabled ? "default" : "pointer" }} />
+      ))}
+    </div>
+    <div style={{ fontSize: 11, color: B.muted, marginTop: 8 }}>{done}/{goal} days · longest streak {longest}</div>
+  </BlockShell>);
+}
+
+// ── 15. Habit Checker ──
+function HabitCheckerBlock({ data = {}, onOutput, T, disabled, state, onState }) {
+  const habits = data.habits || []; const [s, set] = useBlockState({ grid: {} }, state, onState); const grid = s.grid || {};
+  const checks = Object.values(grid).filter(Boolean).length; const goal = habits.length * 5;
+  function toggle(k) { const g = { ...grid, [k]: !grid[k] }; set({ grid: g }); const c = Object.values(g).filter(Boolean).length; if (c >= goal) onOutput?.({ type: "habit_checker", habitsThisWeek: c, passed: true }); }
+  return (<BlockShell type="habit_checker" passed={checks >= goal} sub="Check off each habit, every day this week.">
+    <div style={{ display: "grid", gridTemplateColumns: "1fr repeat(7,28px)", gap: 5, alignItems: "center" }}>
+      <div />{DAYS.map((d, i) => <div key={i} style={{ fontSize: 10, fontWeight: 700, color: B.muted, textAlign: "center" }}>{d}</div>)}
+      {habits.map((h, hi) => ([
+        <div key={`h${hi}`} style={{ fontSize: 12.5, color: B.white, paddingRight: 6 }}>{h}</div>,
+        ...DAYS.map((_, di) => { const k = `${hi}-${di}`; return <button key={k} onClick={() => !disabled && toggle(k)} style={{ width: 24, height: 24, borderRadius: 6, border: `1px solid ${grid[k] ? T.ba : B.borderMid}`, background: grid[k] ? T.p : B.surface3, cursor: "pointer", fontSize: 11, color: "white", margin: "0 auto" }}>{grid[k] ? "✓" : ""}</button>; })
+      ]))}
+    </div>
+  </BlockShell>);
+}
+
+// ── 16. Metric Tracker ──
+function MetricTrackerBlock({ data = {}, onOutput, T, disabled, state, onState }) {
+  const [s, set] = useBlockState({ entries: [] }, state, onState); const entries = s.entries || []; const [v, setV] = useState("");
+  const target = data.target; const vals = entries.map(e => e.value);
+  const trend = vals.length >= 2 ? (vals[vals.length - 1] - vals[0]) : 0;
+  function add() { if (v === "") return; const e = [...entries, { t: Date.now(), value: +v }]; set({ entries: e }); setV(""); const hit = target != null && +v >= target; if (hit || e.length >= 5) onOutput?.({ type: "metric_tracker", entries: e, trend, passed: true }); }
+  const max = Math.max(...vals, target || 0, 1), min = Math.min(...vals, 0);
+  return (<BlockShell type="metric_tracker" passed={(target != null && vals.some(x => x >= target)) || entries.length >= 5} sub={`${data.label || "Metric"}${data.unit ? ` (${data.unit})` : ""}${target != null ? ` · target ${target}` : ""}`}>
+    <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 70, marginBottom: 10 }}>
+      {entries.map((e, i) => <div key={i} title={`${e.value}`} style={{ flex: 1, minWidth: 6, background: T.p, borderRadius: "3px 3px 0 0", height: `${((e.value - min) / (max - min || 1)) * 100}%` }} />)}
+      {!entries.length && <div style={{ fontSize: 12, color: B.muted }}>No entries yet.</div>}
+    </div>
+    {!disabled && <div style={{ display: "flex", gap: 8 }}>
+      <input value={v} onChange={e => setV(e.target.value)} onKeyDown={e => { if (e.key === "Enter") add(); }} type="number" placeholder={`Log ${data.label || "value"}…`} style={{ ...bx.input, fontSize: 13 }} />
+      <button onClick={add} style={pBtn(T)}>+ Log</button>
+    </div>}
+    {entries.length >= 2 && <div style={{ fontSize: 11, color: trend >= 0 ? "#4ADE80" : "#F87171", marginTop: 8 }}>Trend: {trend >= 0 ? "▲" : "▼"} {Math.abs(trend)} since start</div>}
+  </BlockShell>);
+}
+
+// ── 17. Weekly Planner ──
+function WeeklyPlannerBlock({ data = {}, onOutput, T, disabled, state, onState }) {
+  const [s, set] = useBlockState({ goals: ["", "", ""] }, state, onState); const goals = s.goals || [];
+  const filled = goals.filter(g => g.text?.trim?.() || (typeof g === "string" && g.trim())); // tolerate both shapes
+  const norm = goals.map(g => typeof g === "string" ? { text: g, done: false } : g);
+  const real = norm.filter(g => g.text.trim()); const doneCount = real.filter(g => g.done).length;
+  const rate = real.length ? Math.round((doneCount / real.length) * 100) : 0;
+  function setGoal(i, patch) { const g = norm.map((x, j) => j === i ? { ...x, ...patch } : x); set({ goals: g }); if (g.filter(x => x.text.trim()).length && g.filter(x => x.text.trim()).every(x => x.done)) onOutput?.({ type: "weekly_planner", goals: g, completed: g.filter(x => x.done).length, completionRate: 100, passed: true }); }
+  return (<BlockShell type="weekly_planner" passed={real.length > 0 && rate === 100} sub={`Set 3-5 goals for the week · ${rate}% complete`}>
+    {norm.map((g, i) => (
+      <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+        <input type="checkbox" checked={!!g.done} onChange={() => setGoal(i, { done: !g.done })} disabled={disabled} style={{ accentColor: T.p }} />
+        <input value={g.text} onChange={e => setGoal(i, { text: e.target.value })} disabled={disabled} placeholder={`Goal ${i + 1}`} style={{ ...bx.input, fontSize: 13, padding: "7px 10px", textDecoration: g.done ? "line-through" : "none" }} />
+      </div>
+    ))}
+    {norm.length < 5 && !disabled && <button onClick={() => set({ goals: [...norm, { text: "", done: false }] })} style={{ ...pBtn(T, false), padding: "6px 12px", fontSize: 12 }}>+ Add goal</button>}
+  </BlockShell>);
+}
+
+// ── 18. Mood Quadrant ──
+function MoodQuadrantBlock({ data = {}, onOutput, T, disabled, state, onState }) {
+  const [s, set] = useBlockState({ pts: [] }, state, onState); const pts = s.pts || [];
+  function plot(e) { if (disabled) return; const r = e.currentTarget.getBoundingClientRect(); const x = (e.clientX - r.left) / r.width, y = 1 - (e.clientY - r.top) / r.height; const p = [...pts, { x, y }]; set({ pts: p }); if (p.length >= 3) onOutput?.({ type: "mood_quadrant", entries: p, pattern: "logged", passed: true }); }
+  return (<BlockShell type="mood_quadrant" passed={pts.length >= 3} sub="Tap the grid to plot today (→ mood, ↑ energy). Log 3+ days.">
+    <div onClick={plot} style={{ position: "relative", width: "100%", maxWidth: 240, aspectRatio: "1", margin: "0 auto", background: B.surface, border: `1px solid ${B.borderMid}`, borderRadius: 10, cursor: disabled ? "default" : "crosshair" }}>
+      <div style={{ position: "absolute", left: "50%", top: 0, bottom: 0, width: 1, background: B.border }} />
+      <div style={{ position: "absolute", top: "50%", left: 0, right: 0, height: 1, background: B.border }} />
+      <span style={{ position: "absolute", top: 4, left: 6, fontSize: 9, color: B.muted }}>High energy</span>
+      <span style={{ position: "absolute", bottom: 4, right: 6, fontSize: 9, color: B.muted }}>Good mood</span>
+      {pts.map((p, i) => <div key={i} style={{ position: "absolute", left: `${p.x * 100}%`, top: `${(1 - p.y) * 100}%`, width: 12, height: 12, borderRadius: "50%", background: T.p, transform: "translate(-50%,-50%)", opacity: 0.4 + 0.6 * (i + 1) / pts.length }} />)}
+    </div>
+    <div style={{ fontSize: 11, color: B.muted, marginTop: 8, textAlign: "center" }}>{pts.length} entries logged</div>
+  </BlockShell>);
+}
+
+// ── 19. Roleplay Chat ──
+function RoleplayBlock({ data = {}, onOutput, T, disabled, school }) {
+  const sys = `${blockMentor(school)} ROLEPLAY: you fully play "${data.character}". Scenario: ${data.scenario}. Stay 100% in character, never break. React realistically to the student. Under 90 words. The student's goal: ${data.goal}.`;
+  return (<BlockShell type="roleplay" sub={`You're talking to ${data.character}. ${data.scenario}`}>
+    <EvalChat system={sys} opener={`(${data.character}) ${data.scenario}`} criteria={`Student achieved this goal in the roleplay: ${data.goal}`} minUser={3} T={T} disabled={disabled} placeholder="Your response…" onPassed={(r) => onOutput?.({ type: "roleplay", studentScore: r.score, passed: true })} />
+  </BlockShell>);
+}
+
+// ── 20. Objection Handler ──
+function ObjectionHandlerBlock({ data = {}, onOutput, T, disabled, school }) {
+  const objs = data.objections || []; const [i, setI] = useState(0); const [resp, setResp] = useState(""); const [scores, setScores] = useState([]); const [fb, setFb] = useState(""); const [loading, setLoading] = useState(false); const [passed, setPassed] = useState(false);
+  async function handle() {
+    setLoading(true);
+    try {
+      const r = await api(`${blockMentor(school)} A prospect raised this objection about ${data.product}: "${objs[i]}". Rate the student's rebuttal. Reply EXACTLY:\nSCORE: <0-10>\nFEEDBACK: one sentence.`, [{ role: "user", content: resp }], 120);
+      const sc = parseFloat(r.match(/SCORE:\s*([\d.]+)/i)?.[1] || "0"); const f = (r.match(/FEEDBACK:\s*([\s\S]*)/i)?.[1] || r).trim();
+      const ns = [...scores, sc]; setScores(ns); setFb(f); setResp("");
+      if (i + 1 >= objs.length) { const avg = ns.reduce((a, b) => a + b, 0) / ns.length; const ok = avg >= 6.5; setPassed(true); onOutput?.({ type: "objection_handler", objectionsHandled: ns.length, scores: ns, passed: ok }); }
+      else setI(i + 1);
+    } catch (e) { setFb("Error: " + e.message); }
+    setLoading(false);
+  }
+  if (passed) { const avg = (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1); return <BlockShell type="objection_handler" passed={avg >= 6.5} sub={`Handled ${scores.length} objections`}><div style={{ fontSize: 14, color: B.white }}>Average rebuttal score: <strong style={{ color: avg >= 6.5 ? "#4ADE80" : "#F87171" }}>{avg}/10</strong></div></BlockShell>; }
+  return (<BlockShell type="objection_handler" sub={`Product: ${data.product} · Objection ${i + 1}/${objs.length}`}>
+    <div style={{ background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 10, padding: "11px 14px", fontSize: 14, color: B.white, fontStyle: "italic", marginBottom: 10 }}>“{objs[i]}”</div>
+    <textarea value={resp} onChange={e => setResp(e.target.value)} disabled={disabled} rows={3} placeholder="Overcome the objection…" style={{ ...bx.input, fontSize: 13 }} />
+    {fb && <div style={{ fontSize: 12, color: B.mutedMid, margin: "8px 0" }}>{fb}</div>}
+    <button onClick={handle} disabled={!resp.trim() || loading || disabled} style={{ ...pBtn(T), marginTop: 8, opacity: (!resp.trim() || loading) ? 0.5 : 1 }}>{loading ? "Scoring…" : "Submit rebuttal →"}</button>
+  </BlockShell>);
+}
+
+// ── 21. Interview Simulator ──
+function InterviewSimulatorBlock({ data = {}, onOutput, T, disabled, school }) {
+  const qs = data.questions || []; const [i, setI] = useState(0); const [ans, setAns] = useState(""); const [fbs, setFbs] = useState([]); const [scores, setScores] = useState([]); const [loading, setLoading] = useState(false); const [done, setDone] = useState(false);
+  async function next() {
+    setLoading(true);
+    try {
+      const r = await api(`${blockMentor(school)} You're interviewing a candidate for: ${data.role}. Evaluate this answer to "${qs[i]}". Reply EXACTLY:\nSCORE: <0-10>\nFEEDBACK: one sentence.`, [{ role: "user", content: ans }], 120);
+      const sc = parseFloat(r.match(/SCORE:\s*([\d.]+)/i)?.[1] || "0"); const f = (r.match(/FEEDBACK:\s*([\s\S]*)/i)?.[1] || r).trim();
+      const ns = [...scores, sc], nf = [...fbs, f]; setScores(ns); setFbs(nf); setAns("");
+      if (i + 1 >= qs.length) { const avg = ns.reduce((a, b) => a + b, 0) / ns.length; const ok = avg >= 6.5; setDone(true); onOutput?.({ type: "interview_simulator", questionsAsked: qs.length, feedbackPerQuestion: nf, overallScore: avg, passed: ok }); }
+      else setI(i + 1);
+    } catch (e) { setFbs(f => [...f, "Error: " + e.message]); }
+    setLoading(false);
+  }
+  if (done) { const avg = (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1); return (<BlockShell type="interview_simulator" passed={avg >= 6.5} sub={`${data.role} interview complete`}><div style={{ fontSize: 14, color: B.white, marginBottom: 8 }}>Overall: <strong style={{ color: avg >= 6.5 ? "#4ADE80" : "#F87171" }}>{avg}/10</strong></div>{fbs.map((f, k) => <div key={k} style={{ fontSize: 12, color: B.mutedMid, marginBottom: 4 }}>Q{k + 1} ({scores[k]}/10): {f}</div>)}</BlockShell>); }
+  return (<BlockShell type="interview_simulator" sub={`Role: ${data.role} · Question ${i + 1}/${qs.length}`}>
+    <div style={{ background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 10, padding: "11px 14px", fontSize: 14, color: B.white, marginBottom: 10 }}>🧑‍💼 {qs[i]}</div>
+    <textarea value={ans} onChange={e => setAns(e.target.value)} disabled={disabled} rows={4} placeholder="Your answer…" style={{ ...bx.input, fontSize: 13 }} />
+    {fbs[i - 1] && <div style={{ fontSize: 12, color: B.mutedMid, margin: "8px 0" }}>Last: {fbs[i - 1]}</div>}
+    <button onClick={next} disabled={!ans.trim() || loading || disabled} style={{ ...pBtn(T), marginTop: 8, opacity: (!ans.trim() || loading) ? 0.5 : 1 }}>{loading ? "Evaluating…" : i + 1 >= qs.length ? "Finish interview" : "Next question →"}</button>
+  </BlockShell>);
+}
+
+// ── 22. Audio Pitcher ──
+function AudioPitcherBlock({ data = {}, onOutput, T, disabled, school }) {
+  const [text, setText] = useState(""); const [fb, setFb] = useState(""); const [score, setScore] = useState(null); const [loading, setLoading] = useState(false); const [passed, setPassed] = useState(false);
+  async function grade() {
+    setLoading(true);
+    try { const r = await api(`${blockMentor(school)} Grade this spoken pitch. Criteria: ${data.criteria || "clarity, persuasion, delivery"}. Reply EXACTLY:\nSCORE: <0-10>\nFEEDBACK: 2 sentences.`, [{ role: "user", content: `PROMPT: ${data.prompt}\n\nPITCH:\n${text}` }], 200); const sc = parseFloat(r.match(/SCORE:\s*([\d.]+)/i)?.[1] || "0"); const f = (r.match(/FEEDBACK:\s*([\s\S]*)/i)?.[1] || r).trim(); setScore(sc); setFb(f); const ok = sc >= 6.5; setPassed(ok); onOutput?.({ type: "audio_pitcher", audioUrl: null, transcript: text, score: sc, feedback: f, passed: ok }); }
+    catch (e) { setFb("Error: " + e.message); }
+    setLoading(false);
+  }
+  return (<BlockShell type="audio_pitcher" passed={passed} sub={data.prompt}>
+    <div style={{ display: "flex", gap: 8, marginBottom: 8 }}><MicButton onText={t => setText(t)} T={T} /><span style={{ fontSize: 11, color: B.muted, alignSelf: "center" }}>Speak your pitch or type it.</span></div>
+    <textarea value={text} onChange={e => setText(e.target.value)} disabled={disabled} rows={4} placeholder="Your pitch…" style={{ ...bx.input, fontSize: 13 }} />
+    <button onClick={grade} disabled={!text.trim() || loading || disabled} style={{ ...pBtn(T), marginTop: 8, opacity: (!text.trim() || loading) ? 0.5 : 1 }}>{loading ? "Grading…" : "Grade my pitch"}</button>
+    {score != null && <div style={{ marginTop: 10, fontSize: 13, color: B.white }}><strong style={{ color: passed ? "#4ADE80" : "#F87171" }}>{score}/10</strong> — {fb}</div>}
+  </BlockShell>);
+}
+
+// ── 23. Image Gate ──
+function ImageGateBlock({ data = {}, onOutput, T, disabled, school }) {
+  const [img, setImg] = useState(null); const [desc, setDesc] = useState(""); const [fb, setFb] = useState(""); const [loading, setLoading] = useState(false); const [passed, setPassed] = useState(false);
+  function pick(e) { const file = e.target.files?.[0]; if (!file) return; const r = new FileReader(); r.onload = () => setImg(r.result); r.readAsDataURL(file); }
+  async function verify() {
+    setLoading(true);
+    try { const r = await api(`${blockMentor(school)} The student uploaded a photo as proof and described it. Judge against criteria: "${data.criteria}". Reply EXACTLY:\nVERDICT: PASS or NOTYET\nFEEDBACK: one sentence.`, [{ role: "user", content: `TASK: ${data.instruction}\n\nSTUDENT'S DESCRIPTION OF THEIR PHOTO:\n${desc}` }], 160); const ok = /VERDICT:\s*PASS/i.test(r); const f = (r.match(/FEEDBACK:\s*([\s\S]*)/i)?.[1] || r).trim(); setFb(f); setPassed(ok); onOutput?.({ type: "image_gate", imageUrl: img, analysis: f, passed: ok }); }
+    catch (e) { setFb("Error: " + e.message); }
+    setLoading(false);
+  }
+  return (<BlockShell type="image_gate" passed={passed} sub={data.instruction}>
+    {img && <img src={img} alt="proof" style={{ width: "100%", maxHeight: 220, objectFit: "contain", borderRadius: 10, border: `1px solid ${B.border}`, marginBottom: 10 }} />}
+    {!disabled && <label style={{ display: "inline-block", ...pBtn(T, false), marginBottom: 10 }}>📷 {img ? "Change photo" : "Upload photo"}<input type="file" accept="image/*" onChange={pick} style={{ display: "none" }} /></label>}
+    <textarea value={desc} onChange={e => setDesc(e.target.value)} disabled={disabled} rows={2} placeholder="Describe what your photo shows…" style={{ ...bx.input, fontSize: 13 }} />
+    <button onClick={verify} disabled={!img || !desc.trim() || loading || disabled} style={{ ...pBtn(T), marginTop: 8, opacity: (!img || !desc.trim() || loading) ? 0.5 : 1 }}>{loading ? "Verifying…" : "Submit proof"}</button>
+    {fb && <div style={{ marginTop: 10, fontSize: 13, color: passed ? "#4ADE80" : "#F87171", lineHeight: 1.6 }}>{fb}</div>}
+  </BlockShell>);
+}
+
+// ── 24. Video Gate ──
+function VideoGateBlock({ data = {}, onOutput, T, disabled, school }) {
+  const [url, setUrl] = useState(""); const [refl, setRefl] = useState(""); const [fb, setFb] = useState(""); const [loading, setLoading] = useState(false); const [passed, setPassed] = useState(false);
+  async function submit() {
+    setLoading(true);
+    try { const r = await api(`${blockMentor(school)} The student submitted a video link as proof and described it. Reply EXACTLY:\nVERDICT: PASS or NOTYET\nFEEDBACK: one sentence.`, [{ role: "user", content: `TASK: ${data.instruction}\nLINK: ${url}\nWHAT IT SHOWS:\n${refl}` }], 160); const ok = /VERDICT:\s*PASS/i.test(r); const f = (r.match(/FEEDBACK:\s*([\s\S]*)/i)?.[1] || r).trim(); setFb(f); setPassed(ok); onOutput?.({ type: "video_gate", videoUrl: url, watched: true, feedback: f, passed: ok }); }
+    catch (e) { setFb("Error: " + e.message); }
+    setLoading(false);
+  }
+  return (<BlockShell type="video_gate" passed={passed} sub={data.instruction}>
+    <input value={url} onChange={e => setUrl(e.target.value)} disabled={disabled} placeholder="Paste Loom / YouTube link…" style={{ ...bx.input, fontSize: 13, marginBottom: 8 }} />
+    <textarea value={refl} onChange={e => setRefl(e.target.value)} disabled={disabled} rows={2} placeholder="What does your video demonstrate?" style={{ ...bx.input, fontSize: 13 }} />
+    <button onClick={submit} disabled={!url.trim() || !refl.trim() || loading || disabled} style={{ ...pBtn(T), marginTop: 8, opacity: (!url.trim() || !refl.trim() || loading) ? 0.5 : 1 }}>{loading ? "Reviewing…" : "Submit video"}</button>
+    {fb && <div style={{ marginTop: 10, fontSize: 13, color: passed ? "#4ADE80" : "#F87171", lineHeight: 1.6 }}>{fb}</div>}
+  </BlockShell>);
+}
+
+// ── 25. Reading (plain) ──
+function ReadingPlainBlock({ data = {}, onOutput, T, disabled, school }) {
+  const [passed, setPassed] = useState(false); const [tldr, setTldr] = useState(""); const [loading, setLoading] = useState(false);
+  async function summarize() { setLoading(true); try { setTldr(await api(`${blockMentor(school)} Give a 2-sentence TL;DR of this text.`, [{ role: "user", content: String(data.content).slice(0, 4000) }], 150)); } catch { } setLoading(false); }
+  return (<BlockShell type="reading_plain" passed={passed}>
+    <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}><Markdown text={data.content || ""} /></div>
+    {tldr && <div style={{ background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 10, padding: "10px 13px", marginBottom: 10, fontSize: 13, color: B.white, lineHeight: 1.6 }}>📌 {tldr}</div>}
+    <div style={{ display: "flex", gap: 8 }}>
+      <button onClick={summarize} disabled={loading || disabled} style={{ ...pBtn(T, false), opacity: loading ? 0.5 : 1 }}>{loading ? "…" : "✨ TL;DR"}</button>
+      {!passed && <button onClick={() => { setPassed(true); onOutput?.({ type: "reading_plain", read: true, passed: true }); }} disabled={disabled} style={pBtn(T)}>Mark as read ✓</button>}
+    </div>
+  </BlockShell>);
+}
+
+// ── 26. Video Embed ──
+function VideoEmbedBlock({ data = {}, onOutput, T, disabled }) {
+  const [passed, setPassed] = useState(false);
+  function embedUrl(u = "") { const yt = u.match(/(?:youtube\.com\/(?:watch\?v=|shorts\/)|youtu\.be\/)([\w-]+)/); if (yt) return `https://www.youtube.com/embed/${yt[1]}`; const loom = u.match(/loom\.com\/share\/([\w-]+)/); if (loom) return `https://www.loom.com/embed/${loom[1]}`; return u; }
+  return (<BlockShell type="video_embed" passed={passed} sub={data.title}>
+    <div style={{ position: "relative", paddingTop: "56.25%", borderRadius: 10, overflow: "hidden", border: `1px solid ${B.border}`, marginBottom: 10 }}>
+      <iframe title={data.title || "video"} src={embedUrl(data.url)} allowFullScreen style={{ position: "absolute", inset: 0, width: "100%", height: "100%", border: "none" }} />
+    </div>
+    {!passed && <button onClick={() => { setPassed(true); onOutput?.({ type: "video_embed", watched: true, passed: true }); }} disabled={disabled} style={pBtn(T)}>Mark watched ✓</button>}
+  </BlockShell>);
+}
+
+// ── 27. Quiz ──
+function QuizBlock({ data = {}, onOutput, T, disabled }) {
+  const questions = data.questions || []; const [ans, setAns] = useState({});
+  const answered = questions.every((_, i) => ans[i] !== undefined); const score = questions.filter((q, i) => ans[i] === q.answer).length;
+  useEffect(() => { if (answered && questions.length) { const passed = score >= questions.length * 0.7; onOutput?.({ type: "quiz", score, passed }); } }, [answered]); // eslint-disable-line
+  return (<BlockShell type="quiz" passed={answered && score >= questions.length * 0.7}>
+    {questions.map((q, qi) => { const picked = ans[qi]; return (
+      <div key={qi} style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 14, fontWeight: 600, color: B.white, marginBottom: 8, lineHeight: 1.5 }}>{qi + 1}. {q.q}</div>
+        <div style={{ display: "grid", gap: 6 }}>
+          {q.options.map((opt, oi) => { const show = picked !== undefined, isC = oi === q.answer, isP = picked === oi; return (
+            <button key={oi} disabled={disabled} onClick={() => picked === undefined && setAns(a => ({ ...a, [qi]: oi }))} style={{ textAlign: "left", padding: "9px 13px", borderRadius: 9, fontSize: 13, fontFamily: "inherit", lineHeight: 1.45, cursor: picked === undefined ? "pointer" : "default", color: B.white, background: show && isC ? "rgba(74,222,128,0.12)" : show && isP ? "rgba(248,113,113,0.1)" : B.surface, border: `1px solid ${show && isC ? "rgba(74,222,128,0.4)" : show && isP ? "rgba(248,113,113,0.35)" : B.border}` }}>{show && isC ? "✓ " : show && isP ? "✕ " : ""}{opt}</button>
+          ); })}
+        </div>
+        {picked !== undefined && q.explain && <div style={{ fontSize: 12, color: picked === q.answer ? "#4ADE80" : "#F87171", marginTop: 7, lineHeight: 1.5 }}>{q.explain}</div>}
+      </div>
+    ); })}
+    {answered && <div style={{ textAlign: "center", padding: 12, background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 10, fontSize: 14, fontWeight: 700, color: T.hi }}>Score: {score}/{questions.length} <button onClick={() => setAns({})} style={{ marginLeft: 10, background: "none", border: `1px solid ${T.ba}`, borderRadius: 8, color: T.hi, padding: "4px 12px", cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>Retake</button></div>}
+  </BlockShell>);
+}
+
+// ── 28. Calculator ──
+function CalculatorBlock({ data = {}, onOutput, T, disabled, school }) {
+  const fields = data.fields || []; const [vals, setVals] = useState({}); const [res, setRes] = useState(null); const [interp, setInterp] = useState(""); const [loading, setLoading] = useState(false);
+  function compute() {
+    try {
+      const keys = fields.map(f => f.key); const args = keys.map(k => parseFloat(vals[k]) || 0);
+      const fn = new Function(...keys, `return (${data.expression || "0"});`);
+      const r = fn(...args); setRes(typeof r === "number" ? Math.round(r * 100) / 100 : r);
+      onOutput?.({ type: "calculator", result: r, interpretation: interp });
+    } catch (e) { setRes("err"); }
+  }
+  async function explain() { if (res == null) return; setLoading(true); try { setInterp(await api(`${blockMentor(school)} In one sentence, interpret this ${data.title || "result"}: ${res}${data.unit || ""}.`, [{ role: "user", content: JSON.stringify(vals) }], 100)); } catch { } setLoading(false); }
+  return (<BlockShell type="calculator" sub={data.title}>
+    <div style={{ display: "grid", gap: 8, marginBottom: 10 }}>
+      {fields.map((f, i) => <div key={i}><div style={{ fontSize: 12, color: B.mutedMid, marginBottom: 4 }}>{f.label}</div><input type="number" value={vals[f.key] || ""} onChange={e => setVals(v => ({ ...v, [f.key]: e.target.value }))} disabled={disabled} style={{ ...bx.input, fontSize: 13 }} /></div>)}
+    </div>
+    <div style={{ display: "flex", gap: 8 }}><button onClick={compute} disabled={disabled} style={pBtn(T)}>Calculate</button>{res != null && res !== "err" && <button onClick={explain} disabled={loading} style={{ ...pBtn(T, false), opacity: loading ? 0.5 : 1 }}>{loading ? "…" : "✨ Interpret"}</button>}</div>
+    {res != null && <div style={{ marginTop: 10, fontFamily: "'Space Grotesk',sans-serif", fontSize: 24, fontWeight: 700, color: res === "err" ? "#F87171" : T.hi }}>{res === "err" ? "Check inputs" : `${res}${data.unit || ""}`}</div>}
+    {interp && <div style={{ marginTop: 6, fontSize: 13, color: B.mutedMid, lineHeight: 1.6 }}>{interp}</div>}
+  </BlockShell>);
+}
+
+// ── Custom (AI-generated structured tool) ──
+function CustomBlock({ data = {}, onOutput, T, disabled, school }) {
+  const sections = data.sections || []; const [vals, setVals] = useState({}); const [fb, setFb] = useState(""); const [loading, setLoading] = useState(false); const [passed, setPassed] = useState(false);
+  async function submit() {
+    setLoading(true);
+    try { const body = sections.map(s => `${s.label}:\n${vals[s.key] || ""}`).join("\n\n"); const r = await api(`${blockMentor(school)} Give the student useful feedback using this rubric: ${data.rubric}. End with VERDICT: PASS or NOTYET.`, [{ role: "user", content: body }], 350); setFb(r.replace(/VERDICT:.*/is, "").trim()); const ok = /VERDICT:\s*PASS/i.test(r); setPassed(ok); onOutput?.({ type: "custom", inputs: vals, passed: ok, feedback: r }); }
+    catch (e) { setFb("Error: " + e.message); }
+    setLoading(false);
+  }
+  return (<BlockShell type="custom" passed={passed}>
+    {data.intro && <div style={{ marginBottom: 10 }}><Markdown text={data.intro} /></div>}
+    {sections.map((s, i) => <div key={i} style={{ marginBottom: 10 }}><div style={{ fontSize: 13, color: T.hi, marginBottom: 5 }}>{s.label}</div><textarea value={vals[s.key] || ""} onChange={e => setVals(v => ({ ...v, [s.key]: e.target.value }))} disabled={disabled} rows={3} style={{ ...bx.input, fontSize: 13 }} /></div>)}
+    {data.aiFeedback !== false && <button onClick={submit} disabled={loading || disabled} style={{ ...pBtn(T), opacity: loading ? 0.5 : 1 }}>{loading ? "Reviewing…" : "Submit for feedback"}</button>}
+    {fb && <div style={{ marginTop: 10, background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 10, padding: "10px 13px", fontSize: 13, color: B.white, lineHeight: 1.6 }}>{fb}</div>}
+  </BlockShell>);
+}
+
+// ── BlockRenderer: routes a block to its component ──
+const BLOCK_COMPONENTS = {
+  flashcard: FlashcardBlock, reading: ReadingBlock, mindmap: MindMapBlock, essay: EssayBlock, debate: DebateBlock,
+  code_sandbox: CodeSandboxBlock, terminal: TerminalBlock, sequencer: SequencerBlock,
+  journal: JournalBlock, branching_scenario: BranchingScenarioBlock, voice_journal: VoiceJournalBlock, reflection_timer: ReflectionTimerBlock,
+  macro_tracker: MacroTrackerBlock, heatmap: HeatmapBlock, habit_checker: HabitCheckerBlock, metric_tracker: MetricTrackerBlock, weekly_planner: WeeklyPlannerBlock, mood_quadrant: MoodQuadrantBlock,
+  roleplay: RoleplayBlock, objection_handler: ObjectionHandlerBlock, interview_simulator: InterviewSimulatorBlock, audio_pitcher: AudioPitcherBlock,
+  image_gate: ImageGateBlock, video_gate: VideoGateBlock,
+  reading_plain: ReadingPlainBlock, video_embed: VideoEmbedBlock, quiz: QuizBlock, calculator: CalculatorBlock,
+  custom: CustomBlock,
+};
+function BlockRenderer({ block, onOutput, T, disabled, state, onState, school }) {
+  const Comp = BLOCK_COMPONENTS[block?.type];
+  if (!Comp) return <div style={{ fontSize: 12, color: B.muted, padding: 14, border: `1px dashed ${B.borderMid}`, borderRadius: 12 }}>Unknown block: {block?.type}</div>;
+  return <Comp data={block.data || {}} onOutput={onOutput} T={T} disabled={disabled} state={state} onState={onState} school={school} />;
+}
+
 // ─────────────────────────────────────────────────────────────
 // TOOLS
 // ─────────────────────────────────────────────────────────────
-function toolIcon(type) { return { checklist: "✅", habit: "📆", journal: "📓", timer: "⏱️", counter: "🔢", quiz: "❓" }[type] || "🛠️"; }
+function toolIcon(type) { return ({ checklist: "✅", habit: "📆", journal: "📓", timer: "⏱️", counter: "🔢", quiz: "❓" }[type]) || BLOCK_META[type]?.icon || "🛠️"; }
 const DAYS = ["M", "T", "W", "T", "F", "S", "S"];
 
 function ToolFrame({ tool, T, open, onToggle, onRemove, children }) {
@@ -473,7 +1344,7 @@ function ToolFrame({ tool, T, open, onToggle, onRemove, children }) {
   );
 }
 
-function ToolRenderer({ tool, T, state, onState, onRemove }) {
+function ToolRenderer({ tool, T, state, onState, onRemove, school }) {
   const s = state || {};
   const open = s._open !== false;
   const set = (patch) => onState({ ...s, ...patch });
@@ -579,7 +1450,8 @@ function ToolRenderer({ tool, T, state, onState, onRemove }) {
       )}
     </>);
   }
-  return null;
+  // Any other type is a block-style tool → render via BlockRenderer (persisted).
+  return frame(<BlockRenderer block={{ type: tool.type, data: tool.data || tool }} T={T} school={school} state={s.blockState} onState={(bs) => set({ blockState: bs })} />);
 }
 
 function TimerBody({ tool, T }) {
@@ -662,7 +1534,7 @@ function ToolsSection({ rec, T, onUpdate, buildTool, buildingTool, readOnly }) {
         </div>
       )}
       {(rec.tools || []).map((tool) => (
-        <ToolRenderer key={tool.id} tool={tool} T={T}
+        <ToolRenderer key={tool.id} tool={tool} T={T} school={school}
           state={rec.toolStates?.[tool.id]}
           onState={(s) => onUpdate({ toolStates: { ...(rec.toolStates || {}), [tool.id]: s } })}
           onRemove={readOnly ? null : () => onUpdate({ tools: rec.tools.filter(t => t.id !== tool.id) })} />
@@ -693,7 +1565,10 @@ function LessonRow({ lesson, idx, T, progress, onEnter }) {
           <div style={{ fontSize: 14, fontWeight: 600, color: B.white, marginBottom: 4 }}>{lesson.title}</div>
           <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
             <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6, padding: "2px 7px", borderRadius: 4, background: tm.bg, color: tm.c }}>{tm.icon} {lesson.type}</span>
-            <span style={{ fontSize: 12, color: B.muted }}>{lesson.concept?.slice(0, 65)}{lesson.concept?.length > 65 ? "..." : ""}</span>
+            {(lesson.blocks || []).map((b, bi) => (
+              <span key={bi} title={BLOCK_META[b.type]?.label || b.type} style={{ fontSize: 11, padding: "2px 6px", borderRadius: 4, background: B.surface3, border: `1px solid ${B.border}` }}>{BLOCK_META[b.type]?.icon || "🧩"}</span>
+            ))}
+            <span style={{ fontSize: 12, color: B.muted }}>{lesson.concept?.slice(0, 55)}{lesson.concept?.length > 55 ? "..." : ""}</span>
           </div>
         </div>
       </div>
@@ -708,12 +1583,19 @@ function LessonRow({ lesson, idx, T, progress, onEnter }) {
 // ─────────────────────────────────────────────────────────────
 // ITERATE PANEL
 // ─────────────────────────────────────────────────────────────
-function IteratePanel({ school, history, loading, onApply, onTheme, onGami, onClose, advisorChat, onAdvisorChat, onBuildTool, buildingTool }) {
+function IteratePanel({ school, history, loading, onApply, onTheme, onGami, onVoice, onClose, advisorChat, onAdvisorChat, onBuildTool, buildingTool }) {
   const [mode, setMode] = useState("edits");
   const [prompt, setPrompt] = useState("");
   const [advInput, setAdvInput] = useState("");
   const [advLoading, setAdvLoading] = useState(false);
+  const [cmd, setCmd] = useState(null);
+  const [form, setForm] = useState({});
   const advBottom = useRef(null);
+  const path = school.learningPath || "mixed";
+  const recBlocks = allowedBlocksFor(path);
+  const lessonsFlat = (school.semesters || []).flatMap(s => (s.lessons || []).map(l => ({ n: l.number, title: l.title })));
+  const selStyle = { background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.white, fontFamily: "inherit", fontSize: 12, padding: "6px 8px", cursor: "pointer", maxWidth: "100%" };
+  function runCmd(inst) { setCmd(null); setForm({}); onApply(inst); }
   useEffect(() => { advBottom.current?.scrollIntoView({ behavior: "smooth" }); }, [advisorChat, advLoading]);
 
   const QUICK = ["Unlock all lessons", "Make the mentor tougher and more demanding", "Add a 3rd semester with advanced lessons", "Make lessons shorter and more practical", "Add more role-play lessons", "Make every passCriteria stricter and more measurable"];
@@ -758,17 +1640,83 @@ function IteratePanel({ school, history, loading, onApply, onTheme, onGami, onCl
 
       {mode === "edits" && (<>
         <div style={{ padding: "14px 16px", borderBottom: `1px solid ${B.border}` }}>
-          <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.5, color: B.muted, marginBottom: 8 }}>Instant style swap · 0 tokens</div>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.5, color: B.muted }}>Instant swaps</span>
+            <span style={{ fontSize: 10, fontWeight: 700, color: "#4ADE80" }}>0 tokens</span>
+          </div>
+          <div style={{ fontSize: 10, color: B.muted, marginBottom: 5 }}>🎨 Theme</div>
           <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
             {Object.keys(THEMES).map(k => (
               <button key={k} onClick={() => onTheme(k)} title={THEMES[k].label} style={{ width: 26, height: 26, borderRadius: "50%", border: school.theme === k ? `2px solid ${B.white}` : `1px solid ${B.borderMid}`, background: THEMES[k].p, cursor: "pointer" }} />
             ))}
           </div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
+            <label style={{ fontSize: 10, color: B.muted }}>🎙️ Voice</label>
+            <select value={school.voicePreset || "sage"} onChange={e => onVoice && onVoice(e.target.value)} style={selStyle}>
+              {["sage", "drill", "socratic", "scientist", "storyteller", "trickster"].map(v => <option key={v} value={v}>{v[0].toUpperCase() + v.slice(1)}</option>)}
+              {school.voicePreset === "custom" && <option value="custom">Custom</option>}
+            </select>
+          </div>
+          <div style={{ fontSize: 10, color: B.muted, marginBottom: 5 }}>🎮 Gamification</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
             {Object.values(GAMI).map(g => (
               <button key={g.id} onClick={() => onGami(g.id)} style={{ background: (school.gamification?.preset || "none") === g.id ? "rgba(124,58,237,0.18)" : "rgba(255,255,255,0.03)", border: `1px solid ${(school.gamification?.preset || "none") === g.id ? "rgba(124,58,237,0.45)" : B.border}`, borderRadius: 100, padding: "4px 10px", fontSize: 11, color: B.mutedMid, cursor: "pointer", fontFamily: "inherit" }}>{g.name}</button>
             ))}
           </div>
+          <button onClick={() => onApply("Unlock all lessons")} style={{ width: "100%", background: "rgba(124,58,237,0.08)", border: "1px solid rgba(124,58,237,0.3)", borderRadius: 8, color: "#A78BFA", padding: "7px", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit" }}>🔓 Unlock all lessons</button>
+        </div>
+
+        <div style={{ padding: "14px 16px", borderBottom: `1px solid ${B.border}` }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.5, color: B.muted }}>Structure commands</span>
+            <span style={{ fontSize: 10, fontWeight: 700, color: "#FBBF24" }}>~ AI</span>
+          </div>
+          <div style={{ fontSize: 11, color: B.muted, marginBottom: 8 }}>Path: <span style={{ color: "#A78BFA", fontWeight: 600 }}>{path}</span> · blocks limited to this path</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: cmd ? 10 : 0 }}>
+            {[["lesson", "➕ Add Lesson"], ["block", "⚒️ Add Block"], ["semester", "📚 Add Semester"], ["difficulty", "📈 Difficulty"]].map(([k, l]) => (
+              <button key={k} onClick={() => { setCmd(cmd === k ? null : k); setForm({}); }} disabled={loading} style={{ background: cmd === k ? "rgba(124,58,237,0.2)" : "rgba(124,58,237,0.06)", border: `1px solid ${cmd === k ? "rgba(124,58,237,0.5)" : "rgba(124,58,237,0.2)"}`, borderRadius: 8, padding: "6px 10px", fontSize: 11.5, color: "#C4B5FD", cursor: "pointer", fontFamily: "inherit", opacity: loading ? 0.5 : 1 }}>{l}</button>
+            ))}
+          </div>
+
+          {cmd === "lesson" && (
+            <div style={{ display: "grid", gap: 7, background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 10, padding: 10 }}>
+              <select value={form.sem || ""} onChange={e => setForm({ ...form, sem: e.target.value })} style={selStyle}>
+                <option value="">Which semester…</option>
+                {(school.semesters || []).map((s, i) => <option key={i} value={s.number || i + 1}>Sem {s.number || i + 1}: {s.title}</option>)}
+              </select>
+              <input value={form.title || ""} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="Lesson title" style={{ ...selStyle, cursor: "text" }} />
+              <select value={form.type || "Dialogue"} onChange={e => setForm({ ...form, type: e.target.value })} style={selStyle}>{Object.keys(TM).map(t => <option key={t} value={t}>{t}</option>)}</select>
+              <button disabled={!form.sem || !form.title} onClick={() => runCmd(`Add a new ${form.type || "Dialogue"} lesson titled "${form.title}" to semester ${form.sem}. Write its concept, openingLine, mission, passCriteria, and 1-3 blocks allowed for the ${path} learning path. Renumber lessons sequentially.`)} style={{ ...pBtnLite(), opacity: (!form.sem || !form.title) ? 0.5 : 1 }}>Add lesson →</button>
+            </div>
+          )}
+          {cmd === "block" && (
+            <div style={{ display: "grid", gap: 7, background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 10, padding: 10 }}>
+              <select value={form.lesson || ""} onChange={e => setForm({ ...form, lesson: e.target.value })} style={selStyle}>
+                <option value="">Which lesson…</option>
+                {lessonsFlat.map((l, i) => <option key={i} value={l.n}>{l.n}. {l.title}</option>)}
+              </select>
+              <select value={form.block || ""} onChange={e => setForm({ ...form, block: e.target.value })} style={selStyle}>
+                <option value="">Pick a block…</option>
+                <optgroup label={`Recommended for ${path}`}>{recBlocks.map(b => <option key={b} value={b}>{BLOCK_META[b]?.icon} {BLOCK_META[b]?.label}</option>)}</optgroup>
+                <optgroup label="All blocks">{ALL_BLOCKS.map(b => <option key={b} value={b}>{BLOCK_META[b]?.icon} {BLOCK_META[b]?.label}</option>)}</optgroup>
+              </select>
+              <button disabled={!form.lesson || !form.block} onClick={() => runCmd(`Add a ${form.block} block to lesson number ${form.lesson}. Fill its data fully per the schema and keep it consistent with that lesson's concept and the ${path} path. Preserve all other lessons and blocks.`)} style={{ ...pBtnLite(), opacity: (!form.lesson || !form.block) ? 0.5 : 1 }}>Add block →</button>
+            </div>
+          )}
+          {cmd === "semester" && (
+            <div style={{ display: "grid", gap: 7, background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 10, padding: 10 }}>
+              <input value={form.title || ""} onChange={e => setForm({ ...form, title: e.target.value })} placeholder="Semester title" style={{ ...selStyle, cursor: "text" }} />
+              <input value={form.count || ""} onChange={e => setForm({ ...form, count: e.target.value })} type="number" placeholder="How many lessons (e.g. 3)" style={{ ...selStyle, cursor: "text" }} />
+              <button disabled={!form.title} onClick={() => runCmd(`Add a new final semester titled "${form.title}" with ${form.count || 3} escalating lessons, each with 1-3 blocks allowed for the ${path} learning path. Number lessons sequentially after the existing ones.`)} style={{ ...pBtnLite(), opacity: !form.title ? 0.5 : 1 }}>Add semester →</button>
+            </div>
+          )}
+          {cmd === "difficulty" && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 10, padding: 10 }}>
+              {["Beginner", "Intermediate", "Advanced", "Expert"].map(d => (
+                <button key={d} onClick={() => runCmd(`Adjust the whole school to ${d} difficulty: rewrite every passCriteria and mission to match, and scale block complexity accordingly. Keep the lesson count and structure.`)} style={pBtnLite()}>{d}</button>
+              ))}
+            </div>
+          )}
         </div>
         <div style={{ padding: "14px 16px", borderBottom: `1px solid ${B.border}` }}>
           <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.5, color: B.muted, marginBottom: 8 }}>Quick edits</div>
@@ -929,11 +1877,12 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   return (
     <div style={{ position: "relative" }}>
       <Toast toast={toast} />
-      {activeLesson && <MentorChat school={school} lesson={activeLesson} T={T} onClose={() => setActiveLesson(null)} onPass={() => handlePass(activeLesson.number)} />}
+      {activeLesson && <LessonView school={school} lesson={activeLesson} T={T} onClose={() => setActiveLesson(null)} onPass={() => handlePass(activeLesson.number)} />}
       {showIterate && !readOnly && (
         <IteratePanel school={school} history={iterateHistory} loading={iterating} onApply={applyIteration}
           onTheme={(k) => { onUpdate({ data: { ...school, theme: k } }); showToast(`✓ Theme: ${THEMES[k].label}`); }}
           onGami={(gid) => { onUpdate({ data: composeSchool({ ...contentOnly(school), gamiPreset: gid, theme: school.theme }, school.knowledgeDNA) }); showToast(`✓ Gamification: ${GAMI[gid].name}`); }}
+          onVoice={(vp) => { onUpdate({ data: composeSchool({ ...contentOnly(school), voicePreset: vp, systemVoice: undefined, theme: school.theme }, school.knowledgeDNA) }); showToast(`✓ Mentor voice: ${vp[0].toUpperCase() + vp.slice(1)}`); }}
           onClose={() => setShowIterate(false)} advisorChat={rec.advisorChat || []} onAdvisorChat={(msgs) => onUpdate({ advisorChat: msgs })} onBuildTool={buildTool} buildingTool={buildingTool} />
       )}
 
@@ -972,7 +1921,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
             </div>
             <div style={{ padding: "14px 28px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 14 }}>
               <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
-                {[["Duration", school.duration], ["Category", school.category], ["Lessons", total]].map(([l, v]) => (
+                {[["Duration", school.duration], ["Category", school.category], ["Path", school.learningPath || "mixed"], ["Lessons", total]].map(([l, v]) => (
                   <div key={l}><div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, color: B.muted, marginBottom: 2 }}>{l}</div><div style={{ fontSize: 14, fontWeight: 700, color: B.white }}>{v}</div></div>
                 ))}
               </div>
