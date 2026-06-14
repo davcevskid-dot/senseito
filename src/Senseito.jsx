@@ -309,6 +309,14 @@ function pathLabel(k) {
   const map = { mixed: "Mixed (any blocks)", problem_solving: "Problem Solving", case_study: "Case Study", mental_game: "Mental Game" };
   return map[k] || k[0].toUpperCase() + k.slice(1);
 }
+// Minimal but valid block data when the block-author step is unavailable for a type.
+function fallbackBlock(type, lesson) {
+  const c = lesson?.concept || lesson?.title || "";
+  if (type === "essay") return { type, data: { prompt: lesson?.mission || c, minWords: 120 } };
+  if (type === "journal") return { type, data: { prompts: [lesson?.mission || c || "Reflect on this lesson."], minWords: 80 } };
+  if (type === "reading") return { type, data: { passage: c, keyPhrases: [] } };
+  return { type: "reading_plain", data: { content: `## ${lesson?.title || "Lesson"}\n\n${c}` } };
+}
 
 // Serialized, compact path guide injected into the architect prompt.
 const PATH_GUIDE = Object.entries(LEARNING_PATH_RULES).map(([k, v]) =>
@@ -318,7 +326,7 @@ const PATH_GUIDE = Object.entries(LEARNING_PATH_RULES).map(([k, v]) =>
 // ─────────────────────────────────────────────────────────────
 // PROMPTS
 // ─────────────────────────────────────────────────────────────
-const ARCHITECT_SYS = `You are the Senseito School Architect AI — the best curriculum designer alive. Generate a complete school as a JSON object.
+const ARCHITECT_SYS = `You are the Senseito School Architect AI — the best curriculum designer alive. Design the PLAN for a complete school as a COMPACT JSON object. This is the structure only — the detailed contents of each interactive block are generated in a SEPARATE later step, so do NOT include block data here, only block type names. Keep your output tight so it never gets truncated.
 
 If the request is critically ambiguous OR references external content you cannot access (a URL with no pasted content), return ONLY: {"needMoreInfo": "one specific, friendly question asking for exactly what you need"}. Use this sparingly — only when you truly cannot build something great.
 
@@ -330,9 +338,9 @@ The learningPath determines which interactive blocks you may use and how lessons
 STEP 2 — PICK THE MENTOR VOICE, INDEPENDENTLY.
 voicePreset is a SEPARATE dimension from learningPath. A "language" school can have any voice (drill, socratic, storyteller…). Choose the voice that best fits the creator's request; if they named a persona, match it.
 
-STEP 3 — SELECT BLOCKS PER LESSON.
-Each lesson gets 1-3 blocks from the chosen path's ALLOWED list ONLY. NEVER use a block from that path's forbidden list. Order blocks pedagogically (e.g. reading → practice → check). The LAST block should be the one that proves mastery.
-${BLOCK_SCHEMA_GUIDE}
+STEP 3 — PLAN BLOCKS PER LESSON (TYPES ONLY).
+For each lesson choose 1-3 block TYPES from the chosen path's ALLOWED list ONLY (never a forbidden one), ordered pedagogically (e.g. reading → practice → check); the LAST should prove mastery. List ONLY the type strings now — their detailed contents are generated later, so keep this plan compact.
+Available block types: ${ALL_BLOCKS.join(", ")}.
 
 STEP 4 — LAY OUT BY THE PATH'S LAYOUT RULE.
 chronological = foundations→deep; project-based = mini projects→capstone; progressive = beginner→expert; weekly-milestones = week-by-week goals; flexible = your call.
@@ -347,7 +355,7 @@ Otherwise return an object with these fields:
 - systemVoice: ONLY if voicePreset is custom — 3-4 sentences capturing exactly how they speak, vocabulary, catchphrases, what they'd NEVER say. Else omit.
 - transformation: vivid before/after of the student
 - gamiPreset: one of xp (default), belts (discipline/martial), quest (adventure/story), none
-- semesters: array of { number, title, theme, weeks, lessons: [ { number, title, type (Dialogue|RolePlay|Mission|Reflection|SkillTest|Quiz|Debate|Journal), concept (1-2 sentences), openingLine (exact first thing the mentor says, in voice), mission, passCriteria (specific, measurable), blocks: [ { type, data } ] (1-3 blocks, allowed for the learningPath, data per the shapes above) } ] }
+- semesters: array of { number, title, theme, weeks, lessons: [ { number, title, type (Dialogue|RolePlay|Mission|Reflection|SkillTest|Quiz|Debate|Journal), concept (1-2 sentences), openingLine (exact first thing the mentor says, in voice), mission, passCriteria (specific, measurable), blockTypes: [ 1-3 block type strings, allowed for the learningPath ] } ] }
 - suggestions: 3-4 short, SPECIFIC improvement ideas for THIS school
 - toolIdeas: 2-3 of { name, why (one line), type (any block type that fits this school) }
 
@@ -358,9 +366,16 @@ QUALITY BAR — must feel like a $500 course on first generation:
 - openingLines must hook instantly, in the mentor's exact voice — no two alike.
 - Missions: doable in 1-3 days, concrete, slightly uncomfortable.
 - passCriteria: evidence-based — what the student must SHOW, not feel.
-- Every lesson MUST include a blocks array (1-3) using ONLY allowed block types for the chosen learningPath. Fill each block's data fully per the schema.
-- If KNOWLEDGE DNA is provided, ground every lesson AND every block in its principles, frameworks, vocabulary.
-- Be specific, vivid, powerful. Zero filler.`;
+- Every lesson MUST include a blockTypes array (1-3) using ONLY allowed block types for the chosen learningPath.
+- If KNOWLEDGE DNA is provided, ground every lesson in its principles, frameworks, vocabulary.
+- Be specific, vivid, powerful. Zero filler. Output ONLY the JSON.`;
+
+// Phase 2 — fill in the actual block contents for one semester at a time.
+const BLOCKFILL_SYS = `You are the Senseito Block Author. You receive a school's context and a list of lessons, each with planned block TYPES. Produce the full DATA for every block.
+Return ONLY JSON: { "lessons": [ { "number": <lesson number>, "blocks": [ { "type", "data" }, ... ] } ] } — one entry per lesson given, blocks in the SAME order as the planned types.
+Each block's data MUST follow these shapes EXACTLY:
+${BLOCK_SCHEMA_GUIDE}
+Make every block specific, vivid and grounded in the school's subject and (if given) the KNOWLEDGE DNA — never generic. Rich but concise. Output ONLY the JSON.`;
 
 const DISTILL_SYS = `You are the Senseito Knowledge Distiller. The text below is source material a creator wants taught. Produce a compact KNOWLEDGE DNA in markdown — the minimum a mentor AI needs to teach this material authentically. Max ~600 words.
 Format exactly:
@@ -2357,10 +2372,37 @@ function Home({ onCreated }) {
     try {
       let vision = source; let dna = null;
       if (source.length > DNA_THRESHOLD) { dna = await api(DISTILL_SYS, [{ role: "user", content: source.slice(0, 30000) }], 1200); vision = (prompt || source).slice(0, 600); }
-      const userMsg = `Build a school for this concept: ${vision}${dna ? `\n\nKNOWLEDGE DNA (distilled from the creator's source material — teach THIS):\n${dna}` : ""}`;
-      const parsed = await apiJSON(ARCHITECT_SYS, [{ role: "user", content: userMsg }], 8000);
-      if (parsed.needMoreInfo) { setClarifyQ(parsed.needMoreInfo); setClarifyA(""); setPhase("clarify"); return; }
-      onCreated(composeSchool(parsed.school || parsed, dna));
+
+      // PHASE 1 — compact plan (structure + block TYPES only). Always small, never truncates.
+      const planMsg = `Plan a school for this concept: ${vision}${dna ? `\n\nKNOWLEDGE DNA (teach THIS):\n${dna}` : ""}`;
+      const plan = await apiJSON(ARCHITECT_SYS, [{ role: "user", content: planMsg }], 6000);
+      if (plan.needMoreInfo) { setClarifyQ(plan.needMoreInfo); setClarifyA(""); setPhase("clarify"); return; }
+      const content = plan.school || plan;
+      if (!content?.name || !Array.isArray(content.semesters) || !content.semesters.some(s => s.lessons?.length)) throw new Error("Couldn't draft the lessons — please try again or simplify the prompt.");
+
+      // PHASE 2 — fill each semester's block DATA in parallel, with the token budget
+      // sized to that semester's workload (and capped). Falls back gracefully per lesson.
+      const ctxHeader = `SCHOOL: ${content.name} — ${content.description}\nLEARNING PATH: ${content.learningPath || "mixed"}\nMENTOR: ${content.mentorName || ""} (voice: ${content.voicePreset || "sage"})${dna ? `\nKNOWLEDGE DNA:\n${String(dna).slice(0, 2500)}` : ""}`;
+      await Promise.all((content.semesters || []).map(async (sem) => {
+        const lessons = (sem.lessons || []).filter(l => (l.blockTypes || []).length).map(l => ({ number: l.number, title: l.title, type: l.type, concept: l.concept, mission: l.mission, passCriteria: l.passCriteria, blockTypes: l.blockTypes }));
+        if (!lessons.length) { (sem.lessons || []).forEach(l => { l.blocks = l.blocks?.length ? l.blocks : [fallbackBlock("reading_plain", l)]; delete l.blockTypes; }); return; }
+        const blockCount = lessons.reduce((a, l) => a + (l.blockTypes?.length || 1), 0);
+        const tok = Math.min(16000, Math.max(3000, blockCount * 1300 + 1200)); // approx-token budgeting
+        try {
+          const filled = await apiJSON(BLOCKFILL_SYS, [{ role: "user", content: `${ctxHeader}\n\nSEMESTER: ${sem.title}\nLESSONS (return blocks for each, keyed by number):\n${JSON.stringify(lessons)}` }], tok);
+          const arr = Array.isArray(filled) ? filled : (filled.lessons || []);
+          const byNum = {}; arr.forEach(L => { if (L && L.number != null) byNum[L.number] = Array.isArray(L.blocks) ? L.blocks.filter(b => b && b.type) : []; });
+          (sem.lessons || []).forEach(l => {
+            const got = byNum[l.number];
+            l.blocks = (got && got.length) ? got : (l.blockTypes || ["reading_plain"]).map(t => fallbackBlock(t, l));
+            delete l.blockTypes;
+          });
+        } catch {
+          (sem.lessons || []).forEach(l => { l.blocks = (l.blockTypes || ["reading_plain"]).map(t => fallbackBlock(t, l)); delete l.blockTypes; });
+        }
+      }));
+
+      onCreated(composeSchool(content, dna));
     } catch (e) { setError(e.message || "Build failed — try again."); setPhase("error"); }
   }
 
