@@ -23,22 +23,23 @@ async function supaFetch(path, { method = "GET", body, token, headers = {} } = {
 }
 
 // ── AI via secure Edge proxy. structured=true → guaranteed JSON object. ──
-async function api(system, messages, maxTokens = 4000) {
+// model: "haiku" (default, fast+cheap) | "sonnet" (creative) — proxy falls back safely.
+async function api(system, messages, maxTokens = 4000, model) {
   const res = await fetch(PROXY, {
     method: "POST",
     headers: { "Content-Type": "application/json", apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` },
-    body: JSON.stringify({ system, messages, maxTokens }),
+    body: JSON.stringify({ system, messages, maxTokens, model }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data.error) throw new Error(data.error || `Proxy ${res.status}`);
   return data.text || "";
 }
 
-async function apiJSON(system, messages, maxTokens = 4000) {
+async function apiJSON(system, messages, maxTokens = 4000, model) {
   const res = await fetch(PROXY, {
     method: "POST",
     headers: { "Content-Type": "application/json", apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` },
-    body: JSON.stringify({ system, messages, maxTokens, structured: true }),
+    body: JSON.stringify({ system, messages, maxTokens, structured: true, model }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data.error) throw new Error(data.error || `Proxy ${res.status}`);
@@ -1933,7 +1934,7 @@ function IteratePanel({ school, history, loading, onApply, onTheme, onGami, onVo
   }
 
   return (
-    <div style={{ position: "fixed", top: 0, right: 0, bottom: 0, width: 350, background: B.surface, borderLeft: `1px solid ${B.borderMid}`, zIndex: 150, display: "flex", flexDirection: "column", boxShadow: "-20px 0 60px rgba(0,0,0,0.5)" }}>
+    <div className="ol-iterate" style={{ background: B.surface, borderLeft: `1px solid ${B.borderMid}` }}>
       <div style={{ padding: "16px 18px 0", borderBottom: `1px solid ${B.border}`, background: B.surface2 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
           <div>
@@ -2119,6 +2120,8 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const [showLeads, setShowLeads] = useState(false);
   const [slugInput, setSlugInput] = useState(rec.published_slug || "");
   const [savingSlug, setSavingSlug] = useState(false);
+  const [narrow, setNarrow] = useState(() => typeof window !== "undefined" && window.innerWidth < 900);
+  useEffect(() => { const f = () => setNarrow(window.innerWidth < 900); window.addEventListener("resize", f); return () => window.removeEventListener("resize", f); }, []);
   useEffect(() => {
     if (readOnly || !rec.published || !token) return;
     (async () => { try { const rows = await supaFetch(`/rest/v1/leads?select=email,name,created_at&school_id=eq.${rec.id}&order=created_at.desc`, { token }); setLeads(rows || []); } catch { } })();
@@ -2191,7 +2194,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
       let content = null, lastErr = null;
       for (let attempt = 0; attempt < 2 && !content; attempt++) {
         try {
-          const parsed = await apiJSON(ITERATE_SYS, [{ role: "user", content: payload }], 12000);
+          const parsed = await apiJSON(ITERATE_SYS, [{ role: "user", content: payload }], 12000, "sonnet");
           if (parsed.appAction === "unlockAll") { unlockAll(); setIterateHistory(h => h.map((e, i) => i === 0 ? { ...e, status: "done" } : e)); showToast("✓ All lessons unlocked"); setIterating(false); return; }
           const c = parsed.school || parsed;
           if (!c?.name || !Array.isArray(c.semesters) || c.semesters.length === 0) throw new Error("incomplete");
@@ -2291,7 +2294,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
           onClose={() => setShowIterate(false)} advisorChat={rec.advisorChat || []} onAdvisorChat={(msgs) => onUpdate({ advisorChat: msgs })} onBuildTool={buildTool} buildingTool={buildingTool} />
       )}
 
-      <div style={{ maxWidth: 860, margin: "0 auto", padding: "0 20px 80px", transition: "margin-right 0.3s", marginRight: showIterate && !readOnly ? 360 : "auto", marginLeft: showIterate && !readOnly ? 20 : "auto" }}>
+      <div style={{ maxWidth: 860, margin: "0 auto", padding: "0 20px 80px", transition: "margin-right 0.3s", marginRight: (showIterate && !readOnly && !narrow) ? 360 : "auto", marginLeft: (showIterate && !readOnly && !narrow) ? 20 : "auto" }}>
         {!readOnly && (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 0 14px", flexWrap: "wrap", gap: 8 }}>
             <div style={{ fontSize: 12, color: B.muted }}>📁 Your Schools / <span style={{ color: B.mutedMid }}>{school.name}</span></div>
@@ -2459,7 +2462,7 @@ function Home({ onCreated }) {
 
       // PHASE 1 — compact plan (structure + block TYPES only). Always small, never truncates.
       const planMsg = `Plan a school for this concept: ${vision}${dna ? `\n\nKNOWLEDGE DNA (teach THIS):\n${dna}` : ""}`;
-      const plan = await apiJSON(ARCHITECT_SYS, [{ role: "user", content: planMsg }], 6000);
+      const plan = await apiJSON(ARCHITECT_SYS, [{ role: "user", content: planMsg }], 6000, "sonnet");
       if (plan.needMoreInfo) { setClarifyQ(plan.needMoreInfo); setClarifyA(""); setPhase("clarify"); return; }
       const content = plan.school || plan;
       if (!content?.name || !Array.isArray(content.semesters) || !content.semesters.some(s => s.lessons?.length)) throw new Error("Couldn't draft the lessons — please try again or simplify the prompt.");
@@ -2729,6 +2732,8 @@ export default function Senseito() {
   const [accountOpen, setAccountOpen] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const saveTimer = useRef(null);
+  const lsTimer = useRef(null);
+  const savedRef = useRef({}); // id -> last-saved rec reference (for single-row saves)
   const publicBase = typeof window !== "undefined" ? window.location.origin : "https://senseito.app";
 
   const active = schools.find(s => s.id === view);
@@ -2768,37 +2773,43 @@ export default function Senseito() {
           // Keep ONLY anonymous local schools (built before sign-in) and migrate them to this user.
           // Drop any leftover schools owned by a different account.
           const anon = local.filter(l => !ids.has(l.id) && !l._owner).map(l => ({ ...l, _owner: uid_ }));
+          // Mark cloud recs as already-saved so autosave doesn't re-upload them.
+          cloudRecs.forEach(c => { savedRef.current[c.id] = c; });
           return [...cloudRecs, ...anon];
         });
       } catch (e) { console.warn("Cloud load failed:", e.message); }
     })();
   }, [session]);
 
-  // debounced autosave — only persist schools owned by (or being migrated to) the current user.
+  // Debounced autosave — saves ONLY the schools whose object reference changed since
+  // the last save (setSchools keeps unchanged recs by reference), so a single edit
+  // uploads one row, not the whole library.
   useEffect(() => {
     if (!session) return;
-    const mine = schools.filter(r => !r._owner || r._owner === session.user.id);
-    if (!mine.length) return;
+    const changed = schools.filter(r => (!r._owner || r._owner === session.user.id) && savedRef.current[r.id] !== r);
+    if (!changed.length) return;
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(async () => {
       try {
         setSyncState("saving");
-        const rows = mine.map(r => ({
+        const rows = changed.map(r => ({
           id: r.id, user_id: session.user.id, data: r.data, tools: r.tools || [], tool_states: r.toolStates || {}, progress: r.progress || {}, xp: r.xp || 0,
           revision: r.revision || 0, mentor_chat: r.mentorChat || [], advisor_chat: r.advisorChat || [],
           published: !!r.published, published_slug: r.published_slug || null, updated_at: new Date().toISOString(),
         }));
         await supaFetch(`/rest/v1/schools?on_conflict=id`, { method: "POST", token: session.token, body: rows, headers: { Prefer: "resolution=merge-duplicates" } });
+        changed.forEach(r => { savedRef.current[r.id] = r; });
         setSyncState("saved");
       } catch (e) { console.warn("Cloud save failed:", e.message); setSyncState("error"); }
     }, 1500);
     return () => clearTimeout(saveTimer.current);
   }, [schools, session]);
 
-  // Always cache schools locally so progress survives reloads / browser restarts,
-  // signed in or not (cloud sync, when signed in, remains the source of truth).
+  // Debounced local cache so progress survives reloads / anonymous use without jank.
   useEffect(() => {
-    try { localStorage.setItem("senseito_schools", JSON.stringify(schools)); } catch { }
+    clearTimeout(lsTimer.current);
+    lsTimer.current = setTimeout(() => { try { localStorage.setItem("senseito_schools", JSON.stringify(schools)); } catch { } }, 700);
+    return () => clearTimeout(lsTimer.current);
   }, [schools]);
 
   function createSchool(composed) {
@@ -2853,11 +2864,16 @@ export default function Senseito() {
       <style>{`
         .ol-side{width:236px;flex-shrink:0;background:#0B0B16;border-right:1px solid rgba(255,255,255,0.07);display:flex;flex-direction:column;height:100vh;position:sticky;top:0}
         .ol-burger{display:none}
+        .ol-iterate{position:fixed;top:0;right:0;bottom:0;width:350px;max-width:100vw;z-index:150;display:flex;flex-direction:column;box-shadow:-20px 0 60px rgba(0,0,0,0.5)}
         @media(max-width:820px){
           .ol-side{position:fixed;left:0;top:0;bottom:0;z-index:300;transform:translateX(-100%);transition:transform 0.25s;height:100%}
           .ol-side.open{transform:none;box-shadow:20px 0 60px rgba(0,0,0,0.6)}
           .ol-burger{display:block}
         }
+        @media(max-width:640px){
+          .ol-iterate{width:100vw;left:0;right:0;top:auto;height:86vh;border-radius:18px 18px 0 0;box-shadow:0 -20px 60px rgba(0,0,0,0.6)}
+        }
+        [contenteditable][data-ph]:empty:before{content:attr(data-ph);color:#55556E}
       `}</style>
 
       {accountOpen && <AccountModal session={session} syncState={syncState} schoolCount={schools.length} onSignOut={() => { setSession(null); setSchools([]); setSyncState("idle"); setAccountOpen(false); }} onClose={() => setAccountOpen(false)} />}
