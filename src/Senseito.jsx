@@ -2177,6 +2177,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const school = rec.data;
   const T = THEMES[school.theme] || THEMES.violet;
   const [leads, setLeads] = useState(null);
+  const [students, setStudents] = useState(null);
   const [showLeads, setShowLeads] = useState(false);
   const [slugInput, setSlugInput] = useState(rec.published_slug || "");
   const [savingSlug, setSavingSlug] = useState(false);
@@ -2184,7 +2185,10 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   useEffect(() => { const f = () => setNarrow(window.innerWidth < 900); window.addEventListener("resize", f); return () => window.removeEventListener("resize", f); }, []);
   useEffect(() => {
     if (readOnly || !rec.published || !token) return;
-    (async () => { try { const rows = await supaFetch(`/rest/v1/leads?select=email,name,created_at&school_id=eq.${rec.id}&order=created_at.desc`, { token }); setLeads(rows || []); } catch { } })();
+    (async () => {
+      try { const rows = await supaFetch(`/rest/v1/leads?select=email,name,created_at&school_id=eq.${rec.id}&order=created_at.desc`, { token }); setLeads(rows || []); } catch { }
+      try { const rows = await supaFetch(`/rest/v1/enrollments?select=email,name,progress,xp,updated_at&school_id=eq.${rec.id}&order=updated_at.desc`, { token }); setStudents(rows || []); } catch { }
+    })();
   }, [rec.published, rec.id, token]); // eslint-disable-line
   const [tab, setTab] = useState("lessons");
   const [activeLesson, setActiveLesson] = useState(null);
@@ -2383,15 +2387,27 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
             </div>
             {/* Enrollment analytics */}
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", borderTop: `1px solid rgba(255,255,255,0.06)`, paddingTop: 10 }}>
-              <span style={{ fontSize: 13, color: B.white, fontWeight: 700 }}>📊 {leads ? leads.length : "…"} enrolled</span>
-              {leads && leads.length > 0 && <>
-                <button onClick={() => setShowLeads(s => !s)} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 7, color: B.mutedMid, padding: "4px 10px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit" }}>{showLeads ? "Hide" : "View"} students</button>
-                <button onClick={() => { navigator.clipboard?.writeText(leads.map(l => `${l.name || ""},${l.email}`).join("\n")); showToast("✓ Emails copied (CSV)"); }} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 7, color: B.mutedMid, padding: "4px 10px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit" }}>Copy emails</button>
+              <span style={{ fontSize: 13, color: B.white, fontWeight: 700 }}>📊 {leads ? leads.length : "…"} signups</span>
+              <span style={{ fontSize: 13, color: T.hi, fontWeight: 700 }}>🎓 {students ? students.length : "…"} active students</span>
+              {((leads && leads.length > 0) || (students && students.length > 0)) && <>
+                <button onClick={() => setShowLeads(s => !s)} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 7, color: B.mutedMid, padding: "4px 10px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit" }}>{showLeads ? "Hide" : "View"} details</button>
+                <button onClick={() => { const all = [...(students || []).map(s => `${s.name || ""},${s.email}`), ...(leads || []).map(l => `${l.name || ""},${l.email}`)]; navigator.clipboard?.writeText([...new Set(all)].join("\n")); showToast("✓ Emails copied (CSV)"); }} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 7, color: B.mutedMid, padding: "4px 10px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit" }}>Copy emails</button>
               </>}
             </div>
-            {showLeads && leads && (
-              <div style={{ maxHeight: 160, overflowY: "auto", display: "flex", flexDirection: "column", gap: 4 }}>
-                {leads.map((l, i) => <div key={i} style={{ fontSize: 12, color: B.mutedMid, display: "flex", justifyContent: "space-between", gap: 10 }}><span style={{ color: B.white }}>{l.name || "—"} · {l.email}</span><span>{new Date(l.created_at).toLocaleDateString()}</span></div>)}
+            {showLeads && (
+              <div style={{ maxHeight: 220, overflowY: "auto", display: "flex", flexDirection: "column", gap: 6 }}>
+                {(students || []).map((s, i) => {
+                  const passed = Object.values(s.progress || {}).filter(v => v === "passed").length;
+                  const pct = total ? Math.round((passed / total) * 100) : 0;
+                  return (
+                    <div key={`s${i}`} style={{ background: B.surface2, borderRadius: 8, padding: "8px 11px" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 12 }}><span style={{ color: B.white }}>🎓 {s.name || s.email}</span><span style={{ color: B.muted }}>{passed}/{total} · {s.xp || 0} XP</span></div>
+                      <div style={{ height: 4, background: B.surface3, borderRadius: 2, marginTop: 5, overflow: "hidden" }}><div style={{ width: `${pct}%`, height: "100%", background: T.p }} /></div>
+                    </div>
+                  );
+                })}
+                {(leads || []).map((l, i) => <div key={`l${i}`} style={{ fontSize: 12, color: B.mutedMid, display: "flex", justifyContent: "space-between", gap: 10, padding: "2px 2px" }}><span>✉️ {l.name || "—"} · {l.email}</span><span>{new Date(l.created_at).toLocaleDateString()}</span></div>)}
+                {(!students || !students.length) && (!leads || !leads.length) && <div style={{ fontSize: 12, color: B.muted }}>No enrollments yet.</div>}
               </div>
             )}
           </div>
@@ -2708,7 +2724,7 @@ function AccountModal({ session, syncState, schoolCount, onSignOut, onClose }) {
 // PUBLIC STUDENT VIEW (read-only, no account needed)
 // ─────────────────────────────────────────────────────────────
 // Lead-capture / enrollment card shown on the public landing page.
-function EnrollCard({ schoolId, mentorName, T }) {
+function EnrollCard({ schoolId, mentorName, T, onSignIn }) {
   const key = `senseito_enrolled_${schoolId}`;
   const [done, setDone] = useState(() => { try { return !!localStorage.getItem(key); } catch { return false; } });
   const [name, setName] = useState(""); const [email, setEmail] = useState(""); const [loading, setLoading] = useState(false); const [err, setErr] = useState("");
@@ -2738,6 +2754,7 @@ function EnrollCard({ schoolId, mentorName, T }) {
           <button onClick={enroll} disabled={loading} style={{ background: T.p, border: "none", borderRadius: 10, padding: "10px 20px", color: "white", fontFamily: "inherit", fontSize: 14, fontWeight: 700, cursor: "pointer", opacity: loading ? 0.6 : 1 }}>{loading ? "Enrolling…" : "Enroll →"}</button>
         </div>
         {err && <div style={{ fontSize: 12, color: "#F87171", marginTop: 8 }}>{err}</div>}
+        {onSignIn && <div style={{ fontSize: 11.5, color: B.muted, marginTop: 10 }}>Want progress saved across devices? <span onClick={onSignIn} style={{ color: T.hi, cursor: "pointer", fontWeight: 600 }}>Sign in with Google →</span></div>}
       </div>
     </div>
   );
@@ -2746,14 +2763,26 @@ function EnrollCard({ schoolId, mentorName, T }) {
 function PublicSchool({ slug }) {
   const [rec, setRec] = useState(null);
   const [status, setStatus] = useState("loading");
+  const [stud, setStud] = useState(null); // signed-in student { token, user }
   const lsKey = `senseito_progress_${slug}`;
-  // local-only progress for anonymous students — persisted in localStorage so
-  // they can leave and continue where they left off.
+  const saveT = useRef(null);
+  // Progress: localStorage for anonymous; synced to the cloud once signed in.
   const [localState, setLocalState] = useState(() => {
     try { const saved = localStorage.getItem(`senseito_progress_${slug}`); if (saved) return JSON.parse(saved); } catch { }
     return { progress: {}, xp: 0, toolStates: {}, mentorChat: [] };
   });
-  useEffect(() => { try { localStorage.setItem(lsKey, JSON.stringify(localState)); } catch { } }, [localState, lsKey]);
+  useEffect(() => { if (!stud) { try { localStorage.setItem(lsKey, JSON.stringify(localState)); } catch { } } }, [localState, lsKey, stud]);
+
+  // Capture the OAuth token from the hash (sign-in returns to this page).
+  useEffect(() => {
+    (async () => {
+      try {
+        const h = new URLSearchParams((window.location.hash || "").replace(/^#/, ""));
+        const at = h.get("access_token");
+        if (at) { const user = await supaFetch("/auth/v1/user", { token: at }); setStud({ token: at, user }); try { window.history.replaceState(null, "", window.location.pathname); } catch { } }
+      } catch { }
+    })();
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -2767,6 +2796,32 @@ function PublicSchool({ slug }) {
     })();
   }, [slug]);
 
+  // On sign-in: load this student's saved progress, or create their enrollment.
+  useEffect(() => {
+    if (!stud || !rec) return;
+    (async () => {
+      try {
+        const rows = await supaFetch(`/rest/v1/enrollments?select=progress,xp,tool_states&school_id=eq.${rec.id}&student_id=eq.${stud.user.id}&limit=1`, { token: stud.token });
+        if (rows && rows.length) {
+          const e = rows[0];
+          setLocalState(s => ({ ...s, progress: e.progress || s.progress, xp: e.xp || s.xp, toolStates: e.tool_states || s.toolStates }));
+        } else {
+          await supaFetch(`/rest/v1/enrollments?on_conflict=school_id,student_id`, { method: "POST", token: stud.token, headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: [{ school_id: rec.id, student_id: stud.user.id, email: stud.user.email, name: stud.user?.user_metadata?.full_name || null, progress: localState.progress || {}, xp: localState.xp || 0, tool_states: localState.toolStates || {}, updated_at: new Date().toISOString() }] });
+        }
+      } catch (e) { console.warn("enrollment load:", e.message); }
+    })();
+  }, [stud, rec]); // eslint-disable-line
+
+  // Debounced cloud save of the signed-in student's progress.
+  useEffect(() => {
+    if (!stud || !rec) return;
+    clearTimeout(saveT.current);
+    saveT.current = setTimeout(async () => {
+      try { await supaFetch(`/rest/v1/enrollments?on_conflict=school_id,student_id`, { method: "POST", token: stud.token, headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: [{ school_id: rec.id, student_id: stud.user.id, email: stud.user.email, name: stud.user?.user_metadata?.full_name || null, progress: localState.progress || {}, xp: localState.xp || 0, tool_states: localState.toolStates || {}, updated_at: new Date().toISOString() }] }); } catch { }
+    }, 1200);
+    return () => clearTimeout(saveT.current);
+  }, [localState, stud, rec]); // eslint-disable-line
+
   if (status === "loading") return <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: B.muted, fontFamily: "'Inter',sans-serif" }}>Loading school…</div>;
   if (status === "notfound") return (
     <div style={{ minHeight: "100vh", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14, color: B.muted, fontFamily: "'Inter',sans-serif", textAlign: "center", padding: 20 }}>
@@ -2777,15 +2832,23 @@ function PublicSchool({ slug }) {
     </div>
   );
 
+  const signIn = () => { const redirect = encodeURIComponent(window.location.href.split("#")[0]); window.location.href = `${SUPA_URL}/auth/v1/authorize?provider=google&redirect_to=${redirect}`; };
+  const T = THEMES[rec.data?.theme] || THEMES.violet;
   const merged = { ...rec, ...localState };
   return (
     <div style={{ background: B.bg, minHeight: "100vh", color: B.white, fontFamily: fontStack(rec.data) }}>
       <GlobalStyle />
-      <div style={{ borderBottom: `1px solid ${B.border}`, padding: "12px 20px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+      <div style={{ borderBottom: `1px solid ${B.border}`, padding: "12px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
         <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 16, fontWeight: 700, color: B.white }}>Sensei<span style={{ background: "linear-gradient(135deg,#7C3AED,#06B6D4)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>to</span></div>
-        <a href="/" style={{ fontSize: 12.5, color: "#A78BFA", textDecoration: "none", border: "1px solid rgba(124,58,237,0.35)", borderRadius: 8, padding: "6px 13px", fontWeight: 600 }}>Build your own →</a>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {stud ? <span style={{ fontSize: 12, color: "#6EE7B7" }}>☁️ {stud.user.email}</span>
+            : <button onClick={signIn} style={{ fontSize: 12.5, color: "#67E8F9", background: "rgba(6,182,212,0.09)", border: "1px solid rgba(6,182,212,0.3)", borderRadius: 8, padding: "6px 12px", fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>Sign in to save progress</button>}
+          <a href="/" style={{ fontSize: 12.5, color: "#A78BFA", textDecoration: "none", border: "1px solid rgba(124,58,237,0.35)", borderRadius: 8, padding: "6px 13px", fontWeight: 600 }}>Build your own →</a>
+        </div>
       </div>
-      <EnrollCard schoolId={rec.id} mentorName={rec.data?.mentor?.name} T={THEMES[rec.data?.theme] || THEMES.violet} />
+      {stud
+        ? <div style={{ maxWidth: 860, margin: "16px auto 0", padding: "0 20px" }}><div style={{ background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.3)", borderRadius: 14, padding: "12px 18px", fontSize: 13, color: "#6EE7B7", fontWeight: 600 }}>✓ Enrolled as {stud.user.email} — your progress saves automatically across devices.</div></div>
+        : <EnrollCard schoolId={rec.id} mentorName={rec.data?.mentor?.name} T={T} onSignIn={signIn} />}
       <SchoolPage rec={merged} readOnly onUpdate={(patch) => setLocalState(s => ({ ...s, ...patch }))} />
     </div>
   );
