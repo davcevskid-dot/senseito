@@ -2025,9 +2025,17 @@ function IteratePanel({ school, history, loading, onApply, onTheme, onGami, onVo
 // ─────────────────────────────────────────────────────────────
 // SCHOOL PAGE (creator + student)
 // ─────────────────────────────────────────────────────────────
-function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, publicBase }) {
+function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, publicBase, token, onSetSlug }) {
   const school = rec.data;
   const T = THEMES[school.theme] || THEMES.violet;
+  const [leads, setLeads] = useState(null);
+  const [showLeads, setShowLeads] = useState(false);
+  const [slugInput, setSlugInput] = useState(rec.published_slug || "");
+  const [savingSlug, setSavingSlug] = useState(false);
+  useEffect(() => {
+    if (readOnly || !rec.published || !token) return;
+    (async () => { try { const rows = await supaFetch(`/rest/v1/leads?select=email,name,created_at&school_id=eq.${rec.id}&order=created_at.desc`, { token }); setLeads(rows || []); } catch { } })();
+  }, [rec.published, rec.id, token]); // eslint-disable-line
   const [tab, setTab] = useState("lessons");
   const [activeLesson, setActiveLesson] = useState(null);
   const [editingLesson, setEditingLesson] = useState(null);
@@ -2200,9 +2208,30 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
         )}
 
         {rec.published && !readOnly && (
-          <div style={{ marginBottom: 14, background: "rgba(5,150,105,0.07)", border: "1px solid rgba(5,150,105,0.25)", borderRadius: 12, padding: "11px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-            <div style={{ fontSize: 12.5, color: "#6EE7B7" }}>🌐 Public link: <span style={{ color: B.white }}>{publicBase}/s/{rec.published_slug}</span></div>
-            <button onClick={() => { navigator.clipboard?.writeText(`${publicBase}/s/${rec.published_slug}`); showToast("✓ Link copied to clipboard"); }} style={{ background: "rgba(5,150,105,0.15)", border: "1px solid rgba(5,150,105,0.35)", borderRadius: 7, color: "#6EE7B7", padding: "5px 11px", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit" }}>Copy</button>
+          <div style={{ marginBottom: 14, background: "rgba(5,150,105,0.07)", border: "1px solid rgba(5,150,105,0.25)", borderRadius: 12, padding: "13px 16px", display: "flex", flexDirection: "column", gap: 11 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+              <div style={{ fontSize: 12.5, color: "#6EE7B7" }}>🌐 Public link: <span style={{ color: B.white }}>{publicBase}/s/{rec.published_slug}</span></div>
+              <button onClick={() => { navigator.clipboard?.writeText(`${publicBase}/s/${rec.published_slug}`); showToast("✓ Link copied to clipboard"); }} style={{ background: "rgba(5,150,105,0.15)", border: "1px solid rgba(5,150,105,0.35)", borderRadius: 7, color: "#6EE7B7", padding: "5px 11px", cursor: "pointer", fontSize: 12, fontWeight: 600, fontFamily: "inherit" }}>Copy</button>
+            </div>
+            {/* Custom URL */}
+            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 12, color: B.muted }}>Custom URL: {publicBase}/s/</span>
+              <input value={slugInput} onChange={e => setSlugInput(e.target.value)} placeholder="my-school" style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.white, fontFamily: "inherit", fontSize: 12, padding: "5px 9px", width: 160 }} />
+              <button disabled={savingSlug || !slugInput.trim()} onClick={async () => { setSavingSlug(true); const r = await onSetSlug(rec, slugInput); setSavingSlug(false); showToast(r.ok ? "✓ Custom URL claimed" : `✕ ${r.msg}`, r.ok ? "ok" : "err"); }} style={{ background: T.p, border: "none", borderRadius: 8, color: "white", padding: "5px 12px", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit", opacity: savingSlug ? 0.6 : 1 }}>{savingSlug ? "Checking…" : "Claim"}</button>
+            </div>
+            {/* Enrollment analytics */}
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", borderTop: `1px solid rgba(255,255,255,0.06)`, paddingTop: 10 }}>
+              <span style={{ fontSize: 13, color: B.white, fontWeight: 700 }}>📊 {leads ? leads.length : "…"} enrolled</span>
+              {leads && leads.length > 0 && <>
+                <button onClick={() => setShowLeads(s => !s)} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 7, color: B.mutedMid, padding: "4px 10px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit" }}>{showLeads ? "Hide" : "View"} students</button>
+                <button onClick={() => { navigator.clipboard?.writeText(leads.map(l => `${l.name || ""},${l.email}`).join("\n")); showToast("✓ Emails copied (CSV)"); }} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 7, color: B.mutedMid, padding: "4px 10px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit" }}>Copy emails</button>
+              </>}
+            </div>
+            {showLeads && leads && (
+              <div style={{ maxHeight: 160, overflowY: "auto", display: "flex", flexDirection: "column", gap: 4 }}>
+                {leads.map((l, i) => <div key={i} style={{ fontSize: 12, color: B.mutedMid, display: "flex", justifyContent: "space-between", gap: 10 }}><span style={{ color: B.white }}>{l.name || "—"} · {l.email}</span><span>{new Date(l.created_at).toLocaleDateString()}</span></div>)}
+              </div>
+            )}
           </div>
         )}
 
@@ -2489,6 +2518,42 @@ function AccountModal({ session, syncState, schoolCount, onSignOut, onClose }) {
 // ─────────────────────────────────────────────────────────────
 // PUBLIC STUDENT VIEW (read-only, no account needed)
 // ─────────────────────────────────────────────────────────────
+// Lead-capture / enrollment card shown on the public landing page.
+function EnrollCard({ schoolId, mentorName, T }) {
+  const key = `senseito_enrolled_${schoolId}`;
+  const [done, setDone] = useState(() => { try { return !!localStorage.getItem(key); } catch { return false; } });
+  const [name, setName] = useState(""); const [email, setEmail] = useState(""); const [loading, setLoading] = useState(false); const [err, setErr] = useState("");
+  async function enroll() {
+    if (!/.+@.+\..+/.test(email)) { setErr("Enter a valid email."); return; }
+    setLoading(true); setErr("");
+    try {
+      await supaFetch(`/rest/v1/leads`, { method: "POST", body: [{ school_id: schoolId, email: email.trim(), name: name.trim() || null }], headers: { Prefer: "return=minimal" } });
+      try { localStorage.setItem(key, "1"); } catch { }
+      setDone(true);
+    } catch { setErr("Couldn't enroll — please try again."); }
+    setLoading(false);
+  }
+  if (done) return (
+    <div style={{ maxWidth: 860, margin: "16px auto 0", padding: "0 20px" }}>
+      <div style={{ background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.3)", borderRadius: 14, padding: "14px 18px", fontSize: 13.5, color: "#6EE7B7", fontWeight: 600 }}>✓ You're enrolled — start your first lesson below.</div>
+    </div>
+  );
+  return (
+    <div style={{ maxWidth: 860, margin: "16px auto 0", padding: "0 20px" }}>
+      <div style={{ background: T.gr, border: `1px solid ${T.ba}`, borderRadius: 16, padding: "18px 20px" }}>
+        <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 16, fontWeight: 700, color: B.white, marginBottom: 4 }}>Enroll for free</div>
+        <div style={{ fontSize: 12.5, color: B.mutedMid, marginBottom: 12 }}>Join and {mentorName || "your mentor"} will guide you through. We'll email you your access.</div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <input value={name} onChange={e => setName(e.target.value)} placeholder="Name (optional)" style={{ flex: "1 1 140px", background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 10, color: B.white, fontFamily: "inherit", fontSize: 13, padding: "10px 12px" }} />
+          <input value={email} onChange={e => setEmail(e.target.value)} onKeyDown={e => { if (e.key === "Enter") enroll(); }} placeholder="you@email.com" style={{ flex: "2 1 200px", background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 10, color: B.white, fontFamily: "inherit", fontSize: 13, padding: "10px 12px" }} />
+          <button onClick={enroll} disabled={loading} style={{ background: T.p, border: "none", borderRadius: 10, padding: "10px 20px", color: "white", fontFamily: "inherit", fontSize: 14, fontWeight: 700, cursor: "pointer", opacity: loading ? 0.6 : 1 }}>{loading ? "Enrolling…" : "Enroll →"}</button>
+        </div>
+        {err && <div style={{ fontSize: 12, color: "#F87171", marginTop: 8 }}>{err}</div>}
+      </div>
+    </div>
+  );
+}
+
 function PublicSchool({ slug }) {
   const [rec, setRec] = useState(null);
   const [status, setStatus] = useState("loading");
@@ -2531,6 +2596,7 @@ function PublicSchool({ slug }) {
         <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 16, fontWeight: 700, color: B.white }}>Sensei<span style={{ background: "linear-gradient(135deg,#7C3AED,#06B6D4)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>to</span></div>
         <a href="/" style={{ fontSize: 12.5, color: "#A78BFA", textDecoration: "none", border: "1px solid rgba(124,58,237,0.35)", borderRadius: 8, padding: "6px 13px", fontWeight: 600 }}>Build your own →</a>
       </div>
+      <EnrollCard schoolId={rec.id} mentorName={rec.data?.mentor?.name} T={THEMES[rec.data?.theme] || THEMES.violet} />
       <SchoolPage rec={merged} readOnly onUpdate={(patch) => setLocalState(s => ({ ...s, ...patch }))} />
     </div>
   );
@@ -2661,6 +2727,19 @@ export default function Senseito() {
     setPublishing(false);
   }
 
+  // Claim a custom public URL (slug), checking availability first.
+  async function setCustomSlug(rec, raw) {
+    const slug = slugify(raw || "");
+    if (!slug) return { ok: false, msg: "Enter a valid URL (letters, numbers, dashes)." };
+    if (slug === rec.published_slug) return { ok: true };
+    try {
+      const rows = await supaFetch(`/rest/v1/schools?select=id&published_slug=eq.${encodeURIComponent(slug)}`, { token: session?.token });
+      if (rows && rows.length && rows[0].id !== rec.id) return { ok: false, msg: "That URL is already taken." };
+      updateSchool(rec.id, { published: true, published_slug: slug }); // autosave persists it
+      return { ok: true };
+    } catch (e) { return { ok: false, msg: e.message }; }
+  }
+
   return (
     <div style={{ background: B.bg, minHeight: "100vh", fontFamily: "'Inter',-apple-system,sans-serif", color: B.white, display: "flex" }}>
       <GlobalStyle />
@@ -2730,7 +2809,7 @@ export default function Senseito() {
         <div style={{ position: "relative", zIndex: 1 }}>
           {view === "home" || !active
             ? <Home onCreated={createSchool} />
-            : <SchoolPage key={active.id} rec={active} onUpdate={(patch) => updateSchool(active.id, patch)} onPublish={publishSchool} publishing={publishing} publicBase={publicBase} />}
+            : <SchoolPage key={active.id} rec={active} onUpdate={(patch) => updateSchool(active.id, patch)} onPublish={publishSchool} publishing={publishing} publicBase={publicBase} token={session?.token} onSetSlug={setCustomSlug} />}
         </div>
       </div>
     </div>
