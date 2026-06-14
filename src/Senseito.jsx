@@ -53,6 +53,22 @@ function toApiMessages(msgs) {
   return m;
 }
 
+// Extract plain text from an attached file (PDF via pdf.js CDN, or text/markdown).
+async function extractFileText(file) {
+  const name = (file.name || "").toLowerCase();
+  if (name.endsWith(".pdf") || file.type === "application/pdf") {
+    const pdfjs = await import(/* @vite-ignore */ "https://esm.sh/pdfjs-dist@4.7.76/build/pdf.min.mjs");
+    pdfjs.GlobalWorkerOptions.workerSrc = "https://esm.sh/pdfjs-dist@4.7.76/build/pdf.worker.min.mjs";
+    const buf = await file.arrayBuffer();
+    const doc = await pdfjs.getDocument({ data: buf }).promise;
+    const max = Math.min(doc.numPages, 80); let text = "";
+    for (let p = 1; p <= max; p++) { const page = await doc.getPage(p); const c = await page.getTextContent(); text += c.items.map(i => i.str).join(" ") + "\n"; }
+    return text;
+  }
+  if (name.endsWith(".txt") || name.endsWith(".md") || name.endsWith(".markdown") || (file.type || "").startsWith("text/")) return await file.text();
+  throw new Error("Unsupported file type — use PDF, TXT or MD (for .doc/.docx, paste the text).");
+}
+
 function uid() { return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4); }
 function slugify(s = "") { return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40); }
 
@@ -2292,25 +2308,57 @@ function Home({ onCreated }) {
   const [clarifyQ, setClarifyQ] = useState("");
   const [clarifyA, setClarifyA] = useState("");
   const [error, setError] = useState("");
+  const [attached, setAttached] = useState(null);   // { name, text }
+  const [attaching, setAttaching] = useState(false);
+  const [questions, setQuestions] = useState([]);    // proactive follow-ups
+  const [answers, setAnswers] = useState({});
   const taRef = useRef(null);
   const stepIdx = useTicker(phase === "building", BUILD_STEPS.length, 950);
 
-  async function build(extraContext = "") {
-    const full = `${prompt}\n${extraContext}`.trim();
-    if (!full) { taRef.current?.focus(); return; }
-    if (YT_RE.test(full) && full.length < DNA_THRESHOLD && !extraContext) {
-      setClarifyQ("I found a YouTube link, but I can't watch videos directly yet. Open the video → tap ⋯ → \"Show transcript\" → copy it and paste it below. I'll build the entire school from what's taught in the video.");
-      setClarifyA(""); setPhase("clarify"); return;
-    }
+  async function onFile(e) {
+    const f = e.target.files?.[0]; if (!f) return;
+    setAttaching(true); setError("");
+    try { const text = await extractFileText(f); if (!text.trim()) throw new Error("Couldn't read any text from that file."); setAttached({ name: f.name, text }); }
+    catch (err) { setError(err.message || "Couldn't read that file."); setPhase("error"); }
+    setAttaching(false); e.target.value = "";
+  }
+
+  async function runBuild(source) {
     setPhase("building"); setError("");
     try {
-      let vision = full; let dna = null;
-      if (full.length > DNA_THRESHOLD) { dna = await api(DISTILL_SYS, [{ role: "user", content: full.slice(0, 30000) }], 1200); vision = prompt.slice(0, 600); }
-      const userMsg = `Build a school for this concept: ${vision}${dna ? `\n\nKNOWLEDGE DNA (distilled from the creator's pasted material — teach THIS):\n${dna}` : ""}`;
+      let vision = source; let dna = null;
+      if (source.length > DNA_THRESHOLD) { dna = await api(DISTILL_SYS, [{ role: "user", content: source.slice(0, 30000) }], 1200); vision = (prompt || source).slice(0, 600); }
+      const userMsg = `Build a school for this concept: ${vision}${dna ? `\n\nKNOWLEDGE DNA (distilled from the creator's source material — teach THIS):\n${dna}` : ""}`;
       const parsed = await apiJSON(ARCHITECT_SYS, [{ role: "user", content: userMsg }], 8000);
       if (parsed.needMoreInfo) { setClarifyQ(parsed.needMoreInfo); setClarifyA(""); setPhase("clarify"); return; }
       onCreated(composeSchool(parsed.school || parsed, dna));
     } catch (e) { setError(e.message || "Build failed — try again."); setPhase("error"); }
+  }
+
+  function sourceText(extra = "") {
+    return [prompt.trim(), attached?.text, extra].filter(Boolean).join("\n\n").trim();
+  }
+
+  async function build() {
+    const base = sourceText();
+    if (!base) { taRef.current?.focus(); return; }
+    if (YT_RE.test(base) && base.length < DNA_THRESHOLD && !attached) {
+      setClarifyQ("I found a YouTube link, but I can't watch videos directly yet. Open the video → tap ⋯ → \"Show transcript\" → copy it and paste it below. I'll build the entire school from what's taught in the video.");
+      setClarifyA(""); setPhase("clarify"); return;
+    }
+    // #12 — proactive follow-up questions to tailor the school (max 2).
+    setPhase("thinking");
+    try {
+      const out = await apiJSON(`You refine a request for an online school. Ask AT MOST 2 short, high-leverage questions whose answers would most improve the result (e.g. audience level, length, tone/mentor style, the specific outcome). If the request is already detailed, return fewer or an empty list. Return ONLY JSON: {"questions":["...","..."]}.`, [{ role: "user", content: base.slice(0, 2500) }], 300);
+      const qs = (out.questions || []).filter(q => typeof q === "string" && q.trim()).slice(0, 2);
+      if (qs.length) { setQuestions(qs); setAnswers({}); setPhase("refine"); return; }
+    } catch { /* if this fails, just build */ }
+    runBuild(base);
+  }
+
+  function buildWithAnswers() {
+    const qa = questions.map((q, i) => answers[i]?.trim() ? `${q}\nAnswer: ${answers[i].trim()}` : "").filter(Boolean).join("\n\n");
+    runBuild(sourceText(qa));
   }
 
   return (
@@ -2333,11 +2381,41 @@ function Home({ onCreated }) {
           <textarea ref={taRef} value={prompt} onChange={e => setPrompt(e.target.value)} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)} onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") build(); }}
             placeholder='Describe your school… e.g. "A 10-week Stoic school taught by Marcus Aurelius. He will not let me advance until I prove the lesson stuck." — or paste a book chapter / YouTube transcript and say "teach me this".'
             rows={3} style={{ background: "transparent", border: "none", color: B.white, fontFamily: "inherit", fontSize: 15, lineHeight: 1.65, resize: "none", width: "100%" }} />
+          {attached && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, background: "rgba(6,182,212,0.08)", border: "1px solid rgba(6,182,212,0.3)", borderRadius: 10, padding: "8px 12px" }}>
+              <span style={{ fontSize: 13, color: "#67E8F9" }}>📎 {attached.name}</span>
+              <span style={{ fontSize: 11, color: B.muted }}>({Math.round(attached.text.length / 1000)}k chars — will be taught)</span>
+              <button onClick={() => setAttached(null)} style={{ marginLeft: "auto", background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 13 }}>✕</button>
+            </div>
+          )}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginTop: 10, paddingTop: 10, borderTop: `1px solid ${B.border}` }}>
-            <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
               {CHIPS.map(c => <button key={c.key} onClick={() => setPrompt(CHIP_PROMPTS[c.key])} style={{ background: "rgba(124,58,237,0.09)", border: "1px solid rgba(124,58,237,0.28)", borderRadius: 100, padding: "3px 10px", fontSize: 11, color: "#F0ABFC", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>{c.label}</button>)}
+              <label style={{ background: "rgba(6,182,212,0.09)", border: "1px solid rgba(6,182,212,0.3)", borderRadius: 100, padding: "3px 10px", fontSize: 11, color: "#67E8F9", cursor: "pointer", whiteSpace: "nowrap" }}>{attaching ? "Reading…" : "📎 Attach PDF/book"}<input type="file" accept=".pdf,.txt,.md,.markdown,text/*,application/pdf" onChange={onFile} style={{ display: "none" }} /></label>
             </div>
             <button onClick={() => build()} style={{ background: "linear-gradient(135deg,#7C3AED,#6D28D9)", border: "none", borderRadius: 10, padding: "10px 20px", color: "white", fontFamily: "inherit", fontSize: 14, fontWeight: 700, cursor: "pointer", boxShadow: "0 0 20px rgba(124,58,237,0.35)", whiteSpace: "nowrap" }}>⚡ Build School</button>
+          </div>
+        </div>
+      )}
+      {phase === "thinking" && (
+        <div style={{ marginTop: 28, textAlign: "center", padding: "40px 20px", background: B.surface, border: `1px solid ${B.border}`, borderRadius: 16 }}>
+          <div style={{ width: 28, height: 28, margin: "0 auto 14px", borderRadius: "50%", border: "3px solid rgba(124,58,237,0.18)", borderTopColor: "#7C3AED", animation: "spin 0.9s linear infinite" }} />
+          <div style={{ fontSize: 14, color: B.mutedMid }}>Reading your idea & preparing one or two quick questions…</div>
+        </div>
+      )}
+      {phase === "refine" && (
+        <div style={{ marginTop: 28, background: B.surface, border: "1px solid rgba(124,58,237,0.35)", borderRadius: 16, padding: 24, animation: "fadeUp 0.4s ease" }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#A78BFA", marginBottom: 4, textTransform: "uppercase", letterSpacing: 1 }}>A couple of quick questions</div>
+          <div style={{ fontSize: 13, color: B.muted, marginBottom: 16 }}>Answer what you like — or skip and I'll use sensible defaults.</div>
+          {questions.map((q, i) => (
+            <div key={i} style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 14, color: B.white, marginBottom: 6, lineHeight: 1.5 }}>{q}</div>
+              <input value={answers[i] || ""} onChange={e => setAnswers(a => ({ ...a, [i]: e.target.value }))} placeholder="Your answer (optional)…" style={{ width: "100%", background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 10, color: B.white, fontFamily: "inherit", fontSize: 13, padding: "10px 12px" }} />
+            </div>
+          ))}
+          <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 6 }}>
+            <button onClick={() => runBuild(sourceText())} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 10, color: B.mutedMid, padding: "10px 18px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>Skip & build</button>
+            <button onClick={buildWithAnswers} style={{ background: "linear-gradient(135deg,#7C3AED,#6D28D9)", border: "none", borderRadius: 10, padding: "10px 22px", color: "white", fontFamily: "inherit", fontSize: 14, fontWeight: 700, cursor: "pointer" }}>⚡ Build with this</button>
           </div>
         </div>
       )}
@@ -2353,7 +2431,7 @@ function Home({ onCreated }) {
           <textarea value={clarifyA} onChange={e => setClarifyA(e.target.value)} rows={6} placeholder="Paste or answer here…" style={{ width: "100%", background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 12, color: B.white, fontFamily: "inherit", fontSize: 13, lineHeight: 1.6, padding: "12px 14px", resize: "vertical", marginBottom: 12 }} />
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
             <button onClick={() => setPhase("idle")} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 10, color: B.mutedMid, padding: "10px 18px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>← Back</button>
-            <button onClick={() => build(clarifyA)} disabled={!clarifyA.trim()} style={{ background: clarifyA.trim() ? "linear-gradient(135deg,#7C3AED,#6D28D9)" : "rgba(124,58,237,0.3)", border: "none", borderRadius: 10, padding: "10px 22px", color: "white", fontFamily: "inherit", fontSize: 14, fontWeight: 700, cursor: clarifyA.trim() ? "pointer" : "not-allowed" }}>⚡ Continue Building</button>
+            <button onClick={() => runBuild(sourceText(clarifyA))} disabled={!clarifyA.trim()} style={{ background: clarifyA.trim() ? "linear-gradient(135deg,#7C3AED,#6D28D9)" : "rgba(124,58,237,0.3)", border: "none", borderRadius: 10, padding: "10px 22px", color: "white", fontFamily: "inherit", fontSize: 14, fontWeight: 700, cursor: clarifyA.trim() ? "pointer" : "not-allowed" }}>⚡ Continue Building</button>
           </div>
         </div>
       )}
