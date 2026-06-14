@@ -103,6 +103,16 @@ const GLOBAL_CSS = `
 `;
 function GlobalStyle() { return <style>{GLOBAL_CSS}</style>; }
 
+// Inline-editable text for creators (click to edit, Enter/blur to save).
+function EditableText({ value, onSave, readOnly, style, placeholder }) {
+  if (readOnly) return <span style={style}>{value}</span>;
+  return <span contentEditable suppressContentEditableWarning data-ph={placeholder || ""}
+    title="Click to edit"
+    style={{ ...style, outline: "none", cursor: "text", borderBottom: "1px dashed rgba(255,255,255,0.18)" }}
+    onBlur={e => { const t = e.currentTarget.textContent.trim(); if (t && t !== value) onSave(t); else e.currentTarget.textContent = value; }}
+    onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); } }}>{value}</span>;
+}
+
 const TM = {
   Dialogue: { c: "#A78BFA", bg: "rgba(167,139,250,0.1)", icon: "💬" },
   RolePlay: { c: "#22D3EE", bg: "rgba(34,211,238,0.1)", icon: "🎭" },
@@ -203,7 +213,7 @@ const BLOCK_SCHEMA_GUIDE = `BLOCK DATA SHAPES (each lesson block is { type, data
 - terminal: { scenario, expected:[ordered shell commands] }
 - sequencer: { prompt, items:[steps IN CORRECT ORDER] (4-7) }
 - journal: { prompts:[2-4 deep prompts], minWords }
-- branching_scenario: { start:"n1", nodes:{ n1:{text, choices:[{label,next}]}, ... , end nodes:{text, outcome:"pass"|"fail"} } }
+- branching_scenario: { start:"n1", nodes:{ n1:{text, choices:[{label,next}]}, ... , end nodes:{text, outcome:"pass"|"fail"} } } — MUST be at least 3 decision nodes deep before ANY outcome node (no instant endings); give 2-3 choices per node
 - voice_journal: { prompt, minWords }
 - reflection_timer: { seconds, prompts:[2-4 short cues] }
 - macro_tracker: { goals:{calories,protein,carbs,fat} }
@@ -221,7 +231,7 @@ const BLOCK_SCHEMA_GUIDE = `BLOCK DATA SHAPES (each lesson block is { type, data
 - reading_plain: { content (markdown) }
 - video_embed: { url, title }
 - quiz: { questions:[{q, options:[4], answer (0-3), explain}] (3-6) }
-- calculator: { title, fields:[{label,key}], expression (JS using keys, e.g. "weight/(height*height)"), unit }`;
+- calculator: numeric → { title, fields:[{label,key}], expression (JS using keys, e.g. "weight/(height*height)"), unit }; OR AI/text → { title, mode:"ai", fields:[{label,key,type:"text"}], rubric (what to compute, e.g. "count the verbs in the sentence") } — use AI mode whenever the answer needs language/judgement, not just arithmetic`;
 
 // ─────────────────────────────────────────────────────────────
 // LEARNING PATH RULES (33 paths) — what is being learned drives
@@ -277,6 +287,11 @@ function classifyPath(text = "") {
 function allowedBlocksFor(path) {
   const rule = LEARNING_PATH_RULES[path] || LEARNING_PATH_RULES.mixed;
   return rule.allowedBlocks === "all" ? ALL_BLOCKS : rule.allowedBlocks;
+}
+function pathLabel(k) {
+  if (!k) return "Mixed";
+  const map = { mixed: "Mixed (any blocks)", problem_solving: "Problem Solving", case_study: "Case Study", mental_game: "Mental Game" };
+  return map[k] || k[0].toUpperCase() + k.slice(1);
 }
 
 // Serialized, compact path guide injected into the architect prompt.
@@ -508,13 +523,23 @@ function LessonView({ school, lesson, T, onClose, onPass }) {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [chatPassed, setChatPassed] = useState(false);
+  const [manualDone, setManualDone] = useState(false);
   const [missionShown, setMissionShown] = useState(false);
   const bottomRef = useRef(null);
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs]);
 
-  // The LAST block determines whether the activities are passed.
-  const blocksPassed = blocks.length > 0 && outputs[blocks.length - 1]?.passed === true;
-  const passed = chatPassed || blocksPassed;
+  // Pass logic chosen by the creator (defaults to "last activity / mentor").
+  const pl = lesson.passLogic || {};
+  const passedBlocks = blocks.filter((_, i) => outputs[i]?.passed).length;
+  const lastBlockPassed = blocks.length > 0 && outputs[blocks.length - 1]?.passed === true;
+  let activitiesPass;
+  if (pl.mode === "threshold") activitiesPass = blocks.length > 0 && (passedBlocks / blocks.length) * 100 >= (pl.threshold ?? 70);
+  else if (pl.mode === "lastblock") activitiesPass = lastBlockPassed;
+  else if (pl.mode === "proof") activitiesPass = blocks.some((b, i) => (b.type === "image_gate" || b.type === "video_gate") && outputs[i]?.passed);
+  else activitiesPass = lastBlockPassed; // default
+  const passed = pl.mode === "mentor" ? chatPassed
+    : pl.mode === "manual" ? manualDone
+      : (chatPassed || activitiesPass || manualDone);
 
   // Record the pass the moment it happens (unlocks the next lesson + saves progress),
   // so the student advances even if they close with ✕ instead of clicking Complete.
@@ -573,10 +598,12 @@ function LessonView({ school, lesson, T, onClose, onPass }) {
         {tab === "activities" && (
           <div style={{ flex: 1, overflowY: "auto", padding: "18px 22px", display: "flex", flexDirection: "column", gap: 14 }}>
             <div style={{ fontSize: 13, color: B.mutedMid, lineHeight: 1.6 }}>{lesson.concept}</div>
+            {pl.mode && pl.mode !== "default" && <div style={{ fontSize: 11.5, color: T.a, background: T.as_, border: `1px solid ${T.ba}`, borderRadius: 8, padding: "7px 11px" }}>To pass: {(PASS_MODES.find(m => m[0] === pl.mode) || [])[1]}{pl.mode === "threshold" ? ` (${pl.threshold ?? 70}%)` : ""}.</div>}
             {blocks.map((blk, i) => (
               <BlockRenderer key={i} block={blk} T={T} school={school} onOutput={(o) => setOutputs(s => ({ ...s, [i]: o }))} />
             ))}
-            {blocksPassed && <div style={{ textAlign: "center", padding: "12px 14px", background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.25)", borderRadius: 10, fontSize: 13, color: "#4ADE80", fontWeight: 600 }}>✅ Activities complete — hit "Complete →" above, or talk it through with your mentor.</div>}
+            {pl.mode === "manual" && !manualDone && <button onClick={() => setManualDone(true)} style={{ ...pBtn(T), alignSelf: "center" }}>✓ Mark lesson complete</button>}
+            {passed && <div style={{ textAlign: "center", padding: "12px 14px", background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.25)", borderRadius: 10, fontSize: 13, color: "#4ADE80", fontWeight: 600 }}>✅ Lesson complete — hit "Complete →" above, or talk it through with your mentor.</div>}
           </div>
         )}
 
@@ -588,7 +615,7 @@ function LessonView({ school, lesson, T, onClose, onPass }) {
               return (
                 <div key={i} style={{ display: "flex", justifyContent: isU ? "flex-end" : "flex-start" }}>
                   {!isU && <div style={{ width: 28, height: 28, borderRadius: "50%", background: T.ps, border: `1px solid ${T.ba}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, flexShrink: 0, marginRight: 10, marginTop: 2 }}>🎓</div>}
-                  <div style={{ maxWidth: "76%", background: isU ? T.ps : B.surface2, border: `1px solid ${isU ? T.ba : B.border}`, borderRadius: isU ? "16px 4px 16px 16px" : "4px 16px 16px 16px", padding: "11px 15px", fontSize: 14, lineHeight: 1.65, color: B.white, whiteSpace: "pre-wrap" }}>{m.content}</div>
+                  <div style={{ maxWidth: "76%", background: isU ? T.ps : B.surface2, border: `1px solid ${isU ? T.ba : B.border}`, borderRadius: isU ? "16px 4px 16px 16px" : "4px 16px 16px 16px", padding: "11px 15px", fontSize: 14, lineHeight: 1.65, color: B.white, whiteSpace: isU ? "pre-wrap" : "normal" }}>{isU ? m.content : <Markdown text={m.content} />}</div>
                 </div>
               );
             })}
@@ -656,7 +683,7 @@ function MentorOffice({ school, T, chat, onChat }) {
             return (
               <div key={i} style={{ display: "flex", justifyContent: isU ? "flex-end" : "flex-start" }}>
                 {!isU && <div style={{ width: 28, height: 28, borderRadius: "50%", background: T.ps, border: `1px solid ${T.ba}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, flexShrink: 0, marginRight: 10, marginTop: 2 }}>🎓</div>}
-                <div style={{ maxWidth: "76%", background: isU ? T.ps : B.surface2, border: `1px solid ${isU ? T.ba : B.border}`, borderRadius: isU ? "16px 4px 16px 16px" : "4px 16px 16px 16px", padding: "11px 15px", fontSize: 14, lineHeight: 1.65, color: B.white, whiteSpace: "pre-wrap" }}>{m.content}</div>
+                <div style={{ maxWidth: "76%", background: isU ? T.ps : B.surface2, border: `1px solid ${isU ? T.ba : B.border}`, borderRadius: isU ? "16px 4px 16px 16px" : "4px 16px 16px 16px", padding: "11px 15px", fontSize: 14, lineHeight: 1.65, color: B.white, whiteSpace: isU ? "pre-wrap" : "normal" }}>{isU ? m.content : <Markdown text={m.content} />}</div>
               </div>
             );
           })}
@@ -702,9 +729,15 @@ function useBlockState(initial, state, onState) {
 // Tiny markdown → HTML (our own AI-generated content only).
 function mdLite(t = "") {
   let h = String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-  h = h.replace(/^###\s?(.+)$/gm, "<h4>$1</h4>").replace(/^##\s?(.+)$/gm, "<h3>$1</h3>").replace(/^#\s?(.+)$/gm, "<h2>$1</h2>");
-  h = h.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>").replace(/`([^`]+)`/g, "<code>$1</code>");
-  h = h.replace(/^[-*]\s+(.+)$/gm, "<li>$1</li>").replace(/(<li>[\s\S]*?<\/li>)/g, "<ul style='margin:6px 0 6px 18px'>$1</ul>");
+  h = h.replace(/^###\s?(.+)$/gm, "<div style='font-size:14px;font-weight:700;margin:7px 0 3px'>$1</div>")
+       .replace(/^##\s?(.+)$/gm, "<div style='font-size:15px;font-weight:700;margin:8px 0 4px'>$1</div>")
+       .replace(/^#\s?(.+)$/gm, "<div style='font-size:16px;font-weight:700;margin:9px 0 4px'>$1</div>");
+  h = h.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+       .replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>")
+       .replace(/`([^`]+)`/g, "<code style='background:rgba(255,255,255,0.08);padding:1px 5px;border-radius:4px;font-size:0.92em'>$1</code>");
+  // numbered + bulleted lists
+  h = h.replace(/^\s*\d+\.\s+(.+)$/gm, "<li>$1</li>").replace(/^\s*[-*]\s+(.+)$/gm, "<li>$1</li>");
+  h = h.replace(/(<li>[\s\S]*?<\/li>)(?!\s*<li>)/g, "<ul style='margin:6px 0 6px 20px;display:flex;flex-direction:column;gap:3px'>$1</ul>");
   return h.replace(/\n{2,}/g, "<br/><br/>").replace(/\n/g, "<br/>");
 }
 function Markdown({ text }) { return <div style={{ fontSize: 13.5, lineHeight: 1.7, color: B.white }} dangerouslySetInnerHTML={{ __html: mdLite(text) }} />; }
@@ -715,7 +748,7 @@ function blockMentor(school) { return school?.mentor ? `Speak as ${school.mentor
 async function scoreTranscript(transcript, criteria, minUser = 2) {
   if (transcript.filter(m => m.role === "user").length < minUser) return null;
   const ser = transcript.map(m => `${m.role === "user" ? "STUDENT" : "OTHER"}: ${m.content}`).join("\n\n");
-  const out = await api(`You are a strict, fair examiner. Decide if the STUDENT met this criteria: "${criteria}". Concrete evidence in the student's words only. Reply EXACTLY:\nSCORE: <0-10>\nVERDICT: PASS or NOTYET\nREASON: one sentence`, [{ role: "user", content: ser }], 90);
+  const out = await api(`You are a strict, fair examiner. Decide if the STUDENT met this criteria: "${criteria}". Concrete evidence in the student's words only. Reply EXACTLY:\nSCORE: <0-10>\nVERDICT: PASS or NOTYET\nREASON: one sentence`, [{ role: "user", content: ser }], 160);
   return { score: parseFloat(out.match(/SCORE:\s*([\d.]+)/i)?.[1] || "0"), passed: /VERDICT:\s*PASS/i.test(out), reason: (out.match(/REASON:\s*([\s\S]*)/i)?.[1] || "").trim() };
 }
 
@@ -736,7 +769,7 @@ function BlockShell({ type, sub, passed, children, foot }) {
 function ChatBubble({ m, T }) {
   if (m.role === "system") return <div style={{ textAlign: "center", padding: "8px 12px", background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.25)", borderRadius: 10, fontSize: 12, color: "#4ADE80", fontWeight: 600 }}>{m.content}</div>;
   const isU = m.role === "user";
-  return <div style={{ display: "flex", justifyContent: isU ? "flex-end" : "flex-start" }}><div style={{ maxWidth: "82%", background: isU ? T.ps : B.surface, border: `1px solid ${isU ? T.ba : B.border}`, borderRadius: isU ? "14px 4px 14px 14px" : "4px 14px 14px 14px", padding: "9px 13px", fontSize: 13.5, lineHeight: 1.6, color: B.white, whiteSpace: "pre-wrap" }}>{m.content}</div></div>;
+  return <div style={{ display: "flex", justifyContent: isU ? "flex-end" : "flex-start" }}><div style={{ maxWidth: "82%", background: isU ? T.ps : B.surface, border: `1px solid ${isU ? T.ba : B.border}`, borderRadius: isU ? "14px 4px 14px 14px" : "4px 14px 14px 14px", padding: "9px 13px", fontSize: 13.5, lineHeight: 1.6, color: B.white, whiteSpace: isU ? "pre-wrap" : "normal" }}>{isU ? m.content : <Markdown text={m.content} />}</div></div>;
 }
 
 // Reusable evaluated chat for roleplay / debate.
@@ -818,7 +851,7 @@ function ReadingBlock({ data = {}, onOutput, T, disabled, school }) {
   const all = phrases.length > 0 && phrases.every((_, i) => found[i]);
   async function finish() {
     setLoading(true);
-    try { const e = await api(`${blockMentor(school)} In 3 short bullet lines, explain why these phrases are the key insights of the passage. Be concise.`, [{ role: "user", content: `PASSAGE:\n${data.passage}\n\nKEY PHRASES:\n${phrases.join("\n")}` }], 350); setExp(e); }
+    try { const e = await api(`${blockMentor(school)} In 3 short bullet lines, explain why these phrases are the key insights of the passage. Be concise.`, [{ role: "user", content: `PASSAGE:\n${data.passage}\n\nKEY PHRASES:\n${phrases.join("\n")}` }], 700); setExp(e); }
     catch { setExp(""); }
     setPassed(true); onOutput?.({ type: "reading", highlightCount: phrases.length, explanations: exp, passed: true }); setLoading(false);
   }
@@ -858,7 +891,7 @@ function EssayBlock({ data = {}, onOutput, T, disabled, school }) {
   async function submit() {
     setLoading(true);
     try {
-      const out = await api(`${blockMentor(school)} Evaluate this essay against the prompt. Reply EXACTLY:\nVERDICT: PASS or NOTYET\nFEEDBACK: 2-3 sentences of specific, useful feedback.`, [{ role: "user", content: `PROMPT: ${data.prompt}\n\nESSAY:\n${text}` }], 300);
+      const out = await api(`${blockMentor(school)} Evaluate this essay against the prompt. Reply EXACTLY:\nVERDICT: PASS or NOTYET\nFEEDBACK: 2-3 sentences of specific, useful feedback.`, [{ role: "user", content: `PROMPT: ${data.prompt}\n\nESSAY:\n${text}` }], 600);
       const ok = /VERDICT:\s*PASS/i.test(out); const f = (out.match(/FEEDBACK:\s*([\s\S]*)/i)?.[1] || out).trim();
       setFb(f); setPassed(ok); onOutput?.({ type: "essay", essayText: text, wordCount: words, passed: ok, feedback: f });
     } catch (e) { setFb("Error: " + e.message); }
@@ -898,7 +931,7 @@ function CodeSandboxBlock({ data = {}, onOutput, T, disabled, school }) {
   }
   async function review() {
     setLoading(true);
-    try { const r = await api(`${blockMentor(school)} Review this ${lang} code for the task. Reply EXACTLY:\nVERDICT: PASS or NOTYET\nFEEDBACK: 1-2 sentences.`, [{ role: "user", content: `TASK: ${data.instructions}\n\nCODE:\n${code}\n\nOUTPUT:\n${out}` }], 200); const ok = /VERDICT:\s*PASS/i.test(r); const f = (r.match(/FEEDBACK:\s*([\s\S]*)/i)?.[1] || r).trim(); setFb(f); setPassed(ok); onOutput?.({ type: "code_sandbox", code, output: out, errors: out.includes("Error"), passed: ok }); }
+    try { const r = await api(`${blockMentor(school)} Review this ${lang} code for the task. Reply EXACTLY:\nVERDICT: PASS or NOTYET\nFEEDBACK: 1-2 sentences.`, [{ role: "user", content: `TASK: ${data.instructions}\n\nCODE:\n${code}\n\nOUTPUT:\n${out}` }], 600); const ok = /VERDICT:\s*PASS/i.test(r); const f = (r.match(/FEEDBACK:\s*([\s\S]*)/i)?.[1] || r).trim(); setFb(f); setPassed(ok); onOutput?.({ type: "code_sandbox", code, output: out, errors: out.includes("Error"), passed: ok }); }
     catch (e) { setFb("Error: " + e.message); }
     setLoading(false);
   }
@@ -964,7 +997,7 @@ function JournalBlock({ data = {}, onOutput, T, disabled, school }) {
   const text = prompts.map((p, i) => `${p}\n${ans[i] || ""}`).join("\n\n"); const words = text.trim().split(/\s+/).filter(Boolean).length; const min = data.minWords || 80;
   async function submit() {
     setLoading(true);
-    try { const r = await api(`${blockMentor(school)} The student journaled. Reflect back one genuine insight in 2 sentences, then reply VERDICT: PASS or NOTYET on whether they engaged honestly.`, [{ role: "user", content: text }], 250); setFb(r.replace(/VERDICT:.*/is, "").trim()); const ok = /VERDICT:\s*PASS/i.test(r) || words >= min; setPassed(ok); onOutput?.({ type: "journal", entryText: text, wordCount: words, passed: ok, reflection: r }); }
+    try { const r = await api(`${blockMentor(school)} The student journaled. Reflect back one genuine insight in 2 sentences, then reply VERDICT: PASS or NOTYET on whether they engaged honestly.`, [{ role: "user", content: text }], 600); setFb(r.replace(/VERDICT:.*/is, "").trim()); const ok = /VERDICT:\s*PASS/i.test(r) || words >= min; setPassed(ok); onOutput?.({ type: "journal", entryText: text, wordCount: words, passed: ok, reflection: r }); }
     catch (e) { setFb("Error: " + e.message); }
     setLoading(false);
   }
@@ -1004,7 +1037,7 @@ function VoiceJournalBlock({ data = {}, onOutput, T, disabled, school }) {
   const words = text.trim().split(/\s+/).filter(Boolean).length; const min = data.minWords || 60;
   async function submit() {
     setLoading(true);
-    try { const r = await api(`${blockMentor(school)} The student spoke this reflection aloud. Respond with 2 sentences of genuine feedback, then VERDICT: PASS or NOTYET.`, [{ role: "user", content: `PROMPT: ${data.prompt}\n\nSPOKEN:\n${text}` }], 250); setFb(r.replace(/VERDICT:.*/is, "").trim()); const ok = /VERDICT:\s*PASS/i.test(r) || words >= min; setPassed(ok); onOutput?.({ type: "voice_journal", audioUrl: null, transcript: text, passed: ok, feedback: r }); }
+    try { const r = await api(`${blockMentor(school)} The student spoke this reflection aloud. Respond with 2 sentences of genuine feedback, then VERDICT: PASS or NOTYET.`, [{ role: "user", content: `PROMPT: ${data.prompt}\n\nSPOKEN:\n${text}` }], 600); setFb(r.replace(/VERDICT:.*/is, "").trim()); const ok = /VERDICT:\s*PASS/i.test(r) || words >= min; setPassed(ok); onOutput?.({ type: "voice_journal", audioUrl: null, transcript: text, passed: ok, feedback: r }); }
     catch (e) { setFb("Error: " + e.message); }
     setLoading(false);
   }
@@ -1159,7 +1192,7 @@ function ObjectionHandlerBlock({ data = {}, onOutput, T, disabled, school }) {
   async function handle() {
     setLoading(true);
     try {
-      const r = await api(`${blockMentor(school)} A prospect raised this objection about ${data.product}: "${objs[i]}". Rate the student's rebuttal. Reply EXACTLY:\nSCORE: <0-10>\nFEEDBACK: one sentence.`, [{ role: "user", content: resp }], 120);
+      const r = await api(`${blockMentor(school)} A prospect raised this objection about ${data.product}: "${objs[i]}". Rate the student's rebuttal. Reply EXACTLY:\nSCORE: <0-10>\nFEEDBACK: one sentence.`, [{ role: "user", content: resp }], 700);
       const sc = parseFloat(r.match(/SCORE:\s*([\d.]+)/i)?.[1] || "0"); const f = (r.match(/FEEDBACK:\s*([\s\S]*)/i)?.[1] || r).trim();
       const ns = [...scores, sc]; setScores(ns); setFb(f); setResp("");
       if (i + 1 >= objs.length) { const avg = ns.reduce((a, b) => a + b, 0) / ns.length; const ok = avg >= 6.5; setPassed(true); onOutput?.({ type: "objection_handler", objectionsHandled: ns.length, scores: ns, passed: ok }); }
@@ -1182,7 +1215,7 @@ function InterviewSimulatorBlock({ data = {}, onOutput, T, disabled, school }) {
   async function next() {
     setLoading(true);
     try {
-      const r = await api(`${blockMentor(school)} You're interviewing a candidate for: ${data.role}. Evaluate this answer to "${qs[i]}". Reply EXACTLY:\nSCORE: <0-10>\nFEEDBACK: one sentence.`, [{ role: "user", content: ans }], 120);
+      const r = await api(`${blockMentor(school)} You're interviewing a candidate for: ${data.role}. Evaluate this answer to "${qs[i]}". Reply EXACTLY:\nSCORE: <0-10>\nFEEDBACK: one sentence.`, [{ role: "user", content: ans }], 700);
       const sc = parseFloat(r.match(/SCORE:\s*([\d.]+)/i)?.[1] || "0"); const f = (r.match(/FEEDBACK:\s*([\s\S]*)/i)?.[1] || r).trim();
       const ns = [...scores, sc], nf = [...fbs, f]; setScores(ns); setFbs(nf); setAns("");
       if (i + 1 >= qs.length) { const avg = ns.reduce((a, b) => a + b, 0) / ns.length; const ok = avg >= 6.5; setDone(true); onOutput?.({ type: "interview_simulator", questionsAsked: qs.length, feedbackPerQuestion: nf, overallScore: avg, passed: ok }); }
@@ -1204,7 +1237,7 @@ function AudioPitcherBlock({ data = {}, onOutput, T, disabled, school }) {
   const [text, setText] = useState(""); const [fb, setFb] = useState(""); const [score, setScore] = useState(null); const [loading, setLoading] = useState(false); const [passed, setPassed] = useState(false);
   async function grade() {
     setLoading(true);
-    try { const r = await api(`${blockMentor(school)} Grade this spoken pitch. Criteria: ${data.criteria || "clarity, persuasion, delivery"}. Reply EXACTLY:\nSCORE: <0-10>\nFEEDBACK: 2 sentences.`, [{ role: "user", content: `PROMPT: ${data.prompt}\n\nPITCH:\n${text}` }], 200); const sc = parseFloat(r.match(/SCORE:\s*([\d.]+)/i)?.[1] || "0"); const f = (r.match(/FEEDBACK:\s*([\s\S]*)/i)?.[1] || r).trim(); setScore(sc); setFb(f); const ok = sc >= 6.5; setPassed(ok); onOutput?.({ type: "audio_pitcher", audioUrl: null, transcript: text, score: sc, feedback: f, passed: ok }); }
+    try { const r = await api(`${blockMentor(school)} Grade this spoken pitch. Criteria: ${data.criteria || "clarity, persuasion, delivery"}. Reply EXACTLY:\nSCORE: <0-10>\nFEEDBACK: 2 sentences.`, [{ role: "user", content: `PROMPT: ${data.prompt}\n\nPITCH:\n${text}` }], 600); const sc = parseFloat(r.match(/SCORE:\s*([\d.]+)/i)?.[1] || "0"); const f = (r.match(/FEEDBACK:\s*([\s\S]*)/i)?.[1] || r).trim(); setScore(sc); setFb(f); const ok = sc >= 6.5; setPassed(ok); onOutput?.({ type: "audio_pitcher", audioUrl: null, transcript: text, score: sc, feedback: f, passed: ok }); }
     catch (e) { setFb("Error: " + e.message); }
     setLoading(false);
   }
@@ -1222,7 +1255,7 @@ function ImageGateBlock({ data = {}, onOutput, T, disabled, school }) {
   function pick(e) { const file = e.target.files?.[0]; if (!file) return; const r = new FileReader(); r.onload = () => setImg(r.result); r.readAsDataURL(file); }
   async function verify() {
     setLoading(true);
-    try { const r = await api(`${blockMentor(school)} The student uploaded a photo as proof and described it. Judge against criteria: "${data.criteria}". Reply EXACTLY:\nVERDICT: PASS or NOTYET\nFEEDBACK: one sentence.`, [{ role: "user", content: `TASK: ${data.instruction}\n\nSTUDENT'S DESCRIPTION OF THEIR PHOTO:\n${desc}` }], 160); const ok = /VERDICT:\s*PASS/i.test(r); const f = (r.match(/FEEDBACK:\s*([\s\S]*)/i)?.[1] || r).trim(); setFb(f); setPassed(ok); onOutput?.({ type: "image_gate", imageUrl: img, analysis: f, passed: ok }); }
+    try { const r = await api(`${blockMentor(school)} The student uploaded a photo as proof and described it. Judge against criteria: "${data.criteria}". Reply EXACTLY:\nVERDICT: PASS or NOTYET\nFEEDBACK: one sentence.`, [{ role: "user", content: `TASK: ${data.instruction}\n\nSTUDENT'S DESCRIPTION OF THEIR PHOTO:\n${desc}` }], 500); const ok = /VERDICT:\s*PASS/i.test(r); const f = (r.match(/FEEDBACK:\s*([\s\S]*)/i)?.[1] || r).trim(); setFb(f); setPassed(ok); onOutput?.({ type: "image_gate", imageUrl: img, analysis: f, passed: ok }); }
     catch (e) { setFb("Error: " + e.message); }
     setLoading(false);
   }
@@ -1240,7 +1273,7 @@ function VideoGateBlock({ data = {}, onOutput, T, disabled, school }) {
   const [url, setUrl] = useState(""); const [refl, setRefl] = useState(""); const [fb, setFb] = useState(""); const [loading, setLoading] = useState(false); const [passed, setPassed] = useState(false);
   async function submit() {
     setLoading(true);
-    try { const r = await api(`${blockMentor(school)} The student submitted a video link as proof and described it. Reply EXACTLY:\nVERDICT: PASS or NOTYET\nFEEDBACK: one sentence.`, [{ role: "user", content: `TASK: ${data.instruction}\nLINK: ${url}\nWHAT IT SHOWS:\n${refl}` }], 160); const ok = /VERDICT:\s*PASS/i.test(r); const f = (r.match(/FEEDBACK:\s*([\s\S]*)/i)?.[1] || r).trim(); setFb(f); setPassed(ok); onOutput?.({ type: "video_gate", videoUrl: url, watched: true, feedback: f, passed: ok }); }
+    try { const r = await api(`${blockMentor(school)} The student submitted a video link as proof and described it. Reply EXACTLY:\nVERDICT: PASS or NOTYET\nFEEDBACK: one sentence.`, [{ role: "user", content: `TASK: ${data.instruction}\nLINK: ${url}\nWHAT IT SHOWS:\n${refl}` }], 500); const ok = /VERDICT:\s*PASS/i.test(r); const f = (r.match(/FEEDBACK:\s*([\s\S]*)/i)?.[1] || r).trim(); setFb(f); setPassed(ok); onOutput?.({ type: "video_gate", videoUrl: url, watched: true, feedback: f, passed: ok }); }
     catch (e) { setFb("Error: " + e.message); }
     setLoading(false);
   }
@@ -1299,25 +1332,40 @@ function QuizBlock({ data = {}, onOutput, T, disabled }) {
   </BlockShell>);
 }
 
-// ── 28. Calculator ──
+// ── 28. Calculator ── (numeric formula OR AI/text mode for things like "count verbs")
 function CalculatorBlock({ data = {}, onOutput, T, disabled, school }) {
-  const fields = data.fields || []; const [vals, setVals] = useState({}); const [res, setRes] = useState(null); const [interp, setInterp] = useState(""); const [loading, setLoading] = useState(false);
-  function compute() {
+  const fields = data.fields || [{ label: "Input", key: "input", type: "text" }];
+  const isAI = data.mode === "ai" || !data.expression || fields.some(f => f.type === "text");
+  const [vals, setVals] = useState({}); const [res, setRes] = useState(null); const [loading, setLoading] = useState(false);
+  async function compute() {
+    if (isAI) {
+      setLoading(true);
+      try {
+        const inputs = fields.map(f => `${f.label}: ${vals[f.key] || ""}`).join("\n");
+        const r = await api(`${blockMentor(school)} Act as a calculator/analyzer. Task: "${data.title || data.prompt || "compute the result"}". ${data.rubric || data.instructions || ""}\nGiven the input(s) below, return the result clearly (lead with the number/answer in **bold**), then one short line of interpretation.`, [{ role: "user", content: inputs }], 500);
+        setRes(r); onOutput?.({ type: "calculator", result: r, interpretation: r });
+      } catch (e) { setRes("Error: " + e.message); }
+      setLoading(false); return;
+    }
     try {
       const keys = fields.map(f => f.key); const args = keys.map(k => parseFloat(vals[k]) || 0);
-      const fn = new Function(...keys, `return (${data.expression || "0"});`);
-      const r = fn(...args); setRes(typeof r === "number" ? Math.round(r * 100) / 100 : r);
-      onOutput?.({ type: "calculator", result: r, interpretation: interp });
-    } catch (e) { setRes("err"); }
+      const r = new Function(...keys, `return (${data.expression || "0"});`)(...args);
+      const rounded = typeof r === "number" ? Math.round(r * 100) / 100 : r;
+      setRes(`${rounded}${data.unit || ""}`); onOutput?.({ type: "calculator", result: r });
+    } catch { setRes("Check inputs"); }
   }
-  async function explain() { if (res == null) return; setLoading(true); try { setInterp(await api(`${blockMentor(school)} In one sentence, interpret this ${data.title || "result"}: ${res}${data.unit || ""}.`, [{ role: "user", content: JSON.stringify(vals) }], 100)); } catch { } setLoading(false); }
-  return (<BlockShell type="calculator" sub={data.title}>
+  return (<BlockShell type="calculator" sub={data.title || data.prompt}>
     <div style={{ display: "grid", gap: 8, marginBottom: 10 }}>
-      {fields.map((f, i) => <div key={i}><div style={{ fontSize: 12, color: B.mutedMid, marginBottom: 4 }}>{f.label}</div><input type="number" value={vals[f.key] || ""} onChange={e => setVals(v => ({ ...v, [f.key]: e.target.value }))} disabled={disabled} style={{ ...bx.input, fontSize: 13 }} /></div>)}
+      {fields.map((f, i) => <div key={i}><div style={{ fontSize: 12, color: B.mutedMid, marginBottom: 4 }}>{f.label}</div>
+        {(f.type === "text" || isAI)
+          ? <textarea value={vals[f.key] || ""} onChange={e => setVals(v => ({ ...v, [f.key]: e.target.value }))} disabled={disabled} rows={2} style={{ ...bx.input, fontSize: 13 }} />
+          : <input type="number" value={vals[f.key] || ""} onChange={e => setVals(v => ({ ...v, [f.key]: e.target.value }))} disabled={disabled} style={{ ...bx.input, fontSize: 13 }} />}
+      </div>)}
     </div>
-    <div style={{ display: "flex", gap: 8 }}><button onClick={compute} disabled={disabled} style={pBtn(T)}>Calculate</button>{res != null && res !== "err" && <button onClick={explain} disabled={loading} style={{ ...pBtn(T, false), opacity: loading ? 0.5 : 1 }}>{loading ? "…" : "✨ Interpret"}</button>}</div>
-    {res != null && <div style={{ marginTop: 10, fontFamily: "'Space Grotesk',sans-serif", fontSize: 24, fontWeight: 700, color: res === "err" ? "#F87171" : T.hi }}>{res === "err" ? "Check inputs" : `${res}${data.unit || ""}`}</div>}
-    {interp && <div style={{ marginTop: 6, fontSize: 13, color: B.mutedMid, lineHeight: 1.6 }}>{interp}</div>}
+    <button onClick={compute} disabled={disabled || loading} style={{ ...pBtn(T), opacity: loading ? 0.5 : 1 }}>{loading ? "Calculating…" : "Calculate"}</button>
+    {res != null && (isAI
+      ? <div style={{ marginTop: 10, background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 10, padding: "10px 13px" }}><Markdown text={String(res)} /></div>
+      : <div style={{ marginTop: 10, fontFamily: "'Space Grotesk',sans-serif", fontSize: 24, fontWeight: 700, color: String(res).startsWith("Check") ? "#F87171" : T.hi }}>{res}</div>)}
   </BlockShell>);
 }
 
@@ -1326,7 +1374,7 @@ function CustomBlock({ data = {}, onOutput, T, disabled, school }) {
   const sections = data.sections || []; const [vals, setVals] = useState({}); const [fb, setFb] = useState(""); const [loading, setLoading] = useState(false); const [passed, setPassed] = useState(false);
   async function submit() {
     setLoading(true);
-    try { const body = sections.map(s => `${s.label}:\n${vals[s.key] || ""}`).join("\n\n"); const r = await api(`${blockMentor(school)} Give the student useful feedback using this rubric: ${data.rubric}. End with VERDICT: PASS or NOTYET.`, [{ role: "user", content: body }], 350); setFb(r.replace(/VERDICT:.*/is, "").trim()); const ok = /VERDICT:\s*PASS/i.test(r); setPassed(ok); onOutput?.({ type: "custom", inputs: vals, passed: ok, feedback: r }); }
+    try { const body = sections.map(s => `${s.label}:\n${vals[s.key] || ""}`).join("\n\n"); const r = await api(`${blockMentor(school)} Give the student useful feedback using this rubric: ${data.rubric}. End with VERDICT: PASS or NOTYET.`, [{ role: "user", content: body }], 700); setFb(r.replace(/VERDICT:.*/is, "").trim()); const ok = /VERDICT:\s*PASS/i.test(r); setPassed(ok); onOutput?.({ type: "custom", inputs: vals, passed: ok, feedback: r }); }
     catch (e) { setFb("Error: " + e.message); }
     setLoading(false);
   }
@@ -1355,13 +1403,29 @@ function BlockRenderer({ block, onOutput, T, disabled, state, onState, school })
   return <Comp data={block.data || {}} onOutput={onOutput} T={T} disabled={disabled} state={state} onState={onState} school={school} />;
 }
 
+// Legacy tool types keep their fields at the top level; everything else is a block.
+const LEGACY_TOOLS = ["checklist", "habit", "journal", "timer", "counter", "quiz"];
+// Make any AI-built tool spec safe to render, so a successful build always shows up.
+function normalizeTool(spec) {
+  if (!spec || typeof spec !== "object") return null;
+  let s = { ...spec };
+  if (!s.title) s.title = "New Tool";
+  if (!s.type) s.type = s.data ? "custom" : "checklist";
+  const known = LEGACY_TOOLS.includes(s.type) || BLOCK_COMPONENTS[s.type];
+  if (!known) {
+    // Unknown type → coerce to a custom block so it still renders + works.
+    s = { type: "custom", title: s.title, description: s.description || "", data: { intro: s.description || s.title, sections: [{ label: s.title, key: "response" }], rubric: "Give the student specific, useful feedback.", aiFeedback: true } };
+  }
+  return s;
+}
+
 // ─────────────────────────────────────────────────────────────
 // TOOLS
 // ─────────────────────────────────────────────────────────────
 function toolIcon(type) { return ({ checklist: "✅", habit: "📆", journal: "📓", timer: "⏱️", counter: "🔢", quiz: "❓" }[type]) || BLOCK_META[type]?.icon || "🛠️"; }
 const DAYS = ["M", "T", "W", "T", "F", "S", "S"];
 
-function ToolFrame({ tool, T, open, onToggle, onRemove, children }) {
+function ToolFrame({ tool, T, open, onToggle, onRemove, onEdit, busy, children }) {
   return (
     <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 16, overflow: "hidden" }}>
       <div onClick={onToggle} style={{ padding: "14px 20px", borderBottom: open ? `1px solid ${B.border}` : "none", background: B.surface2, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, cursor: "pointer" }}>
@@ -1370,6 +1434,7 @@ function ToolFrame({ tool, T, open, onToggle, onRemove, children }) {
           <div style={{ fontSize: 12, color: B.muted, marginTop: 2 }}>{tool.description}</div>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
+          {onEdit && <button onClick={e => { e.stopPropagation(); const i = window.prompt("How should this tool change?\n(e.g. \"allow text input and count the verbs\", \"add 5 more objections\", \"rename to Daily Tracker\")"); if (i && i.trim()) onEdit(i.trim()); }} style={{ background: "none", border: `1px solid ${B.border}`, borderRadius: 7, color: B.mutedMid, padding: "4px 9px", cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>{busy ? "…" : "✎ Edit"}</button>}
           {onRemove && <button onClick={e => { e.stopPropagation(); onRemove(); }} style={{ background: "none", border: `1px solid ${B.border}`, borderRadius: 7, color: B.muted, padding: "4px 9px", cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>Remove</button>}
           <span style={{ color: T.p, fontSize: 13, transform: open ? "rotate(180deg)" : "none", transition: "transform 0.2s", display: "inline-block" }}>▾</span>
         </div>
@@ -1379,11 +1444,11 @@ function ToolFrame({ tool, T, open, onToggle, onRemove, children }) {
   );
 }
 
-function ToolRenderer({ tool, T, state, onState, onRemove, school }) {
+function ToolRenderer({ tool, T, state, onState, onRemove, onEdit, busy, school }) {
   const s = state || {};
   const open = s._open !== false;
   const set = (patch) => onState({ ...s, ...patch });
-  const frame = (children) => <ToolFrame tool={tool} T={T} open={open} onToggle={() => set({ _open: !open })} onRemove={onRemove}>{children}</ToolFrame>;
+  const frame = (children) => <ToolFrame tool={tool} T={T} open={open} onToggle={() => set({ _open: !open })} onRemove={onRemove} onEdit={onEdit} busy={busy}>{children}</ToolFrame>;
 
   if (tool.type === "checklist") {
     const checks = s.checks || {};
@@ -1524,7 +1589,7 @@ function TimerBody({ tool, T }) {
   );
 }
 
-function ToolsSection({ rec, T, onUpdate, buildTool, buildingTool, readOnly }) {
+function ToolsSection({ rec, T, onUpdate, buildTool, buildingTool, readOnly, onReloadIdeas, onEditTool }) {
   const [custom, setCustom] = useState("");
   const school = rec.data;
   const builtNames = new Set((rec.tools || []).map(t => t.title));
@@ -1534,9 +1599,13 @@ function ToolsSection({ rec, T, onUpdate, buildTool, buildingTool, readOnly }) {
         <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 18, padding: 24 }}>
           <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 15, fontWeight: 700, color: B.white, marginBottom: 4 }}>🛠️ Tools</div>
           <div style={{ fontSize: 12, color: B.muted, marginBottom: 16 }}>Interactive tools, built on demand for this school. Click a tool's header to collapse it.</div>
-          {school.toolIdeas?.length > 0 && (
-            <div style={{ marginBottom: 16 }}>
-              <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.5, color: T.p, marginBottom: 8 }}>AI suggests for this school</div>
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.5, color: T.p }}>AI suggests for this school</div>
+              <button disabled={!!buildingTool} onClick={onReloadIdeas} style={{ background: "none", border: `1px solid ${T.ba}`, borderRadius: 7, color: T.hi, padding: "4px 10px", cursor: "pointer", fontSize: 11, fontFamily: "inherit", opacity: buildingTool ? 0.5 : 1 }}>{buildingTool === "reload" ? "Refreshing…" : "↻ New ideas"}</button>
+            </div>
+            {(!school.toolIdeas || school.toolIdeas.length === 0) && <div style={{ fontSize: 12, color: B.muted, padding: "4px 0 8px" }}>All suggestions built — tap "↻ New ideas" for more, or describe your own below.</div>}
+            {school.toolIdeas?.length > 0 && (
               <div style={{ display: "grid", gap: 8 }}>
                 {school.toolIdeas.map((idea, i) => {
                   const built = builtNames.has(idea.name);
@@ -1555,8 +1624,8 @@ function ToolsSection({ rec, T, onUpdate, buildTool, buildingTool, readOnly }) {
                   );
                 })}
               </div>
-            </div>
-          )}
+            )}
+          </div>
           <div style={{ display: "flex", gap: 8 }}>
             <input value={custom} onChange={e => setCustom(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && custom.trim()) { buildTool(custom.trim(), "custom"); setCustom(""); } }}
               placeholder='Describe any tool… e.g. "a morning routine checklist"'
@@ -1572,6 +1641,7 @@ function ToolsSection({ rec, T, onUpdate, buildTool, buildingTool, readOnly }) {
         <ToolRenderer key={tool.id} tool={tool} T={T} school={school}
           state={rec.toolStates?.[tool.id]}
           onState={(s) => onUpdate({ toolStates: { ...(rec.toolStates || {}), [tool.id]: s } })}
+          onEdit={readOnly ? null : (inst) => onEditTool(tool, inst)} busy={buildingTool === tool.id}
           onRemove={readOnly ? null : () => onUpdate({ tools: rec.tools.filter(t => t.id !== tool.id) })} />
       ))}
       {(rec.tools || []).length === 0 && (
@@ -1586,31 +1656,134 @@ function ToolsSection({ rec, T, onUpdate, buildTool, buildingTool, readOnly }) {
 // ─────────────────────────────────────────────────────────────
 // LESSON ROW
 // ─────────────────────────────────────────────────────────────
-function LessonRow({ lesson, idx, T, progress, onEnter }) {
+function LessonRow({ lesson, idx, T, progress, onEnter, onEdit, onToggleLock, readOnly }) {
   const tm = TM[lesson.type] || TM.Dialogue;
   const state = progress[lesson.number] || "locked";
-  const locked = state === "locked" && idx > 0;
+  const locked = state === "locked" && (idx > 0 || readOnly);
   return (
-    <div style={{ padding: "16px 22px", borderBottom: `1px solid ${B.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, opacity: locked ? 0.5 : 1, transition: "opacity 0.2s" }}>
-      <div style={{ display: "flex", alignItems: "flex-start", gap: 12, flex: 1 }}>
+    <div style={{ padding: "16px 22px", borderBottom: `1px solid ${B.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, opacity: locked && readOnly ? 0.5 : 1, transition: "opacity 0.2s" }}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 12, flex: 1, minWidth: 0 }}>
         <div style={{ width: 28, height: 28, borderRadius: "50%", flexShrink: 0, background: state === "passed" ? "rgba(74,222,128,0.12)" : T.ps, border: `1px solid ${state === "passed" ? "rgba(74,222,128,0.4)" : T.ba}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: state === "passed" ? "#4ADE80" : T.p, marginTop: 1 }}>
           {state === "passed" ? "✓" : lesson.number || idx + 1}
         </div>
-        <div>
+        <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 14, fontWeight: 600, color: B.white, marginBottom: 4 }}>{lesson.title}</div>
           <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
             <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6, padding: "2px 7px", borderRadius: 4, background: tm.bg, color: tm.c }}>{tm.icon} {lesson.type}</span>
             {(lesson.blocks || []).map((b, bi) => (
               <span key={bi} title={BLOCK_META[b.type]?.label || b.type} style={{ fontSize: 11, padding: "2px 6px", borderRadius: 4, background: B.surface3, border: `1px solid ${B.border}` }}>{BLOCK_META[b.type]?.icon || "🧩"}</span>
             ))}
-            <span style={{ fontSize: 12, color: B.muted }}>{lesson.concept?.slice(0, 55)}{lesson.concept?.length > 55 ? "..." : ""}</span>
+            <span style={{ fontSize: 12, color: B.muted }}>{lesson.concept?.slice(0, 50)}{lesson.concept?.length > 50 ? "..." : ""}</span>
           </div>
         </div>
       </div>
-      <button onClick={() => onEnter(lesson)} disabled={locked}
-        style={{ flexShrink: 0, padding: "7px 14px", borderRadius: 8, fontSize: 13, fontWeight: 700, fontFamily: "inherit", cursor: locked ? "not-allowed" : "pointer", border: "none", background: state === "passed" ? "rgba(74,222,128,0.09)" : T.p, color: state === "passed" ? "#4ADE80" : "white", boxShadow: state !== "passed" ? `0 0 14px ${T.pg}` : "none", transition: "all 0.2s" }}>
-        {state === "passed" ? "Revisit" : state === "active" ? "Continue →" : "Enter →"}
-      </button>
+      <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
+        {!readOnly && (
+          <button onClick={() => onToggleLock(lesson.number, state)} title={state === "locked" ? "Locked — click to unlock" : "Unlocked — click to lock"}
+            style={{ background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 7, color: state === "locked" ? B.muted : "#4ADE80", padding: "6px 8px", cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>{state === "locked" ? "🔒" : "🔓"}</button>
+        )}
+        {!readOnly && (
+          <button onClick={() => onEdit(lesson)} title="Edit lesson" style={{ background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 7, color: B.mutedMid, padding: "6px 8px", cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>✎</button>
+        )}
+        <button onClick={() => onEnter(lesson)} disabled={locked}
+          style={{ padding: "7px 14px", borderRadius: 8, fontSize: 13, fontWeight: 700, fontFamily: "inherit", cursor: locked ? "not-allowed" : "pointer", border: "none", background: state === "passed" ? "rgba(74,222,128,0.09)" : T.p, color: state === "passed" ? "#4ADE80" : "white", boxShadow: state !== "passed" ? `0 0 14px ${T.pg}` : "none", transition: "all 0.2s" }}>
+          {state === "passed" ? "Revisit" : state === "active" ? "Continue →" : "Enter →"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+// LESSON EDITOR (creator) — rename, lock, pass logic, edit/delete blocks
+// ─────────────────────────────────────────────────────────────
+const PASS_MODES = [
+  ["default", "Last activity (default)"],
+  ["mentor", "Mentor AI conversation"],
+  ["lastblock", "Last activity must pass"],
+  ["threshold", "% of activities completed"],
+  ["proof", "Photo / video proof"],
+  ["manual", "Manual — student marks done"],
+];
+function blockFields(type) {
+  return ({
+    video_embed: [["url", "Video URL (YouTube / Loom)"], ["title", "Title"]],
+    reading_plain: [["content", "Content (markdown)", "area"]],
+    reading: [["passage", "Passage", "area"]],
+    image_gate: [["instruction", "Instruction"], ["criteria", "Pass criteria"]],
+    video_gate: [["instruction", "Instruction"]],
+    essay: [["prompt", "Prompt", "area"]],
+    debate: [["topic", "Topic"], ["aiPosition", "The side the AI defends"]],
+    roleplay: [["character", "Character"], ["scenario", "Scenario", "area"], ["goal", "Student's goal"]],
+    calculator: [["title", "Title"], ["rubric", "What the AI should compute"]],
+    quiz: [],
+  })[type] || [];
+}
+function LessonEditor({ lesson, T, allowed, onSave, onDelete, onApplyAI, onClose }) {
+  const [d, setD] = useState({ ...lesson, blocks: (lesson.blocks || []).map(b => ({ ...b, data: { ...(b.data || {}) } })), passLogic: lesson.passLogic || { mode: "default", threshold: 70 } });
+  const [addType, setAddType] = useState("");
+  const set = (patch) => setD(x => ({ ...x, ...patch }));
+  const setBlockData = (i, k, v) => setD(x => ({ ...x, blocks: x.blocks.map((b, j) => j === i ? { ...b, data: { ...b.data, [k]: v } } : b) }));
+  const delBlock = (i) => setD(x => ({ ...x, blocks: x.blocks.filter((_, j) => j !== i) }));
+  const inp = { ...bx, fontSize: 13 };
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 220, background: "rgba(0,0,0,0.82)", backdropFilter: "blur(10px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onClose}>
+      <div style={{ background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 20, width: "100%", maxWidth: 600, maxHeight: "88vh", display: "flex", flexDirection: "column", overflow: "hidden" }} onClick={e => e.stopPropagation()}>
+        <div style={{ padding: "16px 22px", borderBottom: `1px solid ${B.border}`, background: B.surface2, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: B.white }}>✎ Edit lesson</div>
+          <button onClick={onClose} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "6px 11px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>✕</button>
+        </div>
+        <div style={{ flex: 1, overflowY: "auto", padding: "18px 22px", display: "flex", flexDirection: "column", gap: 14 }}>
+          <div><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>Title</div><input value={d.title || ""} onChange={e => set({ title: e.target.value })} style={inp.input} /></div>
+          <div><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>Concept</div><textarea value={d.concept || ""} onChange={e => set({ concept: e.target.value })} rows={2} style={inp.input} /></div>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 140 }}><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>Type</div>
+              <select value={d.type || "Dialogue"} onChange={e => set({ type: e.target.value })} style={{ ...inp.input, cursor: "pointer" }}>{Object.keys(TM).map(t => <option key={t} value={t}>{t}</option>)}</select></div>
+            <div style={{ flex: 1, minWidth: 140 }}><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>Passing logic</div>
+              <select value={d.passLogic?.mode || "default"} onChange={e => set({ passLogic: { ...d.passLogic, mode: e.target.value } })} style={{ ...inp.input, cursor: "pointer" }}>{PASS_MODES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></div>
+          </div>
+          {d.passLogic?.mode === "threshold" && (
+            <div><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>Completion threshold (%)</div><input type="number" value={d.passLogic.threshold ?? 70} onChange={e => set({ passLogic: { ...d.passLogic, threshold: +e.target.value } })} style={inp.input} /></div>
+          )}
+          <div><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>Pass criteria (used by mentor / AI evaluation)</div><textarea value={d.passCriteria || ""} onChange={e => set({ passCriteria: e.target.value })} rows={2} style={inp.input} /></div>
+
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: T.p, marginBottom: 8 }}>Activities ({d.blocks.length})</div>
+            {d.blocks.map((b, i) => {
+              const fields = blockFields(b.type);
+              return (
+                <div key={i} style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 10, padding: 12, marginBottom: 8 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: fields.length ? 8 : 0 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: B.white }}>{BLOCK_META[b.type]?.icon} {BLOCK_META[b.type]?.label || b.type}</span>
+                    <button onClick={() => delBlock(i)} style={{ background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.3)", borderRadius: 7, color: "#F87171", padding: "4px 9px", cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>✕ Delete</button>
+                  </div>
+                  {fields.map(([k, label, kind]) => (
+                    <div key={k} style={{ marginBottom: 6 }}>
+                      <div style={{ fontSize: 10, color: B.muted, marginBottom: 3 }}>{label}</div>
+                      {kind === "area"
+                        ? <textarea value={b.data[k] || ""} onChange={e => setBlockData(i, k, e.target.value)} rows={3} style={{ ...inp.input, fontSize: 12 }} />
+                        : <input value={b.data[k] || ""} onChange={e => setBlockData(i, k, e.target.value)} style={{ ...inp.input, fontSize: 12 }} />}
+                    </div>
+                  ))}
+                  {!fields.length && <div style={{ fontSize: 11, color: B.muted }}>Deep edits for this block: use the Iterate panel.</div>}
+                </div>
+              );
+            })}
+            <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+              <select value={addType} onChange={e => setAddType(e.target.value)} style={{ ...inp.input, fontSize: 12, cursor: "pointer", flex: 1 }}>
+                <option value="">+ Add activity (AI fills it)…</option>
+                <optgroup label="Recommended">{(allowed || ALL_BLOCKS).map(b => <option key={b} value={b}>{BLOCK_META[b]?.icon} {BLOCK_META[b]?.label}</option>)}</optgroup>
+                <optgroup label="All">{ALL_BLOCKS.map(b => <option key={b} value={b}>{BLOCK_META[b]?.icon} {BLOCK_META[b]?.label}</option>)}</optgroup>
+              </select>
+              <button disabled={!addType} onClick={() => { onApplyAI(`Add a ${addType} block to lesson number ${lesson.number}. Fill its data fully per the schema and keep it consistent with the lesson. Preserve all other lessons and blocks.`); onClose(); }} style={{ ...pBtnLite(), opacity: addType ? 1 : 0.5 }}>Add</button>
+            </div>
+          </div>
+        </div>
+        <div style={{ padding: "14px 22px", borderTop: `1px solid ${B.border}`, background: B.surface2, display: "flex", justifyContent: "space-between", gap: 8 }}>
+          <button onClick={onDelete} style={{ background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.3)", borderRadius: 9, color: "#F87171", padding: "9px 14px", cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit" }}>🗑 Delete lesson</button>
+          <button onClick={() => onSave(d)} style={{ ...pBtn(T), padding: "9px 20px" }}>Save changes</button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1713,7 +1886,10 @@ function IteratePanel({ school, history, loading, onApply, onTheme, onGami, onVo
             <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.5, color: B.muted }}>Structure commands</span>
             <span style={{ fontSize: 10, fontWeight: 700, color: "#FBBF24" }}>~ AI</span>
           </div>
-          <div style={{ fontSize: 11, color: B.muted, marginBottom: 8 }}>Path: <span style={{ color: "#A78BFA", fontWeight: 600 }}>{path}</span> · blocks limited to this path</div>
+          <div style={{ fontSize: 11, color: B.muted, marginBottom: 6 }}>Learning path · drives layout + which blocks are allowed</div>
+          <select value={path} onChange={e => { const v = e.target.value; if (v !== path) runCmd(`Set this school's learningPath to "${v}". Re-orient the whole school to that path: adopt its layout and use ONLY its allowed block types, rewriting each lesson's blocks to fit. Keep the subject/topic the same.`); }} style={{ ...selStyle, width: "100%", marginBottom: 10 }}>
+            {Object.keys(LEARNING_PATH_RULES).map(k => <option key={k} value={k}>{pathLabel(k)}</option>)}
+          </select>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: cmd ? 10 : 0 }}>
             {[["lesson", "➕ Add Lesson"], ["block", "⚒️ Add Block"], ["semester", "📚 Add Semester"], ["difficulty", "📈 Difficulty"]].map(([k, l]) => (
               <button key={k} onClick={() => { setCmd(cmd === k ? null : k); setForm({}); }} disabled={loading} style={{ background: cmd === k ? "rgba(124,58,237,0.2)" : "rgba(124,58,237,0.06)", border: `1px solid ${cmd === k ? "rgba(124,58,237,0.5)" : "rgba(124,58,237,0.2)"}`, borderRadius: 8, padding: "6px 10px", fontSize: 11.5, color: "#C4B5FD", cursor: "pointer", fontFamily: "inherit", opacity: loading ? 0.5 : 1 }}>{l}</button>
@@ -1739,7 +1915,7 @@ function IteratePanel({ school, history, loading, onApply, onTheme, onGami, onVo
               </select>
               <select value={form.block || ""} onChange={e => setForm({ ...form, block: e.target.value })} style={selStyle}>
                 <option value="">Pick a block…</option>
-                <optgroup label={`Recommended for ${path}`}>{recBlocks.map(b => <option key={b} value={b}>{BLOCK_META[b]?.icon} {BLOCK_META[b]?.label}</option>)}</optgroup>
+                <optgroup label={`Recommended for ${pathLabel(path)}`}>{recBlocks.map(b => <option key={b} value={b}>{BLOCK_META[b]?.icon} {BLOCK_META[b]?.label}</option>)}</optgroup>
                 <optgroup label="All blocks">{ALL_BLOCKS.map(b => <option key={b} value={b}>{BLOCK_META[b]?.icon} {BLOCK_META[b]?.label}</option>)}</optgroup>
               </select>
               <button disabled={!form.lesson || !form.block} onClick={() => runCmd(`Add a ${form.block} block to lesson number ${form.lesson}. Fill its data fully per the schema and keep it consistent with that lesson's concept and the ${path} path. Preserve all other lessons and blocks.`)} style={{ ...pBtnLite(), opacity: (!form.lesson || !form.block) ? 0.5 : 1 }}>Add block →</button>
@@ -1802,7 +1978,7 @@ function IteratePanel({ school, history, loading, onApply, onTheme, onGami, onVo
               <div key={i} style={{ marginBottom: 12 }}>
                 <div style={{ display: "flex", justifyContent: isU ? "flex-end" : "flex-start" }}>
                   <div style={{ maxWidth: "88%", background: isU ? "rgba(124,58,237,0.1)" : B.surface2, border: `1px solid ${isU ? "rgba(124,58,237,0.35)" : B.border}`, borderRadius: isU ? "14px 4px 14px 14px" : "4px 14px 14px 14px", padding: "10px 13px", fontSize: 13, lineHeight: 1.6, color: B.white, whiteSpace: "pre-wrap" }}>
-                    {isU ? m.content : parsed.body || m.content}
+                    {isU ? m.content : <Markdown text={parsed.body || m.content} />}
                   </div>
                 </div>
                 {!isU && parsed.actions.length > 0 && (
@@ -1838,6 +2014,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const T = THEMES[school.theme] || THEMES.violet;
   const [tab, setTab] = useState("lessons");
   const [activeLesson, setActiveLesson] = useState(null);
+  const [editingLesson, setEditingLesson] = useState(null);
   const [showIterate, setShowIterate] = useState(false);
   const [iterating, setIterating] = useState(false);
   const [iterateHistory, setIterateHistory] = useState([]);
@@ -1874,6 +2051,17 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
     const p = {};
     school.semesters?.forEach(s => s.lessons?.forEach(l => { p[l.number] = progress[l.number] === "passed" ? "passed" : "active"; }));
     onUpdate({ progress: p });
+  }
+  function toggleLock(lessonNumber, state) {
+    onUpdate({ progress: { ...progress, [lessonNumber]: state === "locked" ? "active" : "locked" } });
+  }
+  function saveLesson(lessonNumber, draft) {
+    const data = { ...school, semesters: (school.semesters || []).map(sem => ({ ...sem, lessons: (sem.lessons || []).map(l => l.number === lessonNumber ? { ...l, ...draft } : l) })) };
+    onUpdate({ data });
+  }
+  function deleteLessonByNumber(lessonNumber) {
+    const data = { ...school, semesters: (school.semesters || []).map(sem => ({ ...sem, lessons: (sem.lessons || []).filter(l => l.number !== lessonNumber) })) };
+    onUpdate({ data });
   }
 
   async function applyIteration(inst) {
@@ -1913,12 +2101,47 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
     if (buildingTool || readOnly) return;
     setBuildingTool(key || "custom");
     try {
-      const ctx = `SCHOOL: ${school.name} — ${school.description}\nMENTOR: ${school.mentor.name} (${school.mentor.teachingStyle})\nLESSON TOPICS: ${school.semesters?.flatMap(s => s.lessons?.map(l => l.title)).join("; ")}\n${school.knowledgeDNA ? `KNOWLEDGE DNA:\n${String(school.knowledgeDNA).slice(0, 2000)}\n` : ""}\nTOOL REQUEST: ${request}`;
-      const spec = await apiJSON(TOOLBUILDER_SYS, [{ role: "user", content: ctx }], 1500);
+      const ctx = `SCHOOL: ${school.name} — ${school.description}\nLEARNING PATH: ${school.learningPath || "mixed"}\nMENTOR: ${school.mentor.name} (${school.mentor.teachingStyle})\nLESSON TOPICS: ${school.semesters?.flatMap(s => s.lessons?.map(l => l.title)).join("; ")}\n${school.knowledgeDNA ? `KNOWLEDGE DNA:\n${String(school.knowledgeDNA).slice(0, 2000)}\n` : ""}\nTOOL REQUEST: ${request}`;
+      const spec = normalizeTool(await apiJSON(TOOLBUILDER_SYS, [{ role: "user", content: ctx }], 2500));
+      if (!spec) throw new Error("empty tool spec — try rephrasing");
       spec.id = uid();
-      onUpdate({ tools: [...(rec.tools || []), spec] });
+      // If this was built from a suggestion chip, remove that idea so it doesn't linger.
+      const ideaIdx = (typeof key === "string" && key.startsWith("idea-")) ? parseInt(key.slice(5), 10) : -1;
+      onUpdate({
+        tools: [...(rec.tools || []), spec],
+        ...(ideaIdx >= 0 ? { data: { ...school, toolIdeas: (school.toolIdeas || []).filter((_, i) => i !== ideaIdx) } } : {}),
+      });
       showToast(`✓ Tool built: ${spec.title}`); setTab("tools");
     } catch (e) { showToast(`✕ Tool build failed: ${e.message}`, "err"); }
+    setBuildingTool(null);
+  }
+
+  async function editTool(tool, instruction) {
+    if (buildingTool || readOnly || !instruction) return;
+    setBuildingTool(tool.id);
+    try {
+      const ctx = `EXISTING TOOL (JSON):\n${JSON.stringify({ type: tool.type, title: tool.title, description: tool.description, data: tool.data || {} })}\n\nSCHOOL: ${school.name}. LEARNING PATH: ${school.learningPath || "mixed"}.\n\nCHANGE REQUESTED: ${instruction}\n\nReturn the FULL updated tool JSON (same shape). You may change its type if the change requires it (e.g. switch a numeric calculator to mode:"ai" with text fields).`;
+      const spec = normalizeTool(await apiJSON(TOOLBUILDER_SYS, [{ role: "user", content: ctx }], 2500));
+      if (!spec) throw new Error("empty tool spec");
+      spec.id = tool.id;
+      onUpdate({ tools: (rec.tools || []).map(t => t.id === tool.id ? spec : t), toolStates: { ...(rec.toolStates || {}), [tool.id]: {} } });
+      showToast(`✓ Tool updated: ${spec.title}`);
+    } catch (e) { showToast(`✕ ${e.message}`, "err"); }
+    setBuildingTool(null);
+  }
+
+  async function reloadIdeas() {
+    if (readOnly || buildingTool) return;
+    setBuildingTool("reload");
+    try {
+      const existing = [...(school.toolIdeas || []).map(t => t.name), ...(rec.tools || []).map(t => t.title)].join("; ");
+      const sys = `Suggest a FRESH set of interactive learning tools for this school. Return ONLY JSON: {"toolIdeas":[3-4 of {"name","why" (one line),"type"}]}. "type" is one of: ${ALL_BLOCKS.join(", ")}, checklist, habit, journal, timer, counter, quiz. Make each specific to the school and DIFFERENT from already-suggested/built: ${existing || "none"}.`;
+      const ctx = `SCHOOL: ${school.name} — ${school.description}\nLEARNING PATH: ${school.learningPath || "mixed"}\nLESSONS: ${school.semesters?.flatMap(s => s.lessons?.map(l => l.title)).join("; ")}`;
+      const out = await apiJSON(sys, [{ role: "user", content: ctx }], 900);
+      const ideas = Array.isArray(out) ? out : out.toolIdeas;
+      if (Array.isArray(ideas) && ideas.length) { onUpdate({ data: { ...school, toolIdeas: ideas } }); showToast("✓ Fresh tool suggestions"); }
+      else throw new Error("no ideas returned");
+    } catch (e) { showToast(`✕ ${e.message}`, "err"); }
     setBuildingTool(null);
   }
 
@@ -1931,6 +2154,11 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
     <div style={{ position: "relative", fontFamily: fontStack(school) }}>
       <Toast toast={toast} />
       {activeLesson && <LessonView school={school} lesson={activeLesson} T={T} onClose={() => setActiveLesson(null)} onPass={() => handlePass(activeLesson.number)} />}
+      {editingLesson && !readOnly && <LessonEditor lesson={editingLesson} T={T} allowed={allowedBlocksFor(school.learningPath)}
+        onSave={(draft) => { saveLesson(editingLesson.number, draft); setEditingLesson(null); showToast("✓ Lesson updated"); }}
+        onDelete={() => { if (window.confirm("Delete this lesson? This can't be undone.")) { deleteLessonByNumber(editingLesson.number); setEditingLesson(null); showToast("✓ Lesson deleted"); } }}
+        onApplyAI={(inst) => applyIteration(inst)}
+        onClose={() => setEditingLesson(null)} />}
       {showIterate && !readOnly && (
         <IteratePanel school={school} history={iterateHistory} loading={iterating} onApply={applyIteration}
           onTheme={(k) => { onUpdate({ data: { ...school, theme: k } }); showToast(`✓ Theme: ${THEMES[k].label}`); }}
@@ -1969,13 +2197,13 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
           <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 18, overflow: "hidden", animation: "fadeUp 0.5s ease" }}>
             <div style={{ padding: "30px 28px 22px", background: T.gr, borderBottom: `1px solid ${B.border}` }}>
               <div style={{ fontSize: 44, marginBottom: 10 }}>{school.emoji || "🏫"}</div>
-              <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: "clamp(20px,4vw,32px)", fontWeight: 700, letterSpacing: -1, color: B.white, marginBottom: 6 }}>{school.name}</div>
-              <div style={{ fontSize: 14, color: T.a, fontStyle: "italic", marginBottom: 12 }}>{school.tagline}</div>
+              <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: "clamp(20px,4vw,32px)", fontWeight: 700, letterSpacing: -1, color: B.white, marginBottom: 6 }}><EditableText value={school.name} readOnly={readOnly} onSave={v => onUpdate({ data: { ...school, name: v } })} /></div>
+              <div style={{ fontSize: 14, color: T.a, fontStyle: "italic", marginBottom: 12 }}><EditableText value={school.tagline} readOnly={readOnly} onSave={v => onUpdate({ data: { ...school, tagline: v } })} /></div>
               <div style={{ fontSize: 13, color: B.mutedMid, lineHeight: 1.7, maxWidth: 560 }}>{school.description}</div>
             </div>
             <div style={{ padding: "14px 28px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 14 }}>
               <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
-                {[["Duration", school.duration], ["Category", school.category], ["Path", school.learningPath || "mixed"], ["Lessons", total]].map(([l, v]) => (
+                {[["Duration", school.duration], ["Category", school.category], ["Path", pathLabel(school.learningPath)], ["Lessons", total]].map(([l, v]) => (
                   <div key={l}><div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, color: B.muted, marginBottom: 2 }}>{l}</div><div style={{ fontSize: 14, fontWeight: 700, color: B.white }}>{v}</div></div>
                 ))}
               </div>
@@ -2016,12 +2244,12 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
                 <div style={{ padding: "16px 22px", borderBottom: `1px solid ${B.border}`, background: B.surface2, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
                   <div>
                     <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 2, color: T.p, marginBottom: 3 }}>Semester {sem.number || si + 1}</div>
-                    <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 17, fontWeight: 700, color: B.white, letterSpacing: -0.3 }}>{sem.title}</div>
+                    <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 17, fontWeight: 700, color: B.white, letterSpacing: -0.3 }}><EditableText value={sem.title} readOnly={readOnly} onSave={v => onUpdate({ data: { ...school, semesters: school.semesters.map((s, i) => i === si ? { ...s, title: v } : s) } })} /></div>
                     {sem.theme && <div style={{ fontSize: 12, color: B.muted, marginTop: 1 }}>{sem.theme}</div>}
                   </div>
                   {sem.weeks && <div style={{ fontSize: 11, color: T.a, fontWeight: 700, background: T.as_, border: `1px solid ${T.ba}`, borderRadius: 100, padding: "4px 11px" }}>{sem.weeks}</div>}
                 </div>
-                {sem.lessons?.map((l, li) => <LessonRow key={li} lesson={l} idx={li} T={T} progress={progress} onEnter={setActiveLesson} />)}
+                {sem.lessons?.map((l, li) => <LessonRow key={li} lesson={l} idx={li} T={T} progress={progress} onEnter={setActiveLesson} onEdit={setEditingLesson} onToggleLock={toggleLock} readOnly={readOnly} />)}
               </div>
             ))}
             {school.gamification && (
@@ -2047,7 +2275,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
             )}
           </>)}
           {tab === "mentor" && <MentorOffice school={school} T={T} chat={rec.mentorChat || []} onChat={(msgs) => onUpdate({ mentorChat: msgs })} />}
-          {tab === "tools" && <ToolsSection rec={rec} T={T} onUpdate={onUpdate} buildTool={buildTool} buildingTool={buildingTool} readOnly={readOnly} />}
+          {tab === "tools" && <ToolsSection rec={rec} T={T} onUpdate={onUpdate} buildTool={buildTool} buildingTool={buildingTool} readOnly={readOnly} onReloadIdeas={reloadIdeas} onEditTool={editTool} />}
         </div>
       </div>
     </div>
@@ -2239,7 +2467,10 @@ export default function Senseito() {
   const publicMatch = path.match(/^\/s\/([a-z0-9-]+)/i);
   if (publicMatch) return <PublicSchool slug={publicMatch[1]} />;
 
-  const [schools, setSchools] = useState([]);
+  const [schools, setSchools] = useState(() => {
+    try { const s = localStorage.getItem("senseito_schools"); if (s) return JSON.parse(s); } catch { }
+    return [];
+  });
   const [view, setView] = useState("home");
   const [sideOpen, setSideOpen] = useState(false);
   const [session, setSession] = useState(null);
@@ -2313,11 +2544,21 @@ export default function Senseito() {
     return () => clearTimeout(saveTimer.current);
   }, [schools, session]);
 
+  // Always cache schools locally so progress survives reloads / browser restarts,
+  // signed in or not (cloud sync, when signed in, remains the source of truth).
+  useEffect(() => {
+    try { localStorage.setItem("senseito_schools", JSON.stringify(schools)); } catch { }
+  }, [schools]);
+
   function createSchool(composed) {
     const rec = { id: uid(), data: composed, tools: [], toolStates: {}, progress: {}, xp: 0, revision: 0, mentorChat: [], advisorChat: [], published: false, published_slug: null, createdAt: Date.now(), _owner: session?.user?.id || null };
     setSchools(s => [rec, ...s]); setView(rec.id);
   }
   function updateSchool(id, patch) { setSchools(s => s.map(r => r.id === id ? { ...r, ...patch } : r)); }
+  function renameSchool(id, currentName) {
+    const name = window.prompt("Rename school:", currentName);
+    if (name && name.trim()) setSchools(s => s.map(r => r.id === id ? { ...r, data: { ...r.data, name: name.trim() } } : r));
+  }
   async function deleteSchool(id, name) {
     if (!window.confirm(`Delete "${name}"? This can't be undone.`)) return;
     setSchools(s => s.filter(r => r.id !== id)); if (view === id) setView("home");
@@ -2380,7 +2621,8 @@ export default function Senseito() {
                   <div style={{ fontSize: 12.5, fontWeight: 600, color: B.white, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.data.name}{r.published ? " 🌐" : ""}</div>
                   <div style={{ fontSize: 10.5, color: B.muted }}>{done}/{total} lessons</div>
                 </div>
-                <button onClick={e => { e.stopPropagation(); deleteSchool(r.id, r.data.name); }} style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 12, padding: 4, opacity: 0.6 }}>✕</button>
+                <button onClick={e => { e.stopPropagation(); renameSchool(r.id, r.data.name); }} title="Rename" style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 12, padding: 4, opacity: 0.6 }}>✎</button>
+                <button onClick={e => { e.stopPropagation(); deleteSchool(r.id, r.data.name); }} title="Delete" style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 12, padding: 4, opacity: 0.6 }}>✕</button>
               </div>
             );
           })}
