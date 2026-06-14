@@ -391,6 +391,14 @@ The learningPath determines which interactive blocks you may use and how lessons
 STEP 2 — PICK THE MENTOR VOICE, INDEPENDENTLY.
 voicePreset is a SEPARATE dimension from learningPath. A "language" school can have any voice (drill, socratic, storyteller…). Choose the voice that best fits the creator's request; if they named a persona, match it.
 
+STEP 2.5 — DESIGN THE STRUCTURE (do NOT assume a fixed "lessons" spine).
+Decide which SECTIONS this experience needs, based on the subject. Section kinds:
+- "lessons": a gated, sequential curriculum — use when there is a real progression to master.
+- "mentor": an always-available AI mentor for open questions/coaching.
+- "tools": a place where the learner builds and uses their own interactive tools.
+- "dashboard": an always-on grid of bricks the learner returns to (NOT gated). Perfect for practice-driven subjects — e.g. yoga → pose gallery + breath timer + streak tracker; trading → trade journal + metric tracker; meditation → reflection timer + mood quadrant.
+Pick ONLY the sections that genuinely fit. A yoga/habit/practice experience might be a dashboard + mentor with NO lessons at all; a philosophy course might be lessons + mentor. Honor any structure the creator asked for. Each dashboard section carries its own blockTypes (from the allowed list) the learner uses directly.
+
 STEP 3 — PLAN BLOCKS PER LESSON (TYPES ONLY).
 For each lesson choose 1-3 block TYPES from the chosen path's ALLOWED list ONLY (never a forbidden one), ordered pedagogically (e.g. reading → practice → check); the LAST should prove mastery. List ONLY the type strings now — their detailed contents are generated later, so keep this plan compact.
 Available block types: ${ALL_BLOCKS.join(", ")}.
@@ -408,7 +416,9 @@ Otherwise return an object with these fields:
 - systemVoice: ONLY if voicePreset is custom — 3-4 sentences capturing exactly how they speak, vocabulary, catchphrases, what they'd NEVER say. Else omit.
 - transformation: vivid before/after of the student
 - gamiPreset: one of xp (default), belts (discipline/martial), quest (adventure/story), none
-- semesters: array of { number, title, theme, weeks, lessons: [ { number, title, type (Dialogue|RolePlay|Mission|Reflection|SkillTest|Quiz|Debate|Journal), concept (1-2 sentences), openingLine (exact first thing the mentor says, in voice), mission, passCriteria (specific, measurable), blockTypes: [ 1-3 block type strings, allowed for the learningPath ] } ] }
+- layout: best-fit of course | guided | course_toolkit | coach | practice | toolkit | custom
+- sections: ordered array describing the experience — each { kind:"lessons"|"mentor"|"tools"|"dashboard", title (short, subject-flavored, e.g. "Daily Practice"), icon (one emoji), intro (one short line, optional), blockTypes:[2-5 types] (ONLY for dashboard sections — use ONLY the available block types listed in STEP 3, never invent new ones) }. Include a "lessons" section ONLY if you actually provide semesters below.
+- semesters: ONLY if a "lessons" section is included — array of { number, title, theme, weeks, lessons: [ { number, title, type (Dialogue|RolePlay|Mission|Reflection|SkillTest|Quiz|Debate|Journal), concept (1-2 sentences), openingLine (exact first thing the mentor says, in voice), mission, passCriteria (specific, measurable), blockTypes: [ 1-3 block type strings, allowed for the learningPath ] } ] }
 - suggestions: 3-4 short, SPECIFIC improvement ideas for THIS school
 - toolIdeas: 2-3 of { name, why (one line), type (any block type that fits this school) }
 
@@ -442,7 +452,8 @@ Format exactly:
 Output only the markdown. No preamble.`;
 
 const ITERATE_SYS = `You are the Senseito School Editor AI. You receive an existing school PLAN as JSON (lessons describe activities as "blockTypes": [type strings] only — NOT full block data) and an edit instruction.
-Return the FULL updated plan as JSON with the EXACT same structure and field names. Apply ONLY the requested change; preserve everything else exactly, including all lesson "number" values, each lesson's "blockTypes" array, and learningPath/voicePreset/gamiPreset/theme (change those only if asked). Also refresh "suggestions" to 3-4 NEW specific ideas that fit after this change.
+Return the FULL updated plan as JSON with the EXACT same structure and field names. Apply ONLY the requested change; preserve everything else exactly, including all lesson "number" values, each lesson's "blockTypes" array, the "sections" array, "layout", and learningPath/voicePreset/gamiPreset/theme (change those only if asked). Also refresh "suggestions" to 3-4 NEW specific ideas that fit after this change.
+SECTIONS: the experience is made of "sections" (kinds: lessons, mentor, tools, dashboard). PRESERVE the existing sections and their order unless the instruction asks to add/remove/reorder them. A "dashboard" section has its own "blockTypes": [type strings] — keep them unless asked; if adding a tool to a dashboard, append a blockType. If the user asks for a new always-available tool/section, you may add a dashboard section.
 BLOCKS: keep each lesson's existing "blockTypes" unless the instruction changes them. When ADDING or RE-ORIENTING lessons, give each 1-3 blockTypes allowed for the school's learningPath (see list). Do NOT output block data — only type names. Block contents are authored in a separate step.
 Allowed block types per learning path:
 ${PATH_GUIDE}
@@ -516,9 +527,11 @@ function composeSchool(content, dna) {
   const voice = content.systemVoice || VOICES[content.voicePreset] || VOICES.sage;
   const preset = GAMI[content.gamiPreset] || GAMI.xp;
   const learningPath = LEARNING_PATH_RULES[content.learningPath] ? content.learningPath : "mixed";
+  const sections = normalizeSections(content); // null → getSections() derives at render
   return {
     ...content,
     learningPath,
+    ...(sections ? { sections } : {}),
     theme: THEMES[content.theme] ? content.theme : "violet",
     mentor: {
       name: content.mentorName || "The Mentor",
@@ -550,6 +563,9 @@ function planOnly(school) {
       ...s,
       lessons: (s.lessons || []).map(l => { const { blocks, ...rest } = l; return { ...rest, blockTypes: (blocks || []).map(b => b.type) }; }),
     })),
+    sections: (c.sections || []).map(s => s.kind === "dashboard"
+      ? (() => { const { blocks, ...rest } = s; return { ...rest, blockTypes: (blocks || []).map(b => b.type) }; })()
+      : s),
   };
 }
 
@@ -586,7 +602,71 @@ async function fillSchoolBlocks(content, { oldSchool = null, dna = null } = {}) 
       toFill.forEach(l => { l.blocks = (l._types || ["reading_plain"]).map(t => fallbackBlock(t, l)); delete l._types; delete l.blockTypes; });
     }
   }));
+
+  // Author block data for any DASHBOARD sections (always-on grids of bricks).
+  await Promise.all((content.sections || []).filter(s => s.kind === "dashboard").map(async (sec) => {
+    const oldSec = (oldSchool?.sections || []).find(o => o.id === sec.id && o.kind === "dashboard");
+    const oldTypes = (oldSec?.blocks || []).map(b => b.type);
+    const types = (sec.blockTypes && sec.blockTypes.length) ? sec.blockTypes : oldTypes;
+    if (oldSec && oldTypes.length === types.length && oldTypes.every((t, i) => t === types[i]) && (oldSec.blocks || []).every(b => b.data) && same(oldSec.title, sec.title)) { sec.blocks = oldSec.blocks; delete sec.blockTypes; return; }
+    if (sec.blocks && sec.blocks.length && sec.blocks.every(b => b.data) && !(sec.blockTypes && sec.blockTypes.length)) { delete sec.blockTypes; return; }
+    const t2 = types.length ? types : ["reading_plain"];
+    const tok = Math.min(16000, Math.max(2500, t2.length * 1300 + 1000));
+    const ctxLesson = { title: sec.title, concept: sec.intro || sec.title };
+    try {
+      const filled = await apiJSON(BLOCKFILL_SYS, [{ role: "user", content: `${ctxHeader}\n\nDASHBOARD SECTION (always-available tools, not a gated lesson): "${sec.title}"${sec.intro ? ` — ${sec.intro}` : ""}\nReturn ONE lesson object with number 0 whose "blocks" are exactly these types in order: ${JSON.stringify(t2)}` }], tok);
+      const arr = Array.isArray(filled) ? filled : (filled.lessons || []);
+      const got = (arr[0]?.blocks || []).filter(b => b && b.type);
+      sec.blocks = (got && got.length) ? got : t2.map(t => fallbackBlock(t, ctxLesson)); delete sec.blockTypes;
+    } catch {
+      sec.blocks = t2.map(t => fallbackBlock(t, ctxLesson)); delete sec.blockTypes;
+    }
+  }));
   return content;
+}
+
+// ─────────────────────────────────────────────────────────────
+// SECTIONS — the experience is a list of sections, not a fixed spine.
+// kinds: lessons (gated curriculum) · mentor (AI office hours) ·
+//        tools (build-your-own) · dashboard (always-on grid of bricks)
+// ─────────────────────────────────────────────────────────────
+const SECTION_META = {
+  lessons: { title: "Lessons", icon: "📚" },
+  mentor: { title: "Mentor", icon: "🎓" },
+  tools: { title: "Tools", icon: "🛠️" },
+  dashboard: { title: "Dashboard", icon: "🧭" },
+};
+// Starting layouts the creator can pick (or "auto" = let the AI decide).
+const LAYOUTS = {
+  course: { label: "Full Course", kinds: ["lessons", "mentor", "tools"], desc: "Lessons + AI mentor + tools" },
+  guided: { label: "Guided Course", kinds: ["lessons", "mentor"], desc: "Lessons with an AI mentor" },
+  course_toolkit: { label: "Course + Toolkit", kinds: ["lessons", "tools"], desc: "Lessons + tools, no mentor" },
+  coach: { label: "Coaching Space", kinds: ["mentor", "tools"], desc: "AI mentor + tools, no fixed lessons" },
+  practice: { label: "Practice Dashboard", kinds: ["dashboard", "mentor"], desc: "A live dashboard of tools + a mentor" },
+  toolkit: { label: "Pure Toolkit", kinds: ["tools"], desc: "Just interactive tools" },
+};
+function sectionTitle(s) { return `${s.icon || SECTION_META[s.kind]?.icon || "•"} ${s.title || SECTION_META[s.kind]?.title || "Section"}`; }
+// Render-time: use explicit sections, else derive from legacy data (backward compat).
+function getSections(school) {
+  if (Array.isArray(school?.sections) && school.sections.length) return school.sections;
+  const out = [];
+  if (school?.semesters?.some(s => s.lessons?.length)) out.push({ id: "lessons", kind: "lessons", title: "Lessons", icon: "📚" });
+  out.push({ id: "mentor", kind: "mentor", title: "Mentor", icon: "🎓" });
+  out.push({ id: "tools", kind: "tools", title: "Tools", icon: "🛠️" });
+  return out;
+}
+// Normalize architect output (or a chosen layout) into clean sections with stable ids.
+function normalizeSections(content) {
+  let secs = (Array.isArray(content.sections) && content.sections.length) ? content.sections : null;
+  if (!secs && LAYOUTS[content.layout]) secs = LAYOUTS[content.layout].kinds.map(k => ({ kind: k }));
+  if (!secs) return null;
+  const seen = {};
+  return secs.filter(s => s && SECTION_META[s.kind]).map((s, i) => {
+    const singleton = s.kind !== "dashboard";
+    let id = s.id || (singleton ? s.kind : `${s.kind}_${i}`);
+    while (seen[id]) id = `${id}_${i}`; seen[id] = true;
+    return { id, kind: s.kind, title: s.title || SECTION_META[s.kind].title, icon: s.icon || SECTION_META[s.kind].icon, intro: s.intro, ...(s.kind === "dashboard" ? { blocks: s.blocks || [] } : {}) };
+  });
 }
 
 const DNA_THRESHOLD = 3000;
@@ -1796,6 +1876,26 @@ function ToolsSection({ rec, T, onUpdate, buildTool, buildingTool, readOnly, onR
 }
 
 // ─────────────────────────────────────────────────────────────
+// DASHBOARD SECTION — always-on grid of bricks (ungated)
+// ─────────────────────────────────────────────────────────────
+function DashboardSection({ section, rec, T, onUpdate, readOnly, school }) {
+  const blocks = section.blocks || [];
+  const stateFor = (i) => rec.toolStates?.[`${section.id}:${i}`];
+  const setStateFor = (i, s) => onUpdate({ toolStates: { ...(rec.toolStates || {}), [`${section.id}:${i}`]: s } });
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {section.intro && <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: "14px 20px", fontSize: 13, color: B.mutedMid, lineHeight: 1.6 }}>{section.intro}</div>}
+      {blocks.length === 0 && <div style={{ textAlign: "center", padding: "30px 20px", fontSize: 13, color: B.muted, border: `1px dashed ${B.borderMid}`, borderRadius: 14 }}>{readOnly ? "Nothing here yet." : "No tools here yet — add some from the Iterate panel."}</div>}
+      {blocks.map((b, i) => (
+        <div key={i} style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 16, padding: 16, animation: "fadeUp 0.4s ease backwards", animationDelay: `${Math.min(i, 8) * 55}ms` }}>
+          <BlockRenderer block={b} T={T} school={school} state={stateFor(i)} onState={(s) => setStateFor(i, s)} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
 // LESSON ROW
 // ─────────────────────────────────────────────────────────────
 function LessonRow({ lesson, idx, T, progress, onEnter, onEdit, onToggleLock, readOnly }) {
@@ -2190,7 +2290,9 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
       try { const rows = await supaFetch(`/rest/v1/enrollments?select=email,name,progress,xp,updated_at&school_id=eq.${rec.id}&order=updated_at.desc`, { token }); setStudents(rows || []); } catch { }
     })();
   }, [rec.published, rec.id, token]); // eslint-disable-line
-  const [tab, setTab] = useState("lessons");
+  const SECTIONS = getSections(school);
+  const [tab, setTab] = useState(() => SECTIONS[0]?.id || "mentor");
+  const activeTab = SECTIONS.some(s => s.id === tab) ? tab : SECTIONS[0]?.id; // stay valid if layout changes
   const [activeLesson, setActiveLesson] = useState(null);
   const [editingLesson, setEditingLesson] = useState(null);
   const [showIterate, setShowIterate] = useState(false);
@@ -2338,7 +2440,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const total = school.semesters?.reduce((a, s) => a + (s.lessons?.length || 0), 0) || 0;
   const passedCount = Object.values(progress).filter(v => v === "passed").length;
   const pct = total ? Math.round((passedCount / total) * 100) : 0;
-  const TABS = [["lessons", "📚 Lessons"], ["mentor", "🎓 Mentor"], ["tools", `🛠️ Tools${rec.tools?.length ? ` (${rec.tools.length})` : ""}`]];
+  const TABS = SECTIONS.map(s => [s.id, sectionTitle(s) + (s.kind === "tools" && rec.tools?.length ? ` (${rec.tools.length})` : "")]);
 
   return (
     <div style={{ position: "relative", fontFamily: fontStack(school) }}>
@@ -2440,11 +2542,11 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
           {/* Tabs */}
           <div style={{ display: "flex", gap: 4, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: 5, position: "sticky", top: 10, zIndex: 80, backdropFilter: "blur(8px)" }}>
             {TABS.map(([k, l]) => (
-              <button key={k} onClick={() => setTab(k)} style={{ flex: 1, padding: "10px 0", borderRadius: 10, border: "none", background: tab === k ? `linear-gradient(135deg,${T.p},${T.p}CC)` : "transparent", color: tab === k ? "white" : B.mutedMid, fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", boxShadow: tab === k ? `0 0 16px ${T.pg}` : "none", transition: "all 0.2s" }}>{l}</button>
+              <button key={k} onClick={() => setTab(k)} style={{ flex: "1 1 auto", minWidth: 90, padding: "10px 8px", borderRadius: 10, border: "none", background: activeTab === k ? `linear-gradient(135deg,${T.p},${T.p}CC)` : "transparent", color: activeTab === k ? "white" : B.mutedMid, fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", boxShadow: activeTab === k ? `0 0 16px ${T.pg}` : "none", transition: "all 0.2s" }}>{l}</button>
             ))}
           </div>
 
-          {tab === "lessons" && (<>
+          {activeTab === "lessons" && (<>
             {school.transformation && (
               <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: "16px 22px" }}>
                 <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.5, color: T.p, marginBottom: 5 }}>Your Transformation</div>
@@ -2497,8 +2599,11 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
               </div>
             )}
           </>)}
-          {tab === "mentor" && <MentorOffice school={school} T={T} chat={rec.mentorChat || []} onChat={(msgs) => onUpdate({ mentorChat: msgs })} />}
-          {tab === "tools" && <ToolsSection rec={rec} T={T} onUpdate={onUpdate} buildTool={buildTool} buildingTool={buildingTool} readOnly={readOnly} onReloadIdeas={reloadIdeas} onEditTool={editTool} />}
+          {activeTab === "mentor" && <MentorOffice school={school} T={T} chat={rec.mentorChat || []} onChat={(msgs) => onUpdate({ mentorChat: msgs })} />}
+          {activeTab === "tools" && <ToolsSection rec={rec} T={T} onUpdate={onUpdate} buildTool={buildTool} buildingTool={buildingTool} readOnly={readOnly} onReloadIdeas={reloadIdeas} onEditTool={editTool} />}
+          {SECTIONS.filter(s => s.kind === "dashboard").map(sec => activeTab === sec.id
+            ? <DashboardSection key={sec.id} section={sec} rec={rec} T={T} onUpdate={onUpdate} readOnly={readOnly} school={school} />
+            : null)}
         </div>
       </div>
     </div>
@@ -2519,8 +2624,18 @@ function Home({ onCreated }) {
   const [attaching, setAttaching] = useState(false);
   const [questions, setQuestions] = useState([]);    // proactive follow-ups
   const [answers, setAnswers] = useState({});
+  const [struct, setStruct] = useState({ layout: "auto", depth: "auto", interactivity: "auto" });
+  const [showStruct, setShowStruct] = useState(false);
   const taRef = useRef(null);
   const stepIdx = useTicker(phase === "building", BUILD_STEPS.length, 950);
+
+  function structHint() {
+    const h = [];
+    if (struct.layout !== "auto") h.push(`Use the "${struct.layout}" layout (${LAYOUTS[struct.layout]?.kinds.join(" + ")}).`);
+    if (struct.depth !== "auto") h.push({ short: "Keep it short — about 3 lessons.", standard: "Standard depth — about 6 lessons.", deep: "Go deep — about 10 lessons." }[struct.depth]);
+    if (struct.interactivity !== "auto") h.push({ light: "Keep it light — mostly reading/video, minimal interaction.", standard: "A balanced mix of reading and interactive practice.", hands: "Make it highly interactive — lots of practice, games, and tools." }[struct.interactivity]);
+    return h.length ? `\n\nSTRUCTURE PREFERENCES (honor these):\n${h.join("\n")}` : "";
+  }
 
   async function onFile(e) {
     const f = e.target.files?.[0]; if (!f) return;
@@ -2537,7 +2652,7 @@ function Home({ onCreated }) {
       if (source.length > DNA_THRESHOLD) { dna = await api(DISTILL_SYS, [{ role: "user", content: source.slice(0, 30000) }], 1200); vision = (prompt || source).slice(0, 600); }
 
       // PHASE 1 — compact plan (structure + block TYPES only). Always small, never truncates.
-      const planMsg = `Plan a school for this concept: ${vision}${dna ? `\n\nKNOWLEDGE DNA (teach THIS):\n${dna}` : ""}`;
+      const planMsg = `Plan a school for this concept: ${vision}${dna ? `\n\nKNOWLEDGE DNA (teach THIS):\n${dna}` : ""}${structHint()}`;
       const plan = await apiJSON(ARCHITECT_SYS, [{ role: "user", content: planMsg }], 6000, "sonnet");
       if (plan.needMoreInfo) { setClarifyQ(plan.needMoreInfo); setClarifyA(""); setPhase("clarify"); return; }
       const content = plan.school || plan;
@@ -2612,8 +2727,29 @@ function Home({ onCreated }) {
           </div>
         </div>
       )}
+      {(phase === "idle" || phase === "error") && (
+        <div style={{ marginTop: 12 }}>
+          <button onClick={() => setShowStruct(s => !s)} style={{ background: "none", border: "none", color: B.muted, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>{showStruct ? "▾" : "▸"} Structure (optional) — or let the AI decide everything</button>
+          {showStruct && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 10, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 12, padding: "12px 14px" }}>
+              {[
+                ["layout", "Layout", [["auto", "Auto"], ...Object.entries(LAYOUTS).map(([k, v]) => [k, v.label])]],
+                ["depth", "Depth", [["auto", "Auto"], ["short", "Short"], ["standard", "Standard"], ["deep", "Deep"]]],
+                ["interactivity", "Interactivity", [["auto", "Auto"], ["light", "Light"], ["standard", "Standard"], ["hands", "Hands-on"]]],
+              ].map(([key, label, opts]) => (
+                <div key={key} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <span style={{ fontSize: 10, color: B.muted, textTransform: "uppercase", letterSpacing: 1 }}>{label}</span>
+                  <select value={struct[key]} onChange={e => setStruct(s => ({ ...s, [key]: e.target.value }))} style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.white, fontFamily: "inherit", fontSize: 12, padding: "6px 9px", cursor: "pointer" }}>
+                    {opts.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                  </select>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       {phase === "idle" && (
-        <div style={{ marginTop: 30 }}>
+        <div style={{ marginTop: 24 }}>
           <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.5, color: B.muted, marginBottom: 12, textAlign: "center" }}>Or open a ready-made school — instantly, free</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))", gap: 12 }}>
             {EXAMPLE_SCHOOLS.map((ex, i) => {
