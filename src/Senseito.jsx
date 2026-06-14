@@ -388,10 +388,11 @@ Format exactly:
 ## Teaching Stance
 Output only the markdown. No preamble.`;
 
-const ITERATE_SYS = `You are the Senseito School Editor AI. You receive an existing school JSON and an edit instruction.
-Return the FULL updated school as a JSON object with the EXACT same structure and field names as the input. Apply ONLY the requested changes; preserve everything else exactly, including all lesson "number" values, every lesson's "blocks" array, and the learningPath/voicePreset/gamiPreset/theme fields (change those only if asked). Also update "suggestions" to 3-4 NEW specific ideas that make sense after this change.
-BLOCKS: every lesson has a blocks array of { type, data }. When adding or regenerating lessons, include 1-3 blocks using ONLY block types allowed for this school's learningPath. Respect these data shapes:
-${BLOCK_SCHEMA_GUIDE}
+const ITERATE_SYS = `You are the Senseito School Editor AI. You receive an existing school PLAN as JSON (lessons describe activities as "blockTypes": [type strings] only — NOT full block data) and an edit instruction.
+Return the FULL updated plan as JSON with the EXACT same structure and field names. Apply ONLY the requested change; preserve everything else exactly, including all lesson "number" values, each lesson's "blockTypes" array, and learningPath/voicePreset/gamiPreset/theme (change those only if asked). Also refresh "suggestions" to 3-4 NEW specific ideas that fit after this change.
+BLOCKS: keep each lesson's existing "blockTypes" unless the instruction changes them. When ADDING or RE-ORIENTING lessons, give each 1-3 blockTypes allowed for the school's learningPath (see list). Do NOT output block data — only type names. Block contents are authored in a separate step.
+Allowed block types per learning path:
+${PATH_GUIDE}
 SPECIAL CASE: lesson locking/unlocking and progress are managed by the app. If the instruction is purely about unlocking lessons or progress, return ONLY: {"appAction": "unlockAll"}.`;
 
 const TOOLBUILDER_SYS = `You are the Senseito Tool Builder AI. Build ONE interactive learning tool as a JSON object: { type, title, description, data }.
@@ -484,6 +485,55 @@ function composeSchool(content, dna) {
 function contentOnly(school) {
   const { gamification, knowledgeDNA, mentor, ...rest } = school;
   return { ...rest, mentorName: mentor?.name, mentorPersonality: mentor?.personality, sampleLine: mentor?.sampleLine, systemVoice: rest.voicePreset === "custom" ? mentor?.systemVoice : undefined };
+}
+
+// Like contentOnly, but lessons carry only block TYPES (no data) — compact payload
+// for the editor so it never truncates. Block data is preserved/filled afterwards.
+function planOnly(school) {
+  const c = contentOnly(school);
+  return {
+    ...c,
+    semesters: (c.semesters || []).map(s => ({
+      ...s,
+      lessons: (s.lessons || []).map(l => { const { blocks, ...rest } = l; return { ...rest, blockTypes: (blocks || []).map(b => b.type) }; }),
+    })),
+  };
+}
+
+// Author block DATA for a school plan, one semester at a time (parallel, budgeted).
+// Reuses existing block data for lessons that are unchanged; fills new/changed ones.
+async function fillSchoolBlocks(content, { oldSchool = null, dna = null } = {}) {
+  const oldByNum = {};
+  (oldSchool?.semesters || []).forEach(s => (s.lessons || []).forEach(l => { oldByNum[l.number] = l; }));
+  const same = (a, b) => (a || "") === (b || "");
+  const ctxHeader = `SCHOOL: ${content.name} — ${content.description}\nLEARNING PATH: ${content.learningPath || "mixed"}\nMENTOR: ${content.mentorName || content.mentor?.name || ""} (voice: ${content.voicePreset || "sage"})${dna ? `\nKNOWLEDGE DNA:\n${String(dna).slice(0, 2500)}` : ""}`;
+  await Promise.all((content.semesters || []).map(async (sem) => {
+    const toFill = [];
+    (sem.lessons || []).forEach(l => {
+      const old = oldByNum[l.number];
+      const oldTypes = (old?.blocks || []).map(b => b.type);
+      // If the editor didn't restate block types, inherit the old ones.
+      const types = (l.blockTypes && l.blockTypes.length) ? l.blockTypes : oldTypes;
+      const unchanged = old && oldTypes.length === types.length && oldTypes.every((t, i) => t === types[i]) && (old.blocks || []).every(b => b.data)
+        && same(old.title, l.title) && same(old.concept, l.concept) && same(old.mission, l.mission) && same(old.passCriteria, l.passCriteria);
+      if (unchanged) { l.blocks = old.blocks; delete l.blockTypes; return; }
+      if (l.blocks && l.blocks.length && l.blocks.every(b => b.data) && !(l.blockTypes && l.blockTypes.length)) { delete l.blockTypes; return; } // already has data
+      l._types = types.length ? types : ["reading_plain"]; toFill.push(l);
+    });
+    if (!toFill.length) return;
+    const lessons = toFill.map(l => ({ number: l.number, title: l.title, type: l.type, concept: l.concept, mission: l.mission, passCriteria: l.passCriteria, blockTypes: l._types }));
+    const blockCount = lessons.reduce((a, l) => a + (l.blockTypes?.length || 1), 0);
+    const tok = Math.min(16000, Math.max(3000, blockCount * 1300 + 1200));
+    try {
+      const filled = await apiJSON(BLOCKFILL_SYS, [{ role: "user", content: `${ctxHeader}\n\nSEMESTER: ${sem.title}\nLESSONS (return blocks for each, keyed by number):\n${JSON.stringify(lessons)}` }], tok);
+      const arr = Array.isArray(filled) ? filled : (filled.lessons || []);
+      const byNum = {}; arr.forEach(L => { if (L && L.number != null) byNum[L.number] = Array.isArray(L.blocks) ? L.blocks.filter(b => b && b.type) : []; });
+      toFill.forEach(l => { const got = byNum[l.number]; l.blocks = (got && got.length) ? got : (l._types || ["reading_plain"]).map(t => fallbackBlock(t, l)); delete l._types; delete l.blockTypes; });
+    } catch {
+      toFill.forEach(l => { l.blocks = (l._types || ["reading_plain"]).map(t => fallbackBlock(t, l)); delete l._types; delete l.blockTypes; });
+    }
+  }));
+  return content;
 }
 
 const DNA_THRESHOLD = 3000;
@@ -1750,12 +1800,29 @@ function blockFields(type) {
     quiz: [],
   })[type] || [];
 }
-function LessonEditor({ lesson, T, allowed, onSave, onDelete, onApplyAI, onClose }) {
+function LessonEditor({ lesson, T, allowed, onSave, onDelete, onApplyAI, onAuthorBlock, onClose }) {
   const [d, setD] = useState({ ...lesson, blocks: (lesson.blocks || []).map(b => ({ ...b, data: { ...(b.data || {}) } })), passLogic: lesson.passLogic || { mode: "default", threshold: 70 } });
   const [addType, setAddType] = useState("");
+  const [busyIdx, setBusyIdx] = useState(-1);
+  const [adding, setAdding] = useState(false);
   const set = (patch) => setD(x => ({ ...x, ...patch }));
   const setBlockData = (i, k, v) => setD(x => ({ ...x, blocks: x.blocks.map((b, j) => j === i ? { ...b, data: { ...b.data, [k]: v } } : b) }));
   const delBlock = (i) => setD(x => ({ ...x, blocks: x.blocks.filter((_, j) => j !== i) }));
+  const lessonCtx = () => ({ title: d.title, concept: d.concept, mission: d.mission, passCriteria: d.passCriteria });
+  const changeBlockType = (i, t) => setD(x => ({ ...x, blocks: x.blocks.map((b, j) => j === i ? { type: t, data: {} } : b) }));
+  async function rewriteBlock(i) {
+    const b = d.blocks[i];
+    const instruction = window.prompt("Customize this activity (optional) — e.g. 'make it harder', 'use travel vocabulary', 'add 5 more cards'") ?? "";
+    setBusyIdx(i);
+    try { const nb = await onAuthorBlock(b.type, instruction, lessonCtx()); setD(x => ({ ...x, blocks: x.blocks.map((bb, j) => j === i ? nb : bb) })); } catch { }
+    setBusyIdx(-1);
+  }
+  async function addBlock() {
+    if (!addType) return; setAdding(true);
+    try { const nb = await onAuthorBlock(addType, "", lessonCtx()); setD(x => ({ ...x, blocks: [...x.blocks, nb] })); setAddType(""); }
+    catch { setD(x => ({ ...x, blocks: [...x.blocks, { type: addType, data: {} }] })); setAddType(""); }
+    setAdding(false);
+  }
   const inp = { ...bx, fontSize: 13 };
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 220, background: "rgba(0,0,0,0.82)", backdropFilter: "blur(10px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onClose}>
@@ -1784,9 +1851,14 @@ function LessonEditor({ lesson, T, allowed, onSave, onDelete, onApplyAI, onClose
               const fields = blockFields(b.type);
               return (
                 <div key={i} style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 10, padding: 12, marginBottom: 8 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: fields.length ? 8 : 0 }}>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: B.white }}>{BLOCK_META[b.type]?.icon} {BLOCK_META[b.type]?.label || b.type}</span>
-                    <button onClick={() => delBlock(i)} style={{ background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.3)", borderRadius: 7, color: "#F87171", padding: "4px 9px", cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>✕ Delete</button>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
+                    <select value={b.type} onChange={e => changeBlockType(i, e.target.value)} title="Change activity type" style={{ ...inp.input, fontSize: 12, cursor: "pointer", width: "auto", flex: "1 1 150px" }}>
+                      {ALL_BLOCKS.map(t => <option key={t} value={t}>{BLOCK_META[t]?.icon} {BLOCK_META[t]?.label}</option>)}
+                    </select>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button onClick={() => rewriteBlock(i)} disabled={busyIdx === i} title="Rewrite with AI" style={{ background: "rgba(124,58,237,0.1)", border: "1px solid rgba(124,58,237,0.4)", borderRadius: 7, color: "#C4B5FD", padding: "4px 9px", cursor: "pointer", fontSize: 11, fontFamily: "inherit", opacity: busyIdx === i ? 0.6 : 1 }}>{busyIdx === i ? "…" : "✨ AI"}</button>
+                      <button onClick={() => delBlock(i)} style={{ background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.3)", borderRadius: 7, color: "#F87171", padding: "4px 9px", cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>✕</button>
+                    </div>
                   </div>
                   {fields.map(([k, label, kind]) => (
                     <div key={k} style={{ marginBottom: 6 }}>
@@ -1796,7 +1868,7 @@ function LessonEditor({ lesson, T, allowed, onSave, onDelete, onApplyAI, onClose
                         : <input value={b.data[k] || ""} onChange={e => setBlockData(i, k, e.target.value)} style={{ ...inp.input, fontSize: 12 }} />}
                     </div>
                   ))}
-                  {!fields.length && <div style={{ fontSize: 11, color: B.muted }}>Deep edits for this block: use the Iterate panel.</div>}
+                  {!fields.length && <div style={{ fontSize: 11, color: B.muted }}>Tap ✨ AI to (re)generate this activity, or change its type above.</div>}
                 </div>
               );
             })}
@@ -1806,7 +1878,7 @@ function LessonEditor({ lesson, T, allowed, onSave, onDelete, onApplyAI, onClose
                 <optgroup label="Recommended">{(allowed || ALL_BLOCKS).map(b => <option key={b} value={b}>{BLOCK_META[b]?.icon} {BLOCK_META[b]?.label}</option>)}</optgroup>
                 <optgroup label="All">{ALL_BLOCKS.map(b => <option key={b} value={b}>{BLOCK_META[b]?.icon} {BLOCK_META[b]?.label}</option>)}</optgroup>
               </select>
-              <button disabled={!addType} onClick={() => { onApplyAI(`Add a ${addType} block to lesson number ${lesson.number}. Fill its data fully per the schema and keep it consistent with the lesson. Preserve all other lessons and blocks.`); onClose(); }} style={{ ...pBtnLite(), opacity: addType ? 1 : 0.5 }}>Add</button>
+              <button disabled={!addType || adding} onClick={addBlock} style={{ ...pBtnLite(), opacity: (addType && !adding) ? 1 : 0.5 }}>{adding ? "Adding…" : "Add"}</button>
             </div>
           </div>
         </div>
@@ -2114,20 +2186,21 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
     }
     setIterating(true); setIterateHistory(h => [{ instruction: inst, status: "working" }, ...h]);
     try {
-      const payload = `CURRENT SCHOOL:\n${JSON.stringify(contentOnly(school))}\n\nEDIT INSTRUCTION: ${inst}`;
-      // Schools with full block data are large — give the editor room and retry once on a
-      // truncated/incomplete response (the usual cause of "incomplete school" errors).
+      // Edit at the PLAN level (block types only) so the response stays compact and never truncates.
+      const payload = `CURRENT SCHOOL (lessons list only block TYPES):\n${JSON.stringify(planOnly(school))}\n\nEDIT INSTRUCTION: ${inst}`;
       let content = null, lastErr = null;
       for (let attempt = 0; attempt < 2 && !content; attempt++) {
         try {
-          const parsed = await apiJSON(ITERATE_SYS, [{ role: "user", content: payload }], 16000);
+          const parsed = await apiJSON(ITERATE_SYS, [{ role: "user", content: payload }], 12000);
           if (parsed.appAction === "unlockAll") { unlockAll(); setIterateHistory(h => h.map((e, i) => i === 0 ? { ...e, status: "done" } : e)); showToast("✓ All lessons unlocked"); setIterating(false); return; }
           const c = parsed.school || parsed;
           if (!c?.name || !Array.isArray(c.semesters) || c.semesters.length === 0) throw new Error("incomplete");
           content = c;
         } catch (e) { lastErr = e; }
       }
-      if (!content) throw new Error(lastErr?.message === "incomplete" || /JSON|structured/i.test(lastErr?.message || "") ? "The editor's response was too large to apply — try a smaller, more specific change." : (lastErr?.message || "Edit failed — try rephrasing"));
+      if (!content) throw new Error(lastErr?.message === "incomplete" || /JSON|structured/i.test(lastErr?.message || "") ? "Couldn't apply that edit — try a smaller, more specific change." : (lastErr?.message || "Edit failed — try rephrasing"));
+      // Preserve unchanged lessons' block data; author only new/changed lessons.
+      await fillSchoolBlocks(content, { oldSchool: school, dna: school.knowledgeDNA });
       onUpdate({ data: composeSchool(content, school.knowledgeDNA), revision: (rec.revision || 0) + 1 });
       setIterateHistory(h => h.map((e, i) => i === 0 ? { ...e, status: "done" } : e)); showToast("✓ Change applied — school updated");
     } catch (err) {
@@ -2153,6 +2226,17 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
       showToast(`✓ Tool built: ${spec.title}`); setTab("tools");
     } catch (e) { showToast(`✕ Tool build failed: ${e.message}`, "err"); }
     setBuildingTool(null);
+  }
+
+  // Author/rewrite a SINGLE block for a lesson (granular block customization).
+  async function authorBlock(lessonCtx, type, instruction) {
+    const sys = `You author ONE Senseito interactive learning block of type "${type}". Return ONLY JSON {"type","data"} where data EXACTLY follows this shape:\n${BLOCK_SCHEMA_GUIDE}`;
+    const ctx = `SCHOOL: ${school.name} — ${school.description}\nLEARNING PATH: ${school.learningPath || "mixed"}${school.knowledgeDNA ? `\nKNOWLEDGE DNA:\n${String(school.knowledgeDNA).slice(0, 2000)}` : ""}\nLESSON: ${lessonCtx.title || ""} — ${lessonCtx.concept || ""}\nBLOCK TYPE: ${type}\n${instruction ? `CUSTOMIZE: ${instruction}` : "Author it richly and specifically for this lesson."}`;
+    const out = await apiJSON(sys, [{ role: "user", content: ctx }], 1800);
+    let blk = (out && out.type && out.data) ? out : (out?.blocks?.[0]) || (out?.lessons?.[0]?.blocks?.[0]);
+    if (!blk || !blk.type) blk = { type, data: (out && out.data) || out || {} };
+    blk.type = type;
+    return blk;
   }
 
   async function editTool(tool, instruction) {
@@ -2196,7 +2280,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
       {editingLesson && !readOnly && <LessonEditor lesson={editingLesson} T={T} allowed={allowedBlocksFor(school.learningPath)}
         onSave={(draft) => { saveLesson(editingLesson.number, draft); setEditingLesson(null); showToast("✓ Lesson updated"); }}
         onDelete={() => { if (window.confirm("Delete this lesson? This can't be undone.")) { deleteLessonByNumber(editingLesson.number); setEditingLesson(null); showToast("✓ Lesson deleted"); } }}
-        onApplyAI={(inst) => applyIteration(inst)}
+        onApplyAI={(inst) => applyIteration(inst)} onAuthorBlock={authorBlock}
         onClose={() => setEditingLesson(null)} />}
       {showIterate && !readOnly && (
         <IteratePanel school={school} history={iterateHistory} loading={iterating} onApply={applyIteration}
@@ -2380,27 +2464,8 @@ function Home({ onCreated }) {
       const content = plan.school || plan;
       if (!content?.name || !Array.isArray(content.semesters) || !content.semesters.some(s => s.lessons?.length)) throw new Error("Couldn't draft the lessons — please try again or simplify the prompt.");
 
-      // PHASE 2 — fill each semester's block DATA in parallel, with the token budget
-      // sized to that semester's workload (and capped). Falls back gracefully per lesson.
-      const ctxHeader = `SCHOOL: ${content.name} — ${content.description}\nLEARNING PATH: ${content.learningPath || "mixed"}\nMENTOR: ${content.mentorName || ""} (voice: ${content.voicePreset || "sage"})${dna ? `\nKNOWLEDGE DNA:\n${String(dna).slice(0, 2500)}` : ""}`;
-      await Promise.all((content.semesters || []).map(async (sem) => {
-        const lessons = (sem.lessons || []).filter(l => (l.blockTypes || []).length).map(l => ({ number: l.number, title: l.title, type: l.type, concept: l.concept, mission: l.mission, passCriteria: l.passCriteria, blockTypes: l.blockTypes }));
-        if (!lessons.length) { (sem.lessons || []).forEach(l => { l.blocks = l.blocks?.length ? l.blocks : [fallbackBlock("reading_plain", l)]; delete l.blockTypes; }); return; }
-        const blockCount = lessons.reduce((a, l) => a + (l.blockTypes?.length || 1), 0);
-        const tok = Math.min(16000, Math.max(3000, blockCount * 1300 + 1200)); // approx-token budgeting
-        try {
-          const filled = await apiJSON(BLOCKFILL_SYS, [{ role: "user", content: `${ctxHeader}\n\nSEMESTER: ${sem.title}\nLESSONS (return blocks for each, keyed by number):\n${JSON.stringify(lessons)}` }], tok);
-          const arr = Array.isArray(filled) ? filled : (filled.lessons || []);
-          const byNum = {}; arr.forEach(L => { if (L && L.number != null) byNum[L.number] = Array.isArray(L.blocks) ? L.blocks.filter(b => b && b.type) : []; });
-          (sem.lessons || []).forEach(l => {
-            const got = byNum[l.number];
-            l.blocks = (got && got.length) ? got : (l.blockTypes || ["reading_plain"]).map(t => fallbackBlock(t, l));
-            delete l.blockTypes;
-          });
-        } catch {
-          (sem.lessons || []).forEach(l => { l.blocks = (l.blockTypes || ["reading_plain"]).map(t => fallbackBlock(t, l)); delete l.blockTypes; });
-        }
-      }));
+      // PHASE 2 — author block data per semester (parallel, budgeted, graceful fallback).
+      await fillSchoolBlocks(content, { dna });
 
       onCreated(composeSchool(content, dna));
     } catch (e) { setError(e.message || "Build failed — try again."); setPhase("error"); }
