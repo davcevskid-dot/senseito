@@ -112,6 +112,7 @@ const GLOBAL_CSS = `
   @keyframes shimmer{to{background-position:-200% 0}}
   @keyframes blink{0%,100%{opacity:1}50%{opacity:0.3}}
   @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+  @keyframes aurora{0%,100%{opacity:0.6;transform:translateY(0) scale(1)}50%{opacity:1;transform:translateY(-12px) scale(1.05)}}
   *{box-sizing:border-box;margin:0;padding:0}
   textarea,input,select{outline:none}
   textarea::placeholder,input::placeholder{color:#55556E;font-style:italic}
@@ -178,6 +179,55 @@ const CHIP_PROMPTS = {
   relationships: "An 8-week school on mastering relationships — attachment patterns, communication, boundaries, deep connection. Role-play difficult conversations. The mentor is compassionate but doesn't let students off the hook.",
   productivity: "A 6-week deep work school based on flow science. The mentor is a no-nonsense former operator who treats your attention like a weapon to train. Daily output tracking missions.",
 };
+
+// Pre-built schools openable instantly (0 tokens) so a first-time visitor feels the
+// product in seconds. These are full `content` objects (composeSchool fills mentor/gami).
+const EXAMPLE_SCHOOLS = [
+  {
+    name: "The Stoic Forge", tagline: "Turn every obstacle into fuel.", description: "A short, sharp introduction to Stoic practice. You'll leave able to separate what you control from what you don't — and act on it.", duration: "2 weeks", category: "Philosophy", emoji: "🏛️", learningPath: "theory", theme: "amber", voicePreset: "sage", gamiPreset: "xp",
+    mentorName: "Aurelius", mentorPersonality: "Calm, exacting, and kind. He speaks in short lines and asks one piercing question at a time.", sampleLine: "You do not control the storm. You control the hand on the tiller.", transformation: "From reactive and anxious → composed, deliberate, and hard to rattle.",
+    semesters: [{ number: 1, title: "Foundations", weeks: "Week 1", lessons: [
+      { number: 1, title: "What You Control", type: "Dialogue", concept: "The dichotomy of control — the root of Stoic calm.", openingLine: "Tell me one thing troubling you. Then we'll find the part that is actually yours.", mission: "List 5 current worries; sort each into 'in my control' or 'not'.", passCriteria: "A sorted list with a reason for each.", blocks: [
+        { type: "reading_plain", data: { content: "# The Dichotomy of Control\n\nSome things are **up to us** — our judgments, choices, and actions. Others are **not** — other people, the past, outcomes, reputation.\n\nSuffering comes from gripping what isn't ours. Power comes from pouring everything into what is." } },
+        { type: "quiz", data: { questions: [{ q: "Which is truly 'up to us'?", options: ["Other people's opinions", "Your own judgments & actions", "The weather", "The final outcome"], answer: 1, explain: "Only your judgments and actions are fully yours." }] } },
+      ] },
+      { number: 2, title: "Premeditatio Malorum", type: "Reflection", concept: "Negative visualization to defuse fear and increase gratitude.", openingLine: "Imagine tomorrow's worst plausible moment. Now — how will you meet it well?", mission: "Write a short pre-mortem for tomorrow.", passCriteria: "A concrete pre-mortem with a virtuous response.", blocks: [
+        { type: "journal", data: { prompts: ["What could realistically go wrong tomorrow, and how will you respond with virtue rather than reaction?"], minWords: 70 } },
+      ] },
+    ] }],
+    suggestions: ["Add a debate lesson on fate vs. agency", "Add a daily evening-review tool"],
+    toolIdeas: [{ name: "Evening Review", why: "The Stoic nightly self-examination", type: "journal" }],
+  },
+  {
+    name: "JavaScript in a Weekend", tagline: "Write real code that runs — today.", description: "A hands-on sprint that gets you writing and running JavaScript immediately, no setup required.", duration: "1 week", category: "Coding", emoji: "⚡", learningPath: "coding", theme: "cyan", voicePreset: "scientist", gamiPreset: "xp",
+    mentorName: "Ada", mentorPersonality: "Precise and encouraging. She treats every bug as data and every run as an experiment.", sampleLine: "Don't guess — run it. The console never lies.", transformation: "From 'I can't code' → shipping small working programs with confidence.",
+    semesters: [{ number: 1, title: "First Programs", weeks: "Days 1-3", lessons: [
+      { number: 1, title: "Variables & Output", type: "SkillTest", concept: "Store values and print them.", openingLine: "Let's make the machine talk. Change the value and run it.", mission: "Print your name and your age doubled.", passCriteria: "Code runs and prints the expected output.", blocks: [
+        { type: "reading_plain", data: { content: "# Variables\n\nA variable stores a value: `let x = 5;`. Use `console.log(...)` to print." } },
+        { type: "code_sandbox", data: { language: "javascript", starter: "let name = \"Ada\";\nlet age = 30;\nconsole.log(name);\nconsole.log(age * 2);", instructions: "Run it. Then change name to yours and print age doubled." } },
+      ] },
+      { number: 2, title: "Loops", type: "SkillTest", concept: "Repeat work with a for-loop.", openingLine: "Computers are tireless. Make one count for you.", mission: "Print 1 through 5 with a loop.", passCriteria: "A working loop printing 1..5.", blocks: [
+        { type: "code_sandbox", data: { language: "javascript", starter: "for (let i = 1; i <= 5; i++) {\n  console.log(i);\n}", instructions: "Run it, then make it print only even numbers up to 10." } },
+      ] },
+    ] }],
+    suggestions: ["Add a terminal block for git basics", "Add a capstone mini-project"],
+    toolIdeas: [{ name: "Snippet Sandbox", why: "A scratchpad to test ideas", type: "code_sandbox" }],
+  },
+  {
+    name: "Spanish Survival", tagline: "Order a coffee in Spanish by tonight.", description: "Practical, spoken-first Spanish for real situations. You'll role-play your first conversation fast.", duration: "2 weeks", category: "Language", emoji: "🇪🇸", learningPath: "language", theme: "rose", voicePreset: "storyteller", gamiPreset: "xp",
+    mentorName: "Lucía", mentorPersonality: "Warm and playful; she turns every phrase into a tiny scene you can picture.", sampleLine: "You don't memorize a language — you live it, one café at a time.", transformation: "From silent tourist → confidently handling everyday exchanges.",
+    semesters: [{ number: 1, title: "First Contact", weeks: "Week 1", lessons: [
+      { number: 1, title: "Essential Words", type: "Quiz", concept: "The 8 phrases that unlock politeness.", openingLine: "Repeat after me — out loud. ¿Listo?", mission: "Review the deck until 80% feel easy.", passCriteria: "Reviewed the full deck.", blocks: [
+        { type: "flashcard", data: { cards: [{ front: "Hola", back: "Hello" }, { front: "Gracias", back: "Thank you" }, { front: "Por favor", back: "Please" }, { front: "¿Cuánto cuesta?", back: "How much is it?" }, { front: "La cuenta, por favor", back: "The bill, please" }, { front: "Un café, por favor", back: "A coffee, please" }] } },
+      ] },
+      { number: 2, title: "At the Café", type: "RolePlay", concept: "Your first real exchange.", openingLine: "Buenas. ¿Qué le pongo?", mission: "Order a coffee and a pastry, in Spanish.", passCriteria: "Completed the order in Spanish.", blocks: [
+        { type: "roleplay", data: { character: "a friendly Madrid café waiter who only speaks Spanish", scenario: "You walk into a busy café and want to order a coffee and a pastry.", goal: "Successfully order a coffee and a pastry in Spanish." } },
+      ] },
+    ] }],
+    suggestions: ["Add a pronunciation audio block", "Add a branching scenario at a market"],
+    toolIdeas: [{ name: "Phrase Vault", why: "Save phrases you want to drill", type: "flashcard" }],
+  },
+];
 
 // ─────────────────────────────────────────────────────────────
 // BLOCK LIBRARY METADATA (28 interactive block types)
@@ -1753,7 +1803,7 @@ function LessonRow({ lesson, idx, T, progress, onEnter, onEdit, onToggleLock, re
   const state = progress[lesson.number] || "locked";
   const locked = state === "locked" && (idx > 0 || readOnly);
   return (
-    <div style={{ padding: "16px 22px", borderBottom: `1px solid ${B.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, opacity: locked && readOnly ? 0.5 : 1, transition: "opacity 0.2s" }}>
+    <div style={{ padding: "16px 22px", borderBottom: `1px solid ${B.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, opacity: locked && readOnly ? 0.5 : 1, transition: "opacity 0.2s", animation: "fadeUp 0.4s ease backwards", animationDelay: `${Math.min(idx, 8) * 55}ms` }}>
       <div style={{ display: "flex", alignItems: "flex-start", gap: 12, flex: 1, minWidth: 0 }}>
         <div style={{ width: 28, height: 28, borderRadius: "50%", flexShrink: 0, background: state === "passed" ? "rgba(74,222,128,0.12)" : T.ps, border: `1px solid ${state === "passed" ? "rgba(74,222,128,0.4)" : T.ba}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: state === "passed" ? "#4ADE80" : T.p, marginTop: 1 }}>
           {state === "passed" ? "✓" : lesson.number || idx + 1}
@@ -2546,6 +2596,25 @@ function Home({ onCreated }) {
           </div>
         </div>
       )}
+      {phase === "idle" && (
+        <div style={{ marginTop: 30 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.5, color: B.muted, marginBottom: 12, textAlign: "center" }}>Or open a ready-made school — instantly, free</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))", gap: 12 }}>
+            {EXAMPLE_SCHOOLS.map((ex, i) => {
+              const ET = THEMES[ex.theme] || THEMES.violet;
+              return (
+                <button key={i} onClick={() => onCreated(composeSchool(ex))} style={{ textAlign: "left", background: ET.gr, border: `1px solid ${ET.ba}`, borderRadius: 16, padding: "16px 16px", cursor: "pointer", fontFamily: "inherit", animation: "fadeUp 0.5s ease backwards", animationDelay: `${i * 80}ms`, transition: "transform 0.15s" }}
+                  onMouseEnter={e => e.currentTarget.style.transform = "translateY(-3px)"} onMouseLeave={e => e.currentTarget.style.transform = "none"}>
+                  <div style={{ fontSize: 26, marginBottom: 8 }}>{ex.emoji}</div>
+                  <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 15, fontWeight: 700, color: B.white, marginBottom: 3 }}>{ex.name}</div>
+                  <div style={{ fontSize: 12, color: B.mutedMid, lineHeight: 1.5, marginBottom: 10 }}>{ex.tagline}</div>
+                  <span style={{ fontSize: 11, fontWeight: 700, color: ET.hi }}>Open instantly →</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
       {phase === "thinking" && (
         <div style={{ marginTop: 28, textAlign: "center", padding: "40px 20px", background: B.surface, border: `1px solid ${B.border}`, borderRadius: 16 }}>
           <div style={{ width: 28, height: 28, margin: "0 auto 14px", borderRadius: "50%", border: "3px solid rgba(124,58,237,0.18)", borderTopColor: "#7C3AED", animation: "spin 0.9s linear infinite" }} />
@@ -2960,7 +3029,8 @@ export default function Senseito() {
       <button onClick={() => setSideOpen(s => !s)} className="ol-burger" style={{ position: "fixed", top: 14, left: 14, zIndex: 310, background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.mutedMid, padding: "7px 11px", cursor: "pointer", fontSize: 14 }}>☰</button>
 
       <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
-        <div style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 0, background: "radial-gradient(ellipse 65% 35% at 50% -5%,rgba(124,58,237,0.1) 0%,transparent 60%)" }} />
+        <div style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 0, background: "radial-gradient(ellipse 65% 35% at 50% -5%,rgba(124,58,237,0.1) 0%,transparent 60%)", animation: "aurora 9s ease-in-out infinite" }} />
+        <div style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 0, background: "radial-gradient(ellipse 50% 40% at 85% 10%,rgba(6,182,212,0.07) 0%,transparent 55%)", animation: "aurora 11s ease-in-out infinite reverse" }} />
         <div style={{ position: "relative", zIndex: 1 }}>
           {view === "home" || !active
             ? <Home onCreated={createSchool} />
