@@ -55,7 +55,9 @@ function toApiMessages(msgs) {
 }
 
 // Extract plain text from an attached file (PDF via pdf.js CDN, or text/markdown).
+const MAX_ATTACH_CHARS = 60000; // cap distill cost
 async function extractFileText(file) {
+  if (file.size > 25 * 1024 * 1024) throw new Error("File too large (max 25 MB).");
   const name = (file.name || "").toLowerCase();
   if (name.endsWith(".pdf") || file.type === "application/pdf") {
     const pdfjs = await import(/* @vite-ignore */ "https://esm.sh/pdfjs-dist@4.7.76/build/pdf.min.mjs");
@@ -63,10 +65,10 @@ async function extractFileText(file) {
     const buf = await file.arrayBuffer();
     const doc = await pdfjs.getDocument({ data: buf }).promise;
     const max = Math.min(doc.numPages, 80); let text = "";
-    for (let p = 1; p <= max; p++) { const page = await doc.getPage(p); const c = await page.getTextContent(); text += c.items.map(i => i.str).join(" ") + "\n"; }
-    return text;
+    for (let p = 1; p <= max && text.length < MAX_ATTACH_CHARS; p++) { const page = await doc.getPage(p); const c = await page.getTextContent(); text += c.items.map(i => i.str).join(" ") + "\n"; }
+    return text.slice(0, MAX_ATTACH_CHARS);
   }
-  if (name.endsWith(".txt") || name.endsWith(".md") || name.endsWith(".markdown") || (file.type || "").startsWith("text/")) return await file.text();
+  if (name.endsWith(".txt") || name.endsWith(".md") || name.endsWith(".markdown") || (file.type || "").startsWith("text/")) return (await file.text()).slice(0, MAX_ATTACH_CHARS);
   throw new Error("Unsupported file type — use PDF, TXT or MD (for .doc/.docx, paste the text).");
 }
 
@@ -638,7 +640,8 @@ function LessonView({ school, lesson, T, onClose, onPass }) {
       setMsgs(m => [...m, { role: "assistant", content: reply }]);
       if (!missionShown && reply.toLowerCase().includes("mission")) setMissionShown(true);
       const transcript = [...convo, { role: "assistant", content: reply }];
-      if (transcript.filter(m => m.role === "user").length >= 2 && !chatPassed) {
+      // Only spend an eval call when the student said something substantial (skips chit-chat).
+      if (transcript.filter(m => m.role === "user").length >= 2 && userMsg.length >= 25 && !chatPassed) {
         const serialized = transcript.map(m => `${m.role === "user" ? "STUDENT" : "MENTOR"}: ${m.content}`).join("\n\n");
         const verdict = await api(EVAL_SYS(lesson), [{ role: "user", content: serialized }], 80);
         if (/VERDICT:\s*PASS/i.test(verdict)) {
@@ -680,6 +683,13 @@ function LessonView({ school, lesson, T, onClose, onPass }) {
         {tab === "activities" && (
           <div style={{ flex: 1, overflowY: "auto", padding: "18px 22px", display: "flex", flexDirection: "column", gap: 14 }}>
             <div style={{ fontSize: 13, color: B.mutedMid, lineHeight: 1.6 }}>{lesson.concept}</div>
+            {/* Activity progress stepper */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ flex: 1, display: "flex", gap: 5 }}>
+                {blocks.map((_, i) => <div key={i} style={{ flex: 1, height: 5, borderRadius: 3, background: outputs[i]?.passed ? "#4ADE80" : (outputs[i] ? T.p : B.surface3), transition: "background 0.3s" }} />)}
+              </div>
+              <span style={{ fontSize: 11, color: B.muted, whiteSpace: "nowrap" }}>{passedBlocks}/{blocks.length} done</span>
+            </div>
             {pl.mode && pl.mode !== "default" && <div style={{ fontSize: 11.5, color: T.a, background: T.as_, border: `1px solid ${T.ba}`, borderRadius: 8, padding: "7px 11px" }}>To pass: {(PASS_MODES.find(m => m[0] === pl.mode) || [])[1]}{pl.mode === "threshold" ? ` (${pl.threshold ?? 70}%)` : ""}.</div>}
             {blocks.map((blk, i) => (
               <BlockRenderer key={i} block={blk} T={T} school={school} onOutput={(o) => setOutputs(s => ({ ...s, [i]: o }))} />
@@ -2640,7 +2650,7 @@ function EnrollCard({ schoolId, mentorName, T }) {
       await supaFetch(`/rest/v1/leads`, { method: "POST", body: [{ school_id: schoolId, email: email.trim(), name: name.trim() || null }], headers: { Prefer: "return=minimal" } });
       try { localStorage.setItem(key, "1"); } catch { }
       setDone(true);
-    } catch { setErr("Couldn't enroll — please try again."); }
+    } catch (e) { if (/409|duplicate|unique/i.test(e.message || "")) { try { localStorage.setItem(key, "1"); } catch { } setDone(true); } else setErr("Couldn't enroll — please try again."); }
     setLoading(false);
   }
   if (done) return (
@@ -2734,6 +2744,7 @@ export default function Senseito() {
   const saveTimer = useRef(null);
   const lsTimer = useRef(null);
   const savedRef = useRef({}); // id -> last-saved rec reference (for single-row saves)
+  const [undo, setUndo] = useState(null); // { id, name, timer, restore }
   const publicBase = typeof window !== "undefined" ? window.location.origin : "https://senseito.app";
 
   const active = schools.find(s => s.id === view);
@@ -2821,10 +2832,24 @@ export default function Senseito() {
     const name = window.prompt("Rename school:", currentName);
     if (name && name.trim()) setSchools(s => s.map(r => r.id === id ? { ...r, data: { ...r.data, name: name.trim() } } : r));
   }
-  async function deleteSchool(id, name) {
-    if (!window.confirm(`Delete "${name}"? This can't be undone.`)) return;
+  function deleteSchool(id, name) {
+    const rec = schools.find(r => r.id === id);
+    if (!rec) return;
     setSchools(s => s.filter(r => r.id !== id)); if (view === id) setView("home");
-    if (session) { try { await supaFetch(`/rest/v1/schools?id=eq.${id}`, { method: "DELETE", token: session.token }); } catch { } }
+    // Defer the cloud delete so it can be undone for a few seconds.
+    if (undo?.timer) clearTimeout(undo.timer);
+    const timer = setTimeout(async () => {
+      if (session) { try { await supaFetch(`/rest/v1/schools?id=eq.${id}`, { method: "DELETE", token: session.token }); } catch { } }
+      delete savedRef.current[id];
+      setUndo(u => (u && u.id === id ? null : u));
+    }, 6000);
+    setUndo({ id, name, timer, restore: rec });
+  }
+  function undoDelete() {
+    if (!undo) return;
+    clearTimeout(undo.timer);
+    setSchools(s => [undo.restore, ...s.filter(r => r.id !== undo.id)]);
+    setUndo(null);
   }
 
   async function publishSchool(rec) {
@@ -2877,6 +2902,13 @@ export default function Senseito() {
       `}</style>
 
       {accountOpen && <AccountModal session={session} syncState={syncState} schoolCount={schools.length} onSignOut={() => { setSession(null); setSchools([]); setSyncState("idle"); setAccountOpen(false); }} onClose={() => setAccountOpen(false)} />}
+
+      {undo && (
+        <div style={{ position: "fixed", bottom: 20, left: "50%", transform: "translateX(-50%)", zIndex: 500, background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 12, padding: "10px 14px", display: "flex", alignItems: "center", gap: 14, boxShadow: "0 10px 40px rgba(0,0,0,0.5)", fontSize: 13, color: B.white, animation: "fadeUp 0.3s ease", maxWidth: "92vw" }}>
+          <span>Deleted “{undo.name}”</span>
+          <button onClick={undoDelete} style={{ background: "rgba(124,58,237,0.15)", border: "1px solid rgba(124,58,237,0.45)", borderRadius: 8, color: "#C4B5FD", padding: "5px 14px", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>↩ Undo</button>
+        </div>
+      )}
 
       <div className={`ol-side${sideOpen ? " open" : ""}`}>
         <div style={{ padding: "20px 18px 14px", borderBottom: `1px solid ${B.border}` }}>
