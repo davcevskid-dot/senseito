@@ -370,6 +370,17 @@ function fallbackBlock(type, lesson) {
   if (type === "reading") return { type, data: { passage: c, keyPhrases: [] } };
   return { type: "reading_plain", data: { content: `## ${lesson?.title || "Lesson"}\n\n${c}` } };
 }
+// Remove duplicate blocks (same type + same content) — e.g. a failed author step
+// falling back to several identical reading blocks in one lesson.
+function dedupeBlocks(blocks) {
+  const seen = new Set();
+  return (blocks || []).filter(b => {
+    if (!b || !b.type) return false;
+    const key = b.type + "|" + JSON.stringify(b.data || {});
+    if (seen.has(key)) return false;
+    seen.add(key); return true;
+  });
+}
 
 // Serialized, compact path guide injected into the architect prompt.
 const PATH_GUIDE = Object.entries(LEARNING_PATH_RULES).map(([k, v]) =>
@@ -400,7 +411,7 @@ Decide which SECTIONS this experience needs, based on the subject. Section kinds
 Pick ONLY the sections that genuinely fit. A yoga/habit/practice experience might be a dashboard + mentor with NO lessons at all; a philosophy course might be lessons + mentor. Honor any structure the creator asked for. Each dashboard section carries its own blockTypes (from the allowed list) the learner uses directly.
 
 STEP 3 — PLAN BLOCKS PER LESSON (TYPES ONLY).
-For each lesson choose 1-3 block TYPES from the chosen path's ALLOWED list ONLY (never a forbidden one), ordered pedagogically (e.g. reading → practice → check); the LAST should prove mastery. List ONLY the type strings now — their detailed contents are generated later, so keep this plan compact.
+For each lesson choose 1-3 DISTINCT block TYPES (never repeat the same type within a lesson) from the chosen path's ALLOWED list ONLY (never a forbidden one), ordered pedagogically (e.g. reading → practice → check); the LAST should prove mastery. List ONLY the type strings now — their detailed contents are generated later, so keep this plan compact.
 Available block types: ${ALL_BLOCKS.join(", ")}.
 
 STEP 4 — LAY OUT BY THE PATH'S LAYOUT RULE.
@@ -597,9 +608,9 @@ async function fillSchoolBlocks(content, { oldSchool = null, dna = null } = {}) 
       const filled = await apiJSON(BLOCKFILL_SYS, [{ role: "user", content: `${ctxHeader}\n\nSEMESTER: ${sem.title}\nLESSONS (return blocks for each, keyed by number):\n${JSON.stringify(lessons)}` }], tok);
       const arr = Array.isArray(filled) ? filled : (filled.lessons || []);
       const byNum = {}; arr.forEach(L => { if (L && L.number != null) byNum[L.number] = Array.isArray(L.blocks) ? L.blocks.filter(b => b && b.type) : []; });
-      toFill.forEach(l => { const got = byNum[l.number]; l.blocks = (got && got.length) ? got : (l._types || ["reading_plain"]).map(t => fallbackBlock(t, l)); delete l._types; delete l.blockTypes; });
+      toFill.forEach(l => { const got = byNum[l.number]; l.blocks = dedupeBlocks((got && got.length) ? got : (l._types || ["reading_plain"]).map(t => fallbackBlock(t, l))); delete l._types; delete l.blockTypes; });
     } catch {
-      toFill.forEach(l => { l.blocks = (l._types || ["reading_plain"]).map(t => fallbackBlock(t, l)); delete l._types; delete l.blockTypes; });
+      toFill.forEach(l => { l.blocks = dedupeBlocks((l._types || ["reading_plain"]).map(t => fallbackBlock(t, l))); delete l._types; delete l.blockTypes; });
     }
   }));
 
@@ -617,9 +628,9 @@ async function fillSchoolBlocks(content, { oldSchool = null, dna = null } = {}) 
       const filled = await apiJSON(BLOCKFILL_SYS, [{ role: "user", content: `${ctxHeader}\n\nDASHBOARD SECTION (always-available tools, not a gated lesson): "${sec.title}"${sec.intro ? ` — ${sec.intro}` : ""}\nReturn ONE lesson object with number 0 whose "blocks" are exactly these types in order: ${JSON.stringify(t2)}` }], tok);
       const arr = Array.isArray(filled) ? filled : (filled.lessons || []);
       const got = (arr[0]?.blocks || []).filter(b => b && b.type);
-      sec.blocks = (got && got.length) ? got : t2.map(t => fallbackBlock(t, ctxLesson)); delete sec.blockTypes;
+      sec.blocks = dedupeBlocks((got && got.length) ? got : t2.map(t => fallbackBlock(t, ctxLesson))); delete sec.blockTypes;
     } catch {
-      sec.blocks = t2.map(t => fallbackBlock(t, ctxLesson)); delete sec.blockTypes;
+      sec.blocks = dedupeBlocks(t2.map(t => fallbackBlock(t, ctxLesson))); delete sec.blockTypes;
     }
   }));
   return content;
@@ -731,7 +742,7 @@ function Toast({ toast }) {
 // ─────────────────────────────────────────────────────────────
 function LessonView({ school, lesson, T, onClose, onPass }) {
   const blocks = lesson.blocks || [];
-  const [tab, setTab] = useState(blocks.length ? "activities" : "mentor");
+  const [tab, setTab] = useState("mentor"); // the guided conversation leads; activities are secondary
   const [outputs, setOutputs] = useState({});
   const [msgs, setMsgs] = useState([{ role: "assistant", content: lesson.openingLine || `Let's begin. ${lesson.concept}` }]);
   const [input, setInput] = useState("");
@@ -784,7 +795,7 @@ function LessonView({ school, lesson, T, onClose, onPass }) {
     setLoading(false);
   }
 
-  const TABS = [...(blocks.length ? [["activities", `🧩 Activities${blocks.length ? ` (${blocks.length})` : ""}`]] : []), ["mentor", "💬 Mentor"]];
+  const TABS = [["mentor", "💬 Guided Lesson"], ...(blocks.length ? [["activities", `🧩 Activities (${blocks.length})`]] : [])];
 
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(0,0,0,0.82)", backdropFilter: "blur(10px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onClose}>
@@ -1125,7 +1136,7 @@ function EssayBlock({ data = {}, onOutput, T, disabled, school }) {
       <span style={{ fontSize: 11, color: words >= min ? "#4ADE80" : B.muted }}>{words}/{min} words</span>
       <button disabled={words < min || loading || disabled} onClick={submit} style={{ ...pBtn(T), opacity: (words < min || loading) ? 0.5 : 1 }}>{loading ? "Evaluating…" : passed ? "Resubmit" : "Submit essay"}</button>
     </div>
-    {fb && <div style={{ marginTop: 10, background: passed ? "rgba(74,222,128,0.08)" : T.ps, border: `1px solid ${passed ? "rgba(74,222,128,0.3)" : T.ba}`, borderRadius: 10, padding: "10px 13px", fontSize: 13, color: B.white, lineHeight: 1.6 }}>{fb}</div>}
+    {fb && <div style={{ marginTop: 10, background: passed ? "rgba(74,222,128,0.08)" : T.ps, border: `1px solid ${passed ? "rgba(74,222,128,0.3)" : T.ba}`, borderRadius: 10, padding: "10px 13px", fontSize: 13, color: B.white, lineHeight: 1.6 }}><Markdown text={fb} /></div>}
   </BlockShell>);
 }
 
@@ -1165,7 +1176,7 @@ function CodeSandboxBlock({ data = {}, onOutput, T, disabled, school }) {
     </div>
     {out && <pre style={{ marginTop: 8, background: "#0A0A12", border: `1px solid ${B.border}`, borderRadius: 8, padding: "10px 12px", fontSize: 12, color: "#9FE88D", whiteSpace: "pre-wrap", fontFamily: "ui-monospace,monospace" }}>{out}</pre>}
     {html && <iframe title="preview" srcDoc={html} sandbox="allow-scripts" style={{ marginTop: 8, width: "100%", height: 180, background: "#fff", border: `1px solid ${B.border}`, borderRadius: 8 }} />}
-    {fb && <div style={{ marginTop: 8, fontSize: 13, color: passed ? "#4ADE80" : "#F87171", lineHeight: 1.6 }}>{fb}</div>}
+    {fb && <div style={{ marginTop: 8, fontSize: 13, color: passed ? "#4ADE80" : "#F87171", lineHeight: 1.6 }}><Markdown text={fb} /></div>}
   </BlockShell>);
 }
 
@@ -1234,7 +1245,7 @@ function JournalBlock({ data = {}, onOutput, T, disabled, school }) {
       <span style={{ fontSize: 11, color: words >= min ? "#4ADE80" : B.muted }}>{words}/{min} words</span>
       <button disabled={words < min || loading || disabled} onClick={submit} style={{ ...pBtn(T), opacity: (words < min || loading) ? 0.5 : 1 }}>{loading ? "Reflecting…" : "Submit entry"}</button>
     </div>
-    {fb && <div style={{ marginTop: 10, background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 10, padding: "10px 13px", fontSize: 13, color: B.white, lineHeight: 1.6 }}>{fb}</div>}
+    {fb && <div style={{ marginTop: 10, background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 10, padding: "10px 13px", fontSize: 13, color: B.white, lineHeight: 1.6 }}><Markdown text={fb} /></div>}
   </BlockShell>);
 }
 
@@ -1270,7 +1281,7 @@ function VoiceJournalBlock({ data = {}, onOutput, T, disabled, school }) {
       <span style={{ fontSize: 11, color: words >= min ? "#4ADE80" : B.muted }}>{words}/{min} words</span>
       <button disabled={words < min || loading || disabled} onClick={submit} style={{ ...pBtn(T), opacity: (words < min || loading) ? 0.5 : 1 }}>{loading ? "Reflecting…" : "Submit"}</button>
     </div>
-    {fb && <div style={{ marginTop: 10, background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 10, padding: "10px 13px", fontSize: 13, color: B.white, lineHeight: 1.6 }}>{fb}</div>}
+    {fb && <div style={{ marginTop: 10, background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 10, padding: "10px 13px", fontSize: 13, color: B.white, lineHeight: 1.6 }}><Markdown text={fb} /></div>}
   </BlockShell>);
 }
 
@@ -1426,7 +1437,7 @@ function ObjectionHandlerBlock({ data = {}, onOutput, T, disabled, school }) {
   return (<BlockShell type="objection_handler" sub={`Product: ${data.product} · Objection ${i + 1}/${objs.length}`}>
     <div style={{ background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 10, padding: "11px 14px", fontSize: 14, color: B.white, fontStyle: "italic", marginBottom: 10 }}>“{objs[i]}”</div>
     <textarea value={resp} onChange={e => setResp(e.target.value)} disabled={disabled} rows={3} placeholder="Overcome the objection…" style={{ ...bx.input, fontSize: 13 }} />
-    {fb && <div style={{ fontSize: 12, color: B.mutedMid, margin: "8px 0" }}>{fb}</div>}
+    {fb && <div style={{ fontSize: 12, color: B.mutedMid, margin: "8px 0" }}><Markdown text={fb} /></div>}
     <button onClick={handle} disabled={!resp.trim() || loading || disabled} style={{ ...pBtn(T), marginTop: 8, opacity: (!resp.trim() || loading) ? 0.5 : 1 }}>{loading ? "Scoring…" : "Submit rebuttal →"}</button>
   </BlockShell>);
 }
@@ -1486,7 +1497,7 @@ function ImageGateBlock({ data = {}, onOutput, T, disabled, school }) {
     {!disabled && <label style={{ display: "inline-block", ...pBtn(T, false), marginBottom: 10 }}>📷 {img ? "Change photo" : "Upload photo"}<input type="file" accept="image/*" onChange={pick} style={{ display: "none" }} /></label>}
     <textarea value={desc} onChange={e => setDesc(e.target.value)} disabled={disabled} rows={2} placeholder="Describe what your photo shows…" style={{ ...bx.input, fontSize: 13 }} />
     <button onClick={verify} disabled={!img || !desc.trim() || loading || disabled} style={{ ...pBtn(T), marginTop: 8, opacity: (!img || !desc.trim() || loading) ? 0.5 : 1 }}>{loading ? "Verifying…" : "Submit proof"}</button>
-    {fb && <div style={{ marginTop: 10, fontSize: 13, color: passed ? "#4ADE80" : "#F87171", lineHeight: 1.6 }}>{fb}</div>}
+    {fb && <div style={{ marginTop: 10, fontSize: 13, color: passed ? "#4ADE80" : "#F87171", lineHeight: 1.6 }}><Markdown text={fb} /></div>}
   </BlockShell>);
 }
 
@@ -1503,21 +1514,16 @@ function VideoGateBlock({ data = {}, onOutput, T, disabled, school }) {
     <input value={url} onChange={e => setUrl(e.target.value)} disabled={disabled} placeholder="Paste Loom / YouTube link…" style={{ ...bx.input, fontSize: 13, marginBottom: 8 }} />
     <textarea value={refl} onChange={e => setRefl(e.target.value)} disabled={disabled} rows={2} placeholder="What does your video demonstrate?" style={{ ...bx.input, fontSize: 13 }} />
     <button onClick={submit} disabled={!url.trim() || !refl.trim() || loading || disabled} style={{ ...pBtn(T), marginTop: 8, opacity: (!url.trim() || !refl.trim() || loading) ? 0.5 : 1 }}>{loading ? "Reviewing…" : "Submit video"}</button>
-    {fb && <div style={{ marginTop: 10, fontSize: 13, color: passed ? "#4ADE80" : "#F87171", lineHeight: 1.6 }}>{fb}</div>}
+    {fb && <div style={{ marginTop: 10, fontSize: 13, color: passed ? "#4ADE80" : "#F87171", lineHeight: 1.6 }}><Markdown text={fb} /></div>}
   </BlockShell>);
 }
 
 // ── 25. Reading (plain) ──
-function ReadingPlainBlock({ data = {}, onOutput, T, disabled, school }) {
-  const [passed, setPassed] = useState(false); const [tldr, setTldr] = useState(""); const [loading, setLoading] = useState(false);
-  async function summarize() { setLoading(true); try { setTldr(await api(`${blockMentor(school)} Give a 2-sentence TL;DR of this text.`, [{ role: "user", content: String(data.content).slice(0, 4000) }], 150)); } catch { } setLoading(false); }
+function ReadingPlainBlock({ data = {}, onOutput, T, disabled }) {
+  const [passed, setPassed] = useState(false);
   return (<BlockShell type="reading_plain" passed={passed}>
-    <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 10, padding: "12px 14px", marginBottom: 10 }}><Markdown text={data.content || ""} /></div>
-    {tldr && <div style={{ background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 10, padding: "10px 13px", marginBottom: 10, fontSize: 13, color: B.white, lineHeight: 1.6 }}>📌 {tldr}</div>}
-    <div style={{ display: "flex", gap: 8 }}>
-      <button onClick={summarize} disabled={loading || disabled} style={{ ...pBtn(T, false), opacity: loading ? 0.5 : 1 }}>{loading ? "…" : "✨ TL;DR"}</button>
-      {!passed && <button onClick={() => { setPassed(true); onOutput?.({ type: "reading_plain", read: true, passed: true }); }} disabled={disabled} style={pBtn(T)}>Mark as read ✓</button>}
-    </div>
+    <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 10, padding: "14px 16px", marginBottom: 12 }}><Markdown text={data.content || ""} /></div>
+    {!passed && <button onClick={() => { setPassed(true); onOutput?.({ type: "reading_plain", read: true, passed: true }); }} disabled={disabled} style={pBtn(T)}>Mark as read ✓</button>}
   </BlockShell>);
 }
 
@@ -1604,7 +1610,7 @@ function CustomBlock({ data = {}, onOutput, T, disabled, school }) {
     {data.intro && <div style={{ marginBottom: 10 }}><Markdown text={data.intro} /></div>}
     {sections.map((s, i) => <div key={i} style={{ marginBottom: 10 }}><div style={{ fontSize: 13, color: T.hi, marginBottom: 5 }}>{s.label}</div><textarea value={vals[s.key] || ""} onChange={e => setVals(v => ({ ...v, [s.key]: e.target.value }))} disabled={disabled} rows={3} style={{ ...bx.input, fontSize: 13 }} /></div>)}
     {data.aiFeedback !== false && <button onClick={submit} disabled={loading || disabled} style={{ ...pBtn(T), opacity: loading ? 0.5 : 1 }}>{loading ? "Reviewing…" : "Submit for feedback"}</button>}
-    {fb && <div style={{ marginTop: 10, background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 10, padding: "10px 13px", fontSize: 13, color: B.white, lineHeight: 1.6 }}>{fb}</div>}
+    {fb && <div style={{ marginTop: 10, background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 10, padding: "10px 13px", fontSize: 13, color: B.white, lineHeight: 1.6 }}><Markdown text={fb} /></div>}
   </BlockShell>);
 }
 
@@ -1898,38 +1904,38 @@ function DashboardSection({ section, rec, T, onUpdate, readOnly, school }) {
 // ─────────────────────────────────────────────────────────────
 // LESSON ROW
 // ─────────────────────────────────────────────────────────────
-function LessonRow({ lesson, idx, T, progress, onEnter, onEdit, onToggleLock, readOnly }) {
+function LessonRow({ lesson, idx, T, progress, onEnter, onEdit, onToggleLock, readOnly, mentorName }) {
   const tm = TM[lesson.type] || TM.Dialogue;
   const state = progress[lesson.number] || "locked";
   const locked = state === "locked" && (idx > 0 || readOnly);
+  const accent = state === "passed" ? "#4ADE80" : locked ? B.muted : T.p;
+  const iconBtn = { background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 8, padding: "6px 9px", cursor: "pointer", fontSize: 12, fontFamily: "inherit" };
   return (
-    <div style={{ padding: "16px 22px", borderBottom: `1px solid ${B.border}`, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, opacity: locked && readOnly ? 0.5 : 1, transition: "opacity 0.2s", animation: "fadeUp 0.4s ease backwards", animationDelay: `${Math.min(idx, 8) * 55}ms` }}>
-      <div style={{ display: "flex", alignItems: "flex-start", gap: 12, flex: 1, minWidth: 0 }}>
-        <div style={{ width: 28, height: 28, borderRadius: "50%", flexShrink: 0, background: state === "passed" ? "rgba(74,222,128,0.12)" : T.ps, border: `1px solid ${state === "passed" ? "rgba(74,222,128,0.4)" : T.ba}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, fontWeight: 700, color: state === "passed" ? "#4ADE80" : T.p, marginTop: 1 }}>
-          {state === "passed" ? "✓" : lesson.number || idx + 1}
+    <div style={{ display: "flex", alignItems: "stretch", background: B.surface, border: `1px solid ${state === "passed" ? "rgba(74,222,128,0.28)" : state === "active" ? T.ba : B.border}`, borderRadius: 16, overflow: "hidden", opacity: locked && readOnly ? 0.55 : 1, transition: "transform 0.15s, border-color 0.2s, box-shadow 0.2s", animation: "fadeUp 0.4s ease backwards", animationDelay: `${Math.min(idx, 8) * 50}ms`, boxShadow: state === "active" ? `0 0 22px ${T.pg}` : "none" }}
+      onMouseEnter={e => { if (!locked) { e.currentTarget.style.transform = "translateY(-2px)"; } }} onMouseLeave={e => { e.currentTarget.style.transform = "none"; }}>
+      <div style={{ width: 4, background: accent, flexShrink: 0 }} />
+      <div style={{ flex: 1, minWidth: 0, padding: "15px 8px 15px 14px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", color: state === "passed" ? "#4ADE80" : T.p }}>{state === "passed" ? "✓ Completed" : `Lesson ${lesson.number || idx + 1}`}</span>
+          <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5, padding: "2px 7px", borderRadius: 5, background: tm.bg, color: tm.c }}>{tm.icon} {lesson.type}</span>
         </div>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: B.white, marginBottom: 4 }}>{lesson.title}</div>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-            <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.6, padding: "2px 7px", borderRadius: 4, background: tm.bg, color: tm.c }}>{tm.icon} {lesson.type}</span>
-            {(lesson.blocks || []).map((b, bi) => (
-              <span key={bi} title={BLOCK_META[b.type]?.label || b.type} style={{ fontSize: 11, padding: "2px 6px", borderRadius: 4, background: B.surface3, border: `1px solid ${B.border}` }}>{BLOCK_META[b.type]?.icon || "🧩"}</span>
-            ))}
-            <span style={{ fontSize: 12, color: B.muted }}>{lesson.concept?.slice(0, 50)}{lesson.concept?.length > 50 ? "..." : ""}</span>
-          </div>
+        <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 15.5, fontWeight: 700, color: B.white, marginBottom: 4, lineHeight: 1.25 }}>{lesson.title}</div>
+        {lesson.concept && <div style={{ fontSize: 12.5, color: B.mutedMid, lineHeight: 1.55, marginBottom: 9 }}>{lesson.concept.slice(0, 110)}{lesson.concept.length > 110 ? "…" : ""}</div>}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 11, color: T.a, display: "flex", alignItems: "center", gap: 4 }}>💬 Guided by {mentorName || "your mentor"}</span>
+          {(lesson.blocks || []).length > 0 && <span style={{ display: "flex", gap: 4, alignItems: "center" }}><span style={{ fontSize: 10, color: B.muted }}>·</span>{lesson.blocks.map((b, bi) => <span key={bi} title={BLOCK_META[b.type]?.label || b.type} style={{ fontSize: 13 }}>{BLOCK_META[b.type]?.icon || "🧩"}</span>)}</span>}
         </div>
       </div>
-      <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
+      <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "flex-end", gap: 7, padding: "12px 14px 12px 0", flexShrink: 0 }}>
         {!readOnly && (
-          <button onClick={() => onToggleLock(lesson.number, state)} title={state === "locked" ? "Locked — click to unlock" : "Unlocked — click to lock"}
-            style={{ background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 7, color: state === "locked" ? B.muted : "#4ADE80", padding: "6px 8px", cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>{state === "locked" ? "🔒" : "🔓"}</button>
-        )}
-        {!readOnly && (
-          <button onClick={() => onEdit(lesson)} title="Edit lesson" style={{ background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 7, color: B.mutedMid, padding: "6px 8px", cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>✎</button>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button onClick={() => onToggleLock(lesson.number, state)} title={state === "locked" ? "Locked — click to unlock" : "Unlocked — click to lock"} style={{ ...iconBtn, color: state === "locked" ? B.muted : "#4ADE80" }}>{state === "locked" ? "🔒" : "🔓"}</button>
+            <button onClick={() => onEdit(lesson)} title="Edit lesson" style={{ ...iconBtn, color: B.mutedMid }}>✎</button>
+          </div>
         )}
         <button onClick={() => onEnter(lesson)} disabled={locked}
-          style={{ padding: "7px 14px", borderRadius: 8, fontSize: 13, fontWeight: 700, fontFamily: "inherit", cursor: locked ? "not-allowed" : "pointer", border: "none", background: state === "passed" ? "rgba(74,222,128,0.09)" : T.p, color: state === "passed" ? "#4ADE80" : "white", boxShadow: state !== "passed" ? `0 0 14px ${T.pg}` : "none", transition: "all 0.2s" }}>
-          {state === "passed" ? "Revisit" : state === "active" ? "Continue →" : "Enter →"}
+          style={{ padding: "9px 18px", borderRadius: 10, fontSize: 13, fontWeight: 700, fontFamily: "inherit", cursor: locked ? "not-allowed" : "pointer", border: "none", background: state === "passed" ? "rgba(74,222,128,0.12)" : locked ? B.surface3 : `linear-gradient(135deg,${T.p},${T.p}CC)`, color: state === "passed" ? "#4ADE80" : locked ? B.muted : "white", boxShadow: (!locked && state !== "passed") ? `0 4px 16px ${T.pg}` : "none", whiteSpace: "nowrap" }}>
+          {state === "passed" ? "Review" : state === "active" ? "Continue →" : locked ? "🔒 Locked" : "Begin →"}
         </button>
       </div>
     </div>
@@ -2565,16 +2571,16 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
               </div>
             )}
             {school.semesters?.map((sem, si) => (
-              <div key={si} style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 18, overflow: "hidden" }}>
-                <div style={{ padding: "16px 22px", borderBottom: `1px solid ${B.border}`, background: B.surface2, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
-                  <div>
-                    <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 2, color: T.p, marginBottom: 3 }}>Semester {sem.number || si + 1}</div>
-                    <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 17, fontWeight: 700, color: B.white, letterSpacing: -0.3 }}><EditableText value={sem.title} readOnly={readOnly} onSave={v => onUpdate({ data: { ...school, semesters: school.semesters.map((s, i) => i === si ? { ...s, title: v } : s) } })} /></div>
-                    {sem.theme && <div style={{ fontSize: 12, color: B.muted, marginTop: 1 }}>{sem.theme}</div>}
+              <div key={si} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, padding: "2px 4px" }}>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 2, color: T.p }}>Part {sem.number || si + 1}</span>
+                    <span style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 18, fontWeight: 700, color: B.white, letterSpacing: -0.3 }}><EditableText value={sem.title} readOnly={readOnly} onSave={v => onUpdate({ data: { ...school, semesters: school.semesters.map((s, i) => i === si ? { ...s, title: v } : s) } })} /></span>
+                    {sem.theme && <span style={{ fontSize: 12, color: B.muted }}>· {sem.theme}</span>}
                   </div>
                   {sem.weeks && <div style={{ fontSize: 11, color: T.a, fontWeight: 700, background: T.as_, border: `1px solid ${T.ba}`, borderRadius: 100, padding: "4px 11px" }}>{sem.weeks}</div>}
                 </div>
-                {sem.lessons?.map((l, li) => <LessonRow key={li} lesson={l} idx={li} T={T} progress={progress} onEnter={setActiveLesson} onEdit={setEditingLesson} onToggleLock={toggleLock} readOnly={readOnly} />)}
+                {sem.lessons?.map((l, li) => <LessonRow key={li} lesson={l} idx={li} T={T} progress={progress} mentorName={school.mentor?.name} onEnter={setActiveLesson} onEdit={setEditingLesson} onToggleLock={toggleLock} readOnly={readOnly} />)}
               </div>
             ))}
             {school.gamification && (
