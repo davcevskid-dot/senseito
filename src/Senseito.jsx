@@ -436,6 +436,7 @@ Otherwise return an object with these fields:
 - name, tagline (one punchy line), description (2 sentences on the transformation), duration (honor the implied length), category, emoji (one emoji)
 - learningPath: one key from the list above (REQUIRED)
 - theme: one of violet, cyan, amber, rose, emerald (match the mood)
+- skin: one of aurora, minimal, zen, bold, editorial, playful — the visual vibe that fits the subject. VARY this across schools; do NOT default everything to aurora (e.g. meditation→zen, philosophy→editorial, kids/games→playful, startup→bold, productivity→minimal).
 - voicePreset: one of sage, drill, socratic, scientist, storyteller, trickster, custom
 - mentorName: if the creator named a specific mentor/character/persona, USE EXACTLY THAT; else invent a fitting name
 - mentorPersonality (2 sentences), sampleLine (one powerful thing they'd say to a struggling student, in their exact voice)
@@ -672,6 +673,21 @@ const LAYOUTS = {
   toolkit: { label: "Pure Toolkit", kinds: ["tools"], desc: "Just interactive tools" },
 };
 function sectionTitle(s) { return `${s.icon || SECTION_META[s.kind]?.icon || "•"} ${s.title || SECTION_META[s.kind]?.title || "Section"}`; }
+
+// Visual SKINS so no two schools look the same. Each varies the banner treatment,
+// corner radius and heading font. The architect picks one to match the subject's vibe.
+function skinCfg(skin, T) {
+  const map = {
+    aurora: { radius: 18, top: T.gr, align: "left", emoji: 44, font: "'Space Grotesk',sans-serif", onColor: false, accentBar: false, rule: false },
+    minimal: { radius: 12, top: "var(--surface)", align: "left", emoji: 32, font: "'Space Grotesk',sans-serif", onColor: false, accentBar: true, rule: false },
+    zen: { radius: 24, top: "var(--surface)", align: "center", emoji: 50, font: "'Lora',serif", onColor: false, accentBar: false, rule: false },
+    bold: { radius: 16, top: `linear-gradient(135deg,${T.p},${T.p}AA)`, align: "left", emoji: 52, font: "'Space Grotesk',sans-serif", onColor: true, accentBar: false, rule: false },
+    editorial: { radius: 10, top: "var(--surface)", align: "left", emoji: 30, font: "'Lora',serif", onColor: false, accentBar: false, rule: true },
+    playful: { radius: 26, top: T.gr, align: "center", emoji: 62, font: "'Poppins',sans-serif", onColor: false, accentBar: false, rule: false },
+  };
+  return map[skin] || map.aurora;
+}
+const SKIN_KEYS = ["aurora", "minimal", "zen", "bold", "editorial", "playful"];
 // Render-time: use explicit sections, else derive from legacy data (backward compat).
 function getSections(school) {
   if (Array.isArray(school?.sections) && school.sections.length) return school.sections;
@@ -2297,6 +2313,7 @@ function IteratePanel({ school, history, loading, onApply, onTheme, onGami, onVo
 function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, publicBase, token, onSetSlug }) {
   const school = rec.data;
   const T = THEMES[school.theme] || THEMES.violet;
+  const sk = skinCfg(school.skin, T);
   const [leads, setLeads] = useState(null);
   const [students, setStudents] = useState(null);
   const [showLeads, setShowLeads] = useState(false);
@@ -2539,13 +2556,15 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
         {iterating && <div style={{ position: "sticky", top: 12, zIndex: 90, marginBottom: 16 }}><LoaderCard title="Applying your change…" steps={ITERATE_STEPS} stepIdx={iterStep} sub="The school below will refresh in place" /></div>}
 
         <div style={{ display: "flex", flexDirection: "column", gap: 18, opacity: iterating ? 0.35 : 1, filter: iterating ? "saturate(0.6)" : "none", transition: "opacity 0.4s, filter 0.4s", paddingTop: readOnly ? 18 : 0 }}>
-          {/* Banner */}
-          <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 18, overflow: "hidden", animation: "fadeUp 0.5s ease" }}>
-            <div style={{ padding: "30px 28px 22px", background: T.gr, borderBottom: `1px solid ${B.border}` }}>
-              <div style={{ fontSize: 44, marginBottom: 10 }}>{school.emoji || "🏫"}</div>
-              <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: "clamp(20px,4vw,32px)", fontWeight: 700, letterSpacing: -1, color: B.white, marginBottom: 6 }}><EditableText value={school.name} readOnly={readOnly} onSave={v => onUpdate({ data: { ...school, name: v } })} /></div>
-              <div style={{ fontSize: 14, color: T.a, fontStyle: "italic", marginBottom: 12 }}><EditableText value={school.tagline} readOnly={readOnly} onSave={v => onUpdate({ data: { ...school, tagline: v } })} /></div>
-              <div style={{ fontSize: 13, color: B.mutedMid, lineHeight: 1.7, maxWidth: 560 }}>{school.description}</div>
+          {/* Banner — varies by the school's visual skin */}
+          <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: sk.radius, overflow: "hidden", animation: "fadeUp 0.5s ease" }}>
+            <div style={{ padding: sk.align === "center" ? "34px 28px 26px" : "30px 28px 22px", background: sk.top, borderBottom: `1px solid ${B.border}`, textAlign: sk.align, position: "relative" }}>
+              {sk.accentBar && <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 4, background: `linear-gradient(90deg,${T.p},${T.a})` }} />}
+              <div style={{ fontSize: sk.emoji, marginBottom: 10 }}>{school.emoji || "🏫"}</div>
+              <div style={{ fontFamily: sk.font, fontSize: "clamp(20px,4vw,32px)", fontWeight: 700, letterSpacing: sk.font.includes("Lora") ? 0 : -1, color: sk.onColor ? "#fff" : B.white, marginBottom: 6 }}><EditableText value={school.name} readOnly={readOnly} onSave={v => onUpdate({ data: { ...school, name: v } })} /></div>
+              {sk.rule && <div style={{ width: 48, height: 2, background: T.p, margin: "8px 0 12px" }} />}
+              <div style={{ fontSize: 14, color: sk.onColor ? "rgba(255,255,255,0.85)" : T.a, fontStyle: sk.font.includes("Lora") ? "normal" : "italic", marginBottom: 12 }}><EditableText value={school.tagline} readOnly={readOnly} onSave={v => onUpdate({ data: { ...school, tagline: v } })} /></div>
+              <div style={{ fontSize: 13, color: sk.onColor ? "rgba(255,255,255,0.78)" : B.mutedMid, lineHeight: 1.7, maxWidth: 560, margin: sk.align === "center" ? "0 auto" : 0 }}>{school.description}</div>
             </div>
             <div style={{ padding: "14px 28px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 14 }}>
               <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
