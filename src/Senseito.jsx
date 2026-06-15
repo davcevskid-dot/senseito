@@ -930,7 +930,7 @@ function LessonView({ school, lesson, T, onClose, onPass, canEdit, onUpdateBlock
             {pl.mode && pl.mode !== "default" && <div style={{ fontSize: 11.5, color: T.a, background: T.as_, border: `1px solid ${T.ba}`, borderRadius: 8, padding: "7px 11px" }}>To pass: {(PASS_MODES.find(m => m[0] === pl.mode) || [])[1]}{pl.mode === "threshold" ? ` (${pl.threshold ?? 70}%)` : ""}.</div>}
             {blocks.map((blk, i) => (
               <BrickFrame key={i} T={T} school={school} canEdit={canEdit} blockType={blk.type} ctx={{ title: lesson.title, concept: lesson.concept }} onReplace={(nb) => replaceLessonBlock(i, nb)}>
-                <BlockRenderer block={blk} T={T} school={school} onOutput={(o) => { setOutputs(s => ({ ...s, [i]: o })); onIngest?.({ title: blk.data?.title || lesson.title, lessonId: lesson.number }, o); }} />
+                <BlockRenderer block={blk} T={T} school={school} bus={bus} onOutput={(o) => { setOutputs(s => ({ ...s, [i]: o })); onIngest?.({ title: blk.data?.title || lesson.title, lessonId: lesson.number }, o); }} />
               </BrickFrame>
             ))}
             {pl.mode === "manual" && !manualDone && <button onClick={() => setManualDone(true)} style={{ ...pBtn(T), alignSelf: "center" }}>✓ Mark lesson complete</button>}
@@ -1239,8 +1239,8 @@ function EssayBlock({ data = {}, onOutput, T, disabled, school }) {
 }
 
 // ── 5. Debate ──
-function DebateBlock({ data = {}, onOutput, T, disabled, school }) {
-  const sys = `${blockMentor(school)} You are in a DEBATE. You firmly hold this position: "${data.aiPosition}". Topic: "${data.topic}". Argue hard against the student, attack the weakest part of their reasoning, stay under 90 words. Never concede easily.`;
+function DebateBlock({ data = {}, onOutput, T, disabled, school, bus }) {
+  const sys = `${blockMentor(school)} You are in a DEBATE. You firmly hold this position: "${data.aiPosition}". Topic: "${data.topic}". Argue hard against the student, attack the weakest part of their reasoning, stay under 90 words. Never concede easily.${busContext(bus)}`;
   return (<BlockShell type="debate" sub={`Topic: ${data.topic} — defend your side against the mentor.`}>
     <EvalChat system={sys} opener={`I'll defend this: ${data.aiPosition}. Convince me otherwise.`} criteria={`Student argued their position cogently and rebutted the AI on the topic: ${data.topic}`} minUser={2} T={T} disabled={disabled} placeholder="Make your argument…" onPassed={(r) => onOutput?.({ type: "debate", studentScore: r.score, passed: true })} />
   </BlockShell>);
@@ -1323,12 +1323,12 @@ function SequencerBlock({ data = {}, onOutput, T, disabled }) {
 }
 
 // ── 9. Journal ──
-function JournalBlock({ data = {}, onOutput, T, disabled, school }) {
+function JournalBlock({ data = {}, onOutput, T, disabled, school, bus }) {
   const prompts = data.prompts || []; const [ans, setAns] = useState({}); const [fb, setFb] = useState(""); const [loading, setLoading] = useState(false); const [passed, setPassed] = useState(false);
   const text = prompts.map((p, i) => `${p}\n${ans[i] || ""}`).join("\n\n"); const words = text.trim().split(/\s+/).filter(Boolean).length; const min = data.minWords || 80;
   async function submit() {
     setLoading(true);
-    try { const r = await api(`${blockMentor(school)} The student journaled. Reflect back one genuine insight in 2 sentences, then reply VERDICT: PASS or NOTYET on whether they engaged honestly.`, [{ role: "user", content: text }], 600); setFb(r.replace(/VERDICT:.*/is, "").trim()); const ok = /VERDICT:\s*PASS/i.test(r) || words >= min; setPassed(ok); onOutput?.({ type: "journal", entryText: text, wordCount: words, passed: ok, reflection: r }); }
+    try { const r = await api(`${blockMentor(school)} The student journaled. Reflect back one genuine insight in 2 sentences, connecting it to what you know about them if relevant, then reply VERDICT: PASS or NOTYET on whether they engaged honestly.${busContext(bus)}`, [{ role: "user", content: text }], 600); setFb(r.replace(/VERDICT:.*/is, "").trim()); const ok = /VERDICT:\s*PASS/i.test(r) || words >= min; setPassed(ok); onOutput?.({ type: "journal", entryText: text, wordCount: words, passed: ok, reflection: r }); }
     catch (e) { setFb("Error: " + e.message); }
     setLoading(false);
   }
@@ -1510,8 +1510,8 @@ function MoodQuadrantBlock({ data = {}, onOutput, T, disabled, state, onState })
 }
 
 // ── 19. Roleplay Chat ──
-function RoleplayBlock({ data = {}, onOutput, T, disabled, school }) {
-  const sys = `${blockMentor(school)} ROLEPLAY: you fully play "${data.character}". Scenario: ${data.scenario}. Stay 100% in character, never break. React realistically to the student. Under 90 words. The student's goal: ${data.goal}.`;
+function RoleplayBlock({ data = {}, onOutput, T, disabled, school, bus }) {
+  const sys = `${blockMentor(school)} ROLEPLAY: you fully play "${data.character}". Scenario: ${data.scenario}. Stay 100% in character, never break. React realistically to the student. Under 90 words. The student's goal: ${data.goal}.${busContext(bus)}`;
   return (<BlockShell type="roleplay" sub={`You're talking to ${data.character}. ${data.scenario}`}>
     <EvalChat system={sys} opener={`(${data.character}) ${data.scenario}`} criteria={`Student achieved this goal in the roleplay: ${data.goal}`} minUser={3} T={T} disabled={disabled} placeholder="Your response…" onPassed={(r) => onOutput?.({ type: "roleplay", studentScore: r.score, passed: true })} />
   </BlockShell>);
@@ -1723,12 +1723,12 @@ const BLOCK_COMPONENTS = {
   reading_plain: ReadingPlainBlock, video_embed: VideoEmbedBlock, quiz: QuizBlock, calculator: CalculatorBlock,
   custom: CustomBlock,
 };
-function BlockRenderer({ block, onOutput, T, disabled, state, onState, school }) {
+function BlockRenderer({ block, onOutput, T, disabled, state, onState, school, bus }) {
   const Comp = BLOCK_COMPONENTS[block?.type];
   if (!Comp) return <div style={{ fontSize: 12, color: B.muted, padding: 14, border: `1px dashed ${B.borderMid}`, borderRadius: 12 }}>Unknown block: {block?.type}</div>;
   return (
     <Boundary fallback={() => <div style={{ fontSize: 12.5, color: "#F87171", padding: 14, border: "1px solid rgba(248,113,113,0.3)", borderRadius: 12 }}>⚠️ This {BLOCK_META[block.type]?.label || block.type} activity couldn't load. Try editing or regenerating it.</div>}>
-      <Comp data={block.data || {}} onOutput={onOutput} T={T} disabled={disabled} state={state} onState={onState} school={school} />
+      <Comp data={block.data || {}} onOutput={onOutput} T={T} disabled={disabled} state={state} onState={onState} school={school} bus={bus} />
     </Boundary>
   );
 }
@@ -2018,7 +2018,7 @@ function DashboardSection({ section, rec, T, onUpdate, readOnly, school, onInges
       {blocks.map((b, i) => (
         <BrickFrame key={i} T={T} school={school} canEdit={!readOnly} blockType={b.type} ctx={{ title: section.title, concept: section.intro }} onReplace={(nb) => replaceBlock(i, nb)}>
           <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 16, padding: 16, animation: "fadeUp 0.4s ease backwards", animationDelay: `${Math.min(i, 8) * 55}ms` }}>
-            <BlockRenderer block={b} T={T} school={school} state={stateFor(i)} onState={(s) => setStateFor(i, s)} onOutput={(o) => onIngest?.({ title: section.title }, o)} />
+            <BlockRenderer block={b} T={T} school={school} bus={rec.toolStates?.__bus} state={stateFor(i)} onState={(s) => setStateFor(i, s)} onOutput={(o) => onIngest?.({ title: section.title }, o)} />
           </div>
         </BrickFrame>
       ))}
