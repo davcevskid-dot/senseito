@@ -312,6 +312,7 @@ const ALL_BLOCKS = Object.keys(BLOCK_META);
 
 // Compact data-shape reference handed to the architect/editor AI.
 const BLOCK_SCHEMA_GUIDE = `BLOCK DATA SHAPES (each lesson block is { type, data }):
+Every block's data MAY include "concepts": [concept ids from the school's concept list that this block teaches/tests] — tag accurately so the system can track mastery.
 - flashcard: { cards:[{front,back}] (5-10) }
 - reading: { passage (200-400 words), keyPhrases:[3-6 exact phrases from passage] }
 - mindmap: { center, nodes:[{label, detail}] (4-8) }
@@ -459,6 +460,7 @@ chronological = foundations→deep; project-based = mini projects→capstone; pr
 Otherwise return an object with these fields:
 - name, tagline (one punchy line), description (2 sentences on the transformation), duration (honor the implied length), category, emoji (one emoji)
 - learningPath: one key from the list above (REQUIRED)
+- concepts: 8-20 of { id (short kebab slug), label (the concept name), prereq:[ids it depends on] } — the KNOWLEDGE MAP of this subject. Lessons & blocks will tag which concepts they cover so the system tracks mastery. Order roughly foundational → advanced.
 - theme: one of violet, cyan, amber, rose, emerald (match the mood)
 - skin: one of aurora, minimal, zen, bold, editorial, playful — the visual vibe that fits the subject. VARY this across schools; do NOT default everything to aurora (e.g. meditation→zen, philosophy→editorial, kids/games→playful, startup→bold, productivity→minimal).
 - voicePreset: one of sage, drill, socratic, scientist, storyteller, trickster, custom
@@ -503,7 +505,7 @@ Format exactly:
 Output only the markdown. No preamble.`;
 
 const ITERATE_SYS = `You are the Senseito School Editor AI. You receive an existing school PLAN as JSON (lessons describe activities as "blockTypes": [type strings] only — NOT full block data) and an edit instruction.
-Return the FULL updated plan as JSON with the EXACT same structure and field names. Apply ONLY the requested change; preserve everything else exactly, including all lesson "number" values, each lesson's "blockTypes" array, the "sections" array, "layout", and learningPath/voicePreset/gamiPreset/theme (change those only if asked). Also refresh "suggestions" to 3-4 NEW specific ideas that fit after this change.
+Return the FULL updated plan as JSON with the EXACT same structure and field names. Apply ONLY the requested change; preserve everything else exactly, including all lesson "number" values, each lesson's "blockTypes" array, the "sections" array, the "concepts" array, "layout", and learningPath/voicePreset/gamiPreset/theme (change those only if asked). If the change introduces a genuinely new concept, you may add it to "concepts". Also refresh "suggestions" to 3-4 NEW specific ideas that fit after this change.
 SECTIONS: the experience is made of "sections" (kinds: lessons, mentor, tools, dashboard). PRESERVE the existing sections and their order unless the instruction asks to add/remove/reorder them. A "dashboard" section has its own "blockTypes": [type strings] — keep them unless asked; if adding a tool to a dashboard, append a blockType. If the user asks for a new always-available tool/section, you may add a dashboard section.
 BLOCKS: keep each lesson's existing "blockTypes" unless the instruction changes them. When ADDING or RE-ORIENTING lessons, give each 1-3 blockTypes allowed for the school's learningPath (see list). Do NOT output block data — only type names. Block contents are authored in a separate step.
 Allowed block types per learning path:
@@ -556,12 +558,17 @@ The creator chats with you to shape this project. Reply in JSON ONLY: { "reply":
 - "How can I improve this?" → suggest 2-3 concrete ideas in the reply (action = null) so they can pick.
 Be concrete about this exact project's sections, lessons, dashboards and tools.`;
 
-// Turn the per-learner bus into a short context line the mentor can use.
-function busContext(bus) {
+function conceptLabelOf(school, id) { return (school?.concepts || []).find(c => c.id === id)?.label || id; }
+// Turn the per-learner bus into a short context line the mentor/bricks can use.
+function busContext(bus, school) {
   if (!bus) return "";
   const lines = [];
+  const weak = Object.entries(bus.mastery || {}).filter(([, v]) => v < 0.5).map(([id]) => conceptLabelOf(school, id));
   const st = (bus.struggles || []).slice(-5).map(s => s.label).filter(Boolean);
-  if (st.length) lines.push(`The learner recently STRUGGLED with: ${st.join("; ")}. Weave help on these in naturally — reference them like you noticed.`);
+  const weakAll = [...new Set([...weak, ...st])].slice(0, 6);
+  if (weakAll.length) lines.push(`The learner is WEAK on: ${weakAll.join("; ")}. Reference and reinforce these naturally — like you noticed.`);
+  const strong = Object.entries(bus.mastery || {}).filter(([, v]) => v >= 0.8).map(([id]) => conceptLabelOf(school, id)).slice(0, 6);
+  if (strong.length) lines.push(`They've got a handle on: ${strong.join("; ")} — don't over-explain these.`);
   const m = Object.entries(bus.metrics || {}).slice(-5).map(([k, v]) => `${k}: ${v}`);
   if (m.length) lines.push(`Recent numbers the learner logged: ${m.join(", ")}.`);
   return lines.length ? `\nWHAT YOU KNOW ABOUT THIS LEARNER (from their activity):\n${lines.join("\n")}\n` : "";
@@ -571,7 +578,7 @@ function mentorSys(school, lesson, bus) {
   const dna = school.knowledgeDNA ? `\nKNOWLEDGE DNA (your source material — teach from this, use its vocabulary):\n${String(school.knowledgeDNA).slice(0, 4000)}\n` : "";
   return `You are ${school.mentor.name}, an AI mentor inside the "${school.name}" school on Senseito.
 ${school.mentor.systemVoice}
-${dna}${busContext(bus)}
+${dna}${busContext(bus, school)}
 THIS LESSON: "${lesson.title}" (${lesson.type})
 CONCEPT: ${lesson.concept}
 MISSION: ${lesson.mission}
@@ -594,7 +601,7 @@ function mentorOfficeSys(school, bus) {
   const dna = school.knowledgeDNA ? `\nKNOWLEDGE DNA:\n${String(school.knowledgeDNA).slice(0, 4000)}\n` : "";
   return `You are ${school.mentor.name}, mentor of "${school.name}" on Senseito — holding open OFFICE HOURS.
 ${school.mentor.systemVoice}
-${dna}${busContext(bus)}
+${dna}${busContext(bus, school)}
 THE SCHOOL: ${school.description} Lessons: ${school.semesters?.flatMap(s => s.lessons?.map(l => l.title)).join("; ")}
 The student can ask you ANYTHING related to this subject. Stay fully in character. Connect answers back to the school's lessons and missions when relevant. Push them toward action, not consumption. Never bullet lists. Replies under 150 words.`;
 }
@@ -654,7 +661,8 @@ async function fillSchoolBlocks(content, { oldSchool = null, dna = null } = {}) 
   const oldByNum = {};
   (oldSchool?.semesters || []).forEach(s => (s.lessons || []).forEach(l => { oldByNum[l.number] = l; }));
   const same = (a, b) => (a || "") === (b || "");
-  const ctxHeader = `SCHOOL: ${content.name} — ${content.description}\nLEARNING PATH: ${content.learningPath || "mixed"}\nMENTOR: ${content.mentorName || content.mentor?.name || ""} (voice: ${content.voicePreset || "sage"})${dna ? `\nKNOWLEDGE DNA:\n${String(dna).slice(0, 2500)}` : ""}`;
+  const conceptList = (content.concepts || []).map(c => `${c.id}:${c.label}`).join(", ");
+  const ctxHeader = `SCHOOL: ${content.name} — ${content.description}\nLEARNING PATH: ${content.learningPath || "mixed"}\nMENTOR: ${content.mentorName || content.mentor?.name || ""} (voice: ${content.voicePreset || "sage"})${conceptList ? `\nCONCEPTS (tag each block's data.concepts with the relevant ids): ${conceptList}` : ""}${dna ? `\nKNOWLEDGE DNA:\n${String(dna).slice(0, 2500)}` : ""}`;
   await Promise.all((content.semesters || []).map(async (sem) => {
     const toFill = [];
     (sem.lessons || []).forEach(l => {
@@ -707,7 +715,8 @@ async function fillSchoolBlocks(content, { oldSchool = null, dna = null } = {}) 
 // Author / rewrite ONE block's full data (used by per-brick "✨ iterate" everywhere).
 async function authorOneBlock(school, ctx, type, instruction) {
   const sys = `You author ONE Senseito interactive learning block of type "${type}". Return ONLY JSON { "type", "data" } whose data follows this shape EXACTLY:\n${BLOCK_SCHEMA_GUIDE}\nMake the content rich, specific and genuinely useful — for a reading, write the ACTUAL passage (150-300 words), not a placeholder. Never return empty or generic content.`;
-  const c = `SCHOOL: ${school.name} — ${school.description}\nLEARNING PATH: ${school.learningPath || "mixed"}${school.knowledgeDNA ? `\nKNOWLEDGE DNA:\n${String(school.knowledgeDNA).slice(0, 2000)}` : ""}\nWHERE THIS APPEARS: ${ctx?.title || ""}${ctx?.concept ? ` — ${ctx.concept}` : ""}\nBLOCK TYPE: ${type}\n${instruction ? `WHAT TO DO: ${instruction}` : "Author it richly for this context."}`;
+  const conceptList = (school.concepts || []).map(cc => `${cc.id}:${cc.label}`).join(", ");
+  const c = `SCHOOL: ${school.name} — ${school.description}\nLEARNING PATH: ${school.learningPath || "mixed"}${conceptList ? `\nCONCEPTS (tag data.concepts with relevant ids): ${conceptList}` : ""}${school.knowledgeDNA ? `\nKNOWLEDGE DNA:\n${String(school.knowledgeDNA).slice(0, 2000)}` : ""}\nWHERE THIS APPEARS: ${ctx?.title || ""}${ctx?.concept ? ` — ${ctx.concept}` : ""}\nBLOCK TYPE: ${type}\n${instruction ? `WHAT TO DO: ${instruction}` : "Author it richly for this context."}`;
   const out = await apiJSON(sys, [{ role: "user", content: c }], 2500, "sonnet");
   let blk = (out && out.type && out.data) ? out : (out?.blocks?.[0]) || (out?.lessons?.[0]?.blocks?.[0]);
   if (!blk || !blk.type) blk = { type, data: (out && out.data) || out || {} };
@@ -930,7 +939,7 @@ function LessonView({ school, lesson, T, onClose, onPass, canEdit, onUpdateBlock
             {pl.mode && pl.mode !== "default" && <div style={{ fontSize: 11.5, color: T.a, background: T.as_, border: `1px solid ${T.ba}`, borderRadius: 8, padding: "7px 11px" }}>To pass: {(PASS_MODES.find(m => m[0] === pl.mode) || [])[1]}{pl.mode === "threshold" ? ` (${pl.threshold ?? 70}%)` : ""}.</div>}
             {blocks.map((blk, i) => (
               <BrickFrame key={i} T={T} school={school} canEdit={canEdit} blockType={blk.type} ctx={{ title: lesson.title, concept: lesson.concept }} onReplace={(nb) => replaceLessonBlock(i, nb)}>
-                <BlockRenderer block={blk} T={T} school={school} bus={bus} onOutput={(o) => { setOutputs(s => ({ ...s, [i]: o })); onIngest?.({ title: blk.data?.title || lesson.title, lessonId: lesson.number }, o); }} />
+                <BlockRenderer block={blk} T={T} school={school} bus={bus} onOutput={(o) => { setOutputs(s => ({ ...s, [i]: o })); onIngest?.({ title: blk.data?.title || lesson.title, lessonId: lesson.number, concepts: blk.data?.concepts }, o); }} />
               </BrickFrame>
             ))}
             {pl.mode === "manual" && !manualDone && <button onClick={() => setManualDone(true)} style={{ ...pBtn(T), alignSelf: "center" }}>✓ Mark lesson complete</button>}
@@ -995,6 +1004,20 @@ function MentorOffice({ school, T, chat, onChat, bus }) {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+      {(school.concepts || []).length > 0 && (
+        <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 16, padding: "14px 18px" }}>
+          <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.5, color: T.p, marginBottom: 10 }}>🧠 Your knowledge map</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+            {school.concepts.map(c => {
+              const m = bus?.mastery?.[c.id];
+              const col = m == null ? B.surface3 : m >= 0.8 ? "rgba(74,222,128,0.15)" : m >= 0.5 ? "rgba(251,191,36,0.14)" : "rgba(248,113,113,0.12)";
+              const bc = m == null ? B.borderMid : m >= 0.8 ? "rgba(74,222,128,0.4)" : m >= 0.5 ? "rgba(251,191,36,0.4)" : "rgba(248,113,113,0.35)";
+              const tc = m == null ? B.mutedMid : m >= 0.8 ? "#4ADE80" : m >= 0.5 ? "#FBBF24" : "#F87171";
+              return <span key={c.id} title={m == null ? "Not started" : `Mastery ${Math.round(m * 100)}%`} style={{ fontSize: 11.5, padding: "4px 10px", borderRadius: 100, background: col, border: `1px solid ${bc}`, color: tc }}>{m >= 0.8 ? "✓ " : ""}{c.label}</span>;
+            })}
+          </div>
+        </div>
+      )}
       <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 18, padding: 26, position: "relative", overflow: "hidden" }}>
         <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: `linear-gradient(90deg,${T.p},${T.a})` }} />
         <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 2, color: T.p, marginBottom: 8 }}>Your AI Mentor</div>
@@ -1240,7 +1263,7 @@ function EssayBlock({ data = {}, onOutput, T, disabled, school }) {
 
 // ── 5. Debate ──
 function DebateBlock({ data = {}, onOutput, T, disabled, school, bus }) {
-  const sys = `${blockMentor(school)} You are in a DEBATE. You firmly hold this position: "${data.aiPosition}". Topic: "${data.topic}". Argue hard against the student, attack the weakest part of their reasoning, stay under 90 words. Never concede easily.${busContext(bus)}`;
+  const sys = `${blockMentor(school)} You are in a DEBATE. You firmly hold this position: "${data.aiPosition}". Topic: "${data.topic}". Argue hard against the student, attack the weakest part of their reasoning, stay under 90 words. Never concede easily.${busContext(bus, school)}`;
   return (<BlockShell type="debate" sub={`Topic: ${data.topic} — defend your side against the mentor.`}>
     <EvalChat system={sys} opener={`I'll defend this: ${data.aiPosition}. Convince me otherwise.`} criteria={`Student argued their position cogently and rebutted the AI on the topic: ${data.topic}`} minUser={2} T={T} disabled={disabled} placeholder="Make your argument…" onPassed={(r) => onOutput?.({ type: "debate", studentScore: r.score, passed: true })} />
   </BlockShell>);
@@ -1328,7 +1351,7 @@ function JournalBlock({ data = {}, onOutput, T, disabled, school, bus }) {
   const text = prompts.map((p, i) => `${p}\n${ans[i] || ""}`).join("\n\n"); const words = text.trim().split(/\s+/).filter(Boolean).length; const min = data.minWords || 80;
   async function submit() {
     setLoading(true);
-    try { const r = await api(`${blockMentor(school)} The student journaled. Reflect back one genuine insight in 2 sentences, connecting it to what you know about them if relevant, then reply VERDICT: PASS or NOTYET on whether they engaged honestly.${busContext(bus)}`, [{ role: "user", content: text }], 600); setFb(r.replace(/VERDICT:.*/is, "").trim()); const ok = /VERDICT:\s*PASS/i.test(r) || words >= min; setPassed(ok); onOutput?.({ type: "journal", entryText: text, wordCount: words, passed: ok, reflection: r }); }
+    try { const r = await api(`${blockMentor(school)} The student journaled. Reflect back one genuine insight in 2 sentences, connecting it to what you know about them if relevant, then reply VERDICT: PASS or NOTYET on whether they engaged honestly.${busContext(bus, school)}`, [{ role: "user", content: text }], 600); setFb(r.replace(/VERDICT:.*/is, "").trim()); const ok = /VERDICT:\s*PASS/i.test(r) || words >= min; setPassed(ok); onOutput?.({ type: "journal", entryText: text, wordCount: words, passed: ok, reflection: r }); }
     catch (e) { setFb("Error: " + e.message); }
     setLoading(false);
   }
@@ -1511,7 +1534,7 @@ function MoodQuadrantBlock({ data = {}, onOutput, T, disabled, state, onState })
 
 // ── 19. Roleplay Chat ──
 function RoleplayBlock({ data = {}, onOutput, T, disabled, school, bus }) {
-  const sys = `${blockMentor(school)} ROLEPLAY: you fully play "${data.character}". Scenario: ${data.scenario}. Stay 100% in character, never break. React realistically to the student. Under 90 words. The student's goal: ${data.goal}.${busContext(bus)}`;
+  const sys = `${blockMentor(school)} ROLEPLAY: you fully play "${data.character}". Scenario: ${data.scenario}. Stay 100% in character, never break. React realistically to the student. Under 90 words. The student's goal: ${data.goal}.${busContext(bus, school)}`;
   return (<BlockShell type="roleplay" sub={`You're talking to ${data.character}. ${data.scenario}`}>
     <EvalChat system={sys} opener={`(${data.character}) ${data.scenario}`} criteria={`Student achieved this goal in the roleplay: ${data.goal}`} minUser={3} T={T} disabled={disabled} placeholder="Your response…" onPassed={(r) => onOutput?.({ type: "roleplay", studentScore: r.score, passed: true })} />
   </BlockShell>);
@@ -2018,7 +2041,7 @@ function DashboardSection({ section, rec, T, onUpdate, readOnly, school, onInges
       {blocks.map((b, i) => (
         <BrickFrame key={i} T={T} school={school} canEdit={!readOnly} blockType={b.type} ctx={{ title: section.title, concept: section.intro }} onReplace={(nb) => replaceBlock(i, nb)}>
           <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 16, padding: 16, animation: "fadeUp 0.4s ease backwards", animationDelay: `${Math.min(i, 8) * 55}ms` }}>
-            <BlockRenderer block={b} T={T} school={school} bus={rec.toolStates?.__bus} state={stateFor(i)} onState={(s) => setStateFor(i, s)} onOutput={(o) => onIngest?.({ title: section.title }, o)} />
+            <BlockRenderer block={b} T={T} school={school} bus={rec.toolStates?.__bus} state={stateFor(i)} onState={(s) => setStateFor(i, s)} onOutput={(o) => onIngest?.({ title: section.title, concepts: b.data?.concepts }, o)} />
           </div>
         </BrickFrame>
       ))}
@@ -2477,13 +2500,18 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
     onUpdate({ data });
   }
   // ── Context Bus: bricks write a STRUGGLE/METRIC stream the mentor reads ──
-  const bus = rec.toolStates?.__bus || { struggles: [], metrics: {} };
+  const bus = rec.toolStates?.__bus || { struggles: [], metrics: {}, mastery: {} };
   function ingestOutput(ctx, output) {
     if (!output || !output.type) return;
-    const cur = rec.toolStates?.__bus || { struggles: [], metrics: {} };
-    const next = { struggles: [...(cur.struggles || [])], metrics: { ...(cur.metrics || {}) } };
-    const key = `${ctx.lessonId ?? ctx.title ?? output.type}:${output.type}`;
-    if (output.passed === false) next.struggles = [...next.struggles.filter(s => s.key !== key), { key, label: ctx.title || output.type, type: output.type, at: Date.now() }].slice(-20);
+    const cur = rec.toolStates?.__bus || { struggles: [], metrics: {}, mastery: {} };
+    const next = { struggles: [...(cur.struggles || [])], metrics: { ...(cur.metrics || {}) }, mastery: { ...(cur.mastery || {}) } };
+    const concepts = (ctx.concepts || []).filter(Boolean);
+    if (typeof output.passed === "boolean" && concepts.length) {
+      concepts.forEach(cid => { const prev = next.mastery[cid] ?? 0.5; next.mastery[cid] = Math.round((prev * 0.6 + (output.passed ? 1 : 0) * 0.4) * 100) / 100; });
+    }
+    const label = concepts.map(cid => conceptLabelOf(school, cid))[0] || ctx.title || output.type;
+    const key = `${concepts[0] || ctx.lessonId || ctx.title || output.type}:${output.type}`;
+    if (output.passed === false) next.struggles = [...next.struggles.filter(s => s.key !== key), { key, label, type: output.type, at: Date.now() }].slice(-20);
     else if (output.passed === true) next.struggles = next.struggles.filter(s => s.key !== key);
     if (typeof output.score === "number") next.metrics[`${ctx.title || output.type} score`] = String(output.score);
     if (output.totals?.calories) next.metrics["calories logged"] = String(Math.round(output.totals.calories));
