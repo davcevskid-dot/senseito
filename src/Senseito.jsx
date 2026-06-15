@@ -447,7 +447,7 @@ Decide which SECTIONS this experience needs, based on the subject. Section kinds
 - "mentor": an always-available AI mentor for open questions/coaching.
 - "tools": a place where the learner builds and uses their own interactive tools.
 - "dashboard": an always-on grid of bricks the learner returns to (NOT gated). Perfect for practice-driven subjects — e.g. yoga → pose gallery + breath timer + streak tracker; trading → trade journal + metric tracker; meditation → reflection timer + mood quadrant.
-Pick ONLY the sections that genuinely fit. A yoga/habit/practice experience might be a dashboard + mentor with NO lessons at all; a philosophy course might be lessons + mentor. Honor any structure the creator asked for. Each dashboard section carries its own blockTypes (from the allowed list) the learner uses directly.
+Pick ONLY the sections that genuinely fit. A yoga/habit/practice experience might be a dashboard + mentor with NO lessons at all; a philosophy course might be lessons + mentor. Honor any structure the creator asked for. Each dashboard section carries its own blockTypes the learner uses directly — these MUST be INTERACTIVE/TRACKING bricks (e.g. habit_checker, heatmap, metric_tracker, macro_tracker, mood_quadrant, reflection_timer, weekly_planner, calculator, flashcard, quiz, video_embed). NEVER put reading_plain or reading in a dashboard — a dashboard is for doing, not reading.
 
 STEP 3 — PLAN BLOCKS PER LESSON (TYPES ONLY).
 For each lesson choose 1-3 DISTINCT block TYPES (never repeat the same type within a lesson) from the chosen path's ALLOWED list ONLY (never a forbidden one), ordered pedagogically (e.g. reading → practice → check); the LAST should prove mastery. List ONLY the type strings now — their detailed contents are generated later, so keep this plan compact.
@@ -538,6 +538,23 @@ A student passes ONLY if there is concrete evidence in their own messages (speci
 Reply in EXACTLY this format, nothing else:
 VERDICT: PASS or NOTYET
 REASON: one sentence`;
+
+// Compact description of the whole project for the build assistant.
+function schoolSummary(school) {
+  const secs = getSections(school).map(s => `${s.kind}:"${s.title}"`).join(", ");
+  const lessons = (school.semesters || []).flatMap(s => (s.lessons || []).map(l => `#${l.number} ${l.title} [${(l.blocks || []).map(b => b.type).join("/") || "—"}]`)).join("; ");
+  const dash = (school.sections || []).filter(s => s.kind === "dashboard").map(s => `"${s.title}" [${(s.blocks || []).map(b => b.type).join("/")}]`).join("; ");
+  return `Name: ${school.name}. Subject/path: ${school.learningPath || "mixed"}. Layout sections: ${secs}. Lessons: ${lessons || "none"}. Dashboards: ${dash || "none"}. Mentor: ${school.mentor?.name || "—"} (${school.voicePreset || "sage"} voice). Theme: ${school.theme}, skin: ${school.skin || "aurora"}.`;
+}
+// The build assistant: knows the full project; converses OR emits a precise edit directive.
+const CHAT_SYS = (school) => `You are the Senseito build assistant for the project "${school.name}". You know it fully:
+${schoolSummary(school)}
+Available block types: ${ALL_BLOCKS.join(", ")}.
+The creator chats with you to shape this project. Reply in JSON ONLY: { "reply": "<conversational reply, under 90 words>", "action": <null OR ONE precise one-line edit instruction for the school editor> }.
+- Question / discussion / vague ask → give a sharp, specific answer grounded in THIS project; if you need clarity, ask ONE question; action = null.
+- Clear directive (add/remove/change/expand something) → set "action" to a precise one-line instruction the editor can execute, and a short "reply" confirming it.
+- "How can I improve this?" → suggest 2-3 concrete ideas in the reply (action = null) so they can pick.
+Be concrete about this exact project's sections, lessons, dashboards and tools.`;
 
 function mentorSys(school, lesson) {
   const dna = school.knowledgeDNA ? `\nKNOWLEDGE DNA (your source material — teach from this, use its vocabulary):\n${String(school.knowledgeDNA).slice(0, 4000)}\n` : "";
@@ -676,6 +693,17 @@ async function fillSchoolBlocks(content, { oldSchool = null, dna = null } = {}) 
   return content;
 }
 
+// Author / rewrite ONE block's full data (used by per-brick "✨ iterate" everywhere).
+async function authorOneBlock(school, ctx, type, instruction) {
+  const sys = `You author ONE Senseito interactive learning block of type "${type}". Return ONLY JSON { "type", "data" } whose data follows this shape EXACTLY:\n${BLOCK_SCHEMA_GUIDE}\nMake the content rich, specific and genuinely useful — for a reading, write the ACTUAL passage (150-300 words), not a placeholder. Never return empty or generic content.`;
+  const c = `SCHOOL: ${school.name} — ${school.description}\nLEARNING PATH: ${school.learningPath || "mixed"}${school.knowledgeDNA ? `\nKNOWLEDGE DNA:\n${String(school.knowledgeDNA).slice(0, 2000)}` : ""}\nWHERE THIS APPEARS: ${ctx?.title || ""}${ctx?.concept ? ` — ${ctx.concept}` : ""}\nBLOCK TYPE: ${type}\n${instruction ? `WHAT TO DO: ${instruction}` : "Author it richly for this context."}`;
+  const out = await apiJSON(sys, [{ role: "user", content: c }], 2500, "sonnet");
+  let blk = (out && out.type && out.data) ? out : (out?.blocks?.[0]) || (out?.lessons?.[0]?.blocks?.[0]);
+  if (!blk || !blk.type) blk = { type, data: (out && out.data) || out || {} };
+  blk.type = type;
+  return blk;
+}
+
 // ─────────────────────────────────────────────────────────────
 // SECTIONS — the experience is a list of sections, not a fixed spine.
 // kinds: lessons (gated curriculum) · mentor (AI office hours) ·
@@ -795,11 +823,11 @@ function Toast({ toast }) {
 // ─────────────────────────────────────────────────────────────
 // MENTOR LESSON CHAT
 // ─────────────────────────────────────────────────────────────
-function LessonView({ school, lesson, T, onClose, onPass }) {
-  const blocks = lesson.blocks || [];
+function LessonView({ school, lesson, T, onClose, onPass, canEdit, onUpdateBlock, chat, onChat }) {
+  const [blocks, setBlocks] = useState(lesson.blocks || []);
   const [tab, setTab] = useState("mentor"); // the guided conversation leads; activities are secondary
   const [outputs, setOutputs] = useState({});
-  const [msgs, setMsgs] = useState([{ role: "assistant", content: lesson.openingLine || `Let's begin. ${lesson.concept}` }]);
+  const [msgs, setMsgs] = useState(chat?.length ? chat : [{ role: "assistant", content: lesson.openingLine || `Let's begin. ${lesson.concept}` }]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [chatPassed, setChatPassed] = useState(false);
@@ -807,6 +835,8 @@ function LessonView({ school, lesson, T, onClose, onPass }) {
   const [missionShown, setMissionShown] = useState(false);
   const bottomRef = useRef(null);
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs]);
+  useEffect(() => { if (onChat) onChat(msgs); }, [msgs]); // persist the lesson conversation
+  function replaceLessonBlock(i, nb) { setBlocks(bs => bs.map((b, j) => j === i ? nb : b)); onUpdateBlock?.(i, nb); }
 
   // Pass logic chosen by the creator (defaults to "last activity / mentor").
   const pl = lesson.passLogic || {};
@@ -888,7 +918,9 @@ function LessonView({ school, lesson, T, onClose, onPass }) {
             </div>
             {pl.mode && pl.mode !== "default" && <div style={{ fontSize: 11.5, color: T.a, background: T.as_, border: `1px solid ${T.ba}`, borderRadius: 8, padding: "7px 11px" }}>To pass: {(PASS_MODES.find(m => m[0] === pl.mode) || [])[1]}{pl.mode === "threshold" ? ` (${pl.threshold ?? 70}%)` : ""}.</div>}
             {blocks.map((blk, i) => (
-              <BlockRenderer key={i} block={blk} T={T} school={school} onOutput={(o) => setOutputs(s => ({ ...s, [i]: o }))} />
+              <BrickFrame key={i} T={T} school={school} canEdit={canEdit} blockType={blk.type} ctx={{ title: lesson.title, concept: lesson.concept }} onReplace={(nb) => replaceLessonBlock(i, nb)}>
+                <BlockRenderer block={blk} T={T} school={school} onOutput={(o) => setOutputs(s => ({ ...s, [i]: o }))} />
+              </BrickFrame>
             ))}
             {pl.mode === "manual" && !manualDone && <button onClick={() => setManualDone(true)} style={{ ...pBtn(T), alignSelf: "center" }}>✓ Mark lesson complete</button>}
             {passed && <div style={{ textAlign: "center", padding: "12px 14px", background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.25)", borderRadius: 10, fontSize: 13, color: "#4ADE80", fontWeight: 600 }}>✅ Lesson complete — hit "Complete →" above, or talk it through with your mentor.</div>}
@@ -1690,6 +1722,26 @@ function BlockRenderer({ block, onOutput, T, disabled, state, onState, school })
   );
 }
 
+// Creator wrapper: adds a "✨ Tweak" control on any brick to talk to the AI about
+// THAT brick and rewrite it in place. Renders children plainly when not editable.
+function BrickFrame({ children, T, school, ctx, blockType, onReplace, canEdit }) {
+  const [busy, setBusy] = useState(false);
+  if (!canEdit) return children;
+  async function tweak() {
+    const inst = window.prompt("How should this activity change?\n(e.g. \"write a real 200-word passage\", \"make it harder\", \"add 5 more cards\", \"use travel vocabulary\")");
+    if (inst == null) return; // cancelled
+    setBusy(true);
+    try { const nb = await authorOneBlock(school, ctx, blockType, inst.trim()); onReplace(nb); } catch { }
+    setBusy(false);
+  }
+  return (
+    <div style={{ position: "relative" }}>
+      <button onClick={tweak} disabled={busy} title="Tweak this activity with AI" style={{ position: "absolute", top: 8, right: 8, zIndex: 3, background: busy ? T.p : "rgba(124,58,237,0.12)", border: `1px solid ${T.ba}`, borderRadius: 8, color: busy ? "white" : T.hi, padding: "4px 9px", cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>{busy ? "…" : "✨ Tweak"}</button>
+      {children}
+    </div>
+  );
+}
+
 // Legacy tool types keep their fields at the top level; everything else is a block.
 const LEGACY_TOOLS = ["checklist", "habit", "journal", "timer", "counter", "quiz"];
 // Make any AI-built tool spec safe to render, so a successful build always shows up.
@@ -1947,14 +1999,17 @@ function DashboardSection({ section, rec, T, onUpdate, readOnly, school }) {
   const blocks = section.blocks || [];
   const stateFor = (i) => rec.toolStates?.[`${section.id}:${i}`];
   const setStateFor = (i, s) => onUpdate({ toolStates: { ...(rec.toolStates || {}), [`${section.id}:${i}`]: s } });
+  const replaceBlock = (i, nb) => onUpdate({ data: { ...school, sections: (school.sections || []).map(s => s.id === section.id ? { ...s, blocks: (s.blocks || []).map((b, j) => j === i ? nb : b) } : s) } });
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       {section.intro && <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: "14px 20px", fontSize: 13, color: B.mutedMid, lineHeight: 1.6 }}>{section.intro}</div>}
-      {blocks.length === 0 && <div style={{ textAlign: "center", padding: "30px 20px", fontSize: 13, color: B.muted, border: `1px dashed ${B.borderMid}`, borderRadius: 14 }}>{readOnly ? "Nothing here yet." : "No tools here yet — add some from the Iterate panel."}</div>}
+      {blocks.length === 0 && <div style={{ textAlign: "center", padding: "30px 20px", fontSize: 13, color: B.muted, border: `1px dashed ${B.borderMid}`, borderRadius: 14 }}>{readOnly ? "Nothing here yet." : "No tools here yet — ask in the chat to add some."}</div>}
       {blocks.map((b, i) => (
-        <div key={i} style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 16, padding: 16, animation: "fadeUp 0.4s ease backwards", animationDelay: `${Math.min(i, 8) * 55}ms` }}>
-          <BlockRenderer block={b} T={T} school={school} state={stateFor(i)} onState={(s) => setStateFor(i, s)} />
-        </div>
+        <BrickFrame key={i} T={T} school={school} canEdit={!readOnly} blockType={b.type} ctx={{ title: section.title, concept: section.intro }} onReplace={(nb) => replaceBlock(i, nb)}>
+          <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 16, padding: 16, animation: "fadeUp 0.4s ease backwards", animationDelay: `${Math.min(i, 8) * 55}ms` }}>
+            <BlockRenderer block={b} T={T} school={school} state={stateFor(i)} onState={(s) => setStateFor(i, s)} />
+          </div>
+        </BrickFrame>
       ))}
     </div>
   );
@@ -2406,6 +2461,10 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
     const data = { ...school, semesters: (school.semesters || []).map(sem => ({ ...sem, lessons: (sem.lessons || []).filter(l => l.number !== lessonNumber) })) };
     onUpdate({ data });
   }
+  function updateLessonBlock(lessonNumber, i, nb) {
+    const data = { ...school, semesters: (school.semesters || []).map(sem => ({ ...sem, lessons: (sem.lessons || []).map(l => l.number === lessonNumber ? { ...l, blocks: (l.blocks || []).map((b, j) => j === i ? nb : b) } : l) })) };
+    onUpdate({ data });
+  }
 
   // Iteration is driven by the project chat in the left sidebar (lifted to app root).
   const applyIteration = onIterate || (() => { });
@@ -2477,7 +2536,9 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   return (
     <div style={{ position: "relative", fontFamily: fontStack(school) }}>
       <Toast toast={toast} />
-      {activeLesson && <LessonView school={school} lesson={activeLesson} T={T} onClose={() => setActiveLesson(null)} onPass={() => handlePass(activeLesson.number)} />}
+      {activeLesson && <LessonView school={school} lesson={activeLesson} T={T} onClose={() => setActiveLesson(null)} onPass={() => handlePass(activeLesson.number)}
+        canEdit={!readOnly} onUpdateBlock={(i, nb) => updateLessonBlock(activeLesson.number, i, nb)}
+        chat={rec.lessonChats?.[activeLesson.number]} onChat={(msgs) => onUpdate({ lessonChats: { ...(rec.lessonChats || {}), [activeLesson.number]: msgs } })} />}
       {editingLesson && !readOnly && <LessonEditor lesson={editingLesson} T={T} allowed={allowedBlocksFor(school.learningPath)}
         onSave={(draft) => { saveLesson(editingLesson.number, draft); setEditingLesson(null); showToast("✓ Lesson updated"); }}
         onDelete={() => { if (window.confirm("Delete this lesson? This can't be undone.")) { deleteLessonByNumber(editingLesson.number); setEditingLesson(null); showToast("✓ Lesson deleted"); } }}
@@ -2572,17 +2633,6 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
               <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: "16px 22px" }}>
                 <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.5, color: T.p, marginBottom: 5 }}>Your Transformation</div>
                 <div style={{ fontSize: 13, color: B.white, lineHeight: 1.65 }}>{school.transformation}</div>
-              </div>
-            )}
-            {!readOnly && school.suggestions?.length > 0 && (
-              <div style={{ background: B.surface, border: `1px dashed ${T.ba}`, borderRadius: 14, padding: "16px 20px" }}>
-                <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.5, color: T.p, marginBottom: 9 }}>💡 AI suggests improving this school</div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
-                  {school.suggestions.map((s, i) => (
-                    <button key={i} onClick={() => applyIteration(s)} disabled={iterating} style={{ background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 100, padding: "6px 13px", fontSize: 12, color: T.hi, cursor: "pointer", fontFamily: "inherit", textAlign: "left", lineHeight: 1.4, opacity: iterating ? 0.5 : 1 }}>✨ {s}</button>
-                  ))}
-                </div>
-                <div style={{ fontSize: 11, color: B.muted, marginTop: 8 }}>Tap any suggestion to apply it instantly</div>
               </div>
             )}
             {school.semesters?.map((sem, si) => (
@@ -3024,28 +3074,33 @@ function PublicSchool({ slug }) {
 // PROJECT CHAT — the left bar inside a project (Lovable-style). Every
 // message iterates the school; quick "levers" are zero-token tweaks.
 // ─────────────────────────────────────────────────────────────
-function ProjectChat({ rec, iterating, history, onIterate, onBack, onTheme, onVoice, onFont, onGami }) {
+function ProjectChat({ rec, iterating, history, onSend, onIterate, onBack, onTheme, onVoice, onFont, onGami, onUndo, canUndo }) {
   const school = rec.data; const T = THEMES[school.theme] || THEMES.violet;
   const [input, setInput] = useState("");
   const [showLevers, setShowLevers] = useState(false);
+  const [showSugg, setShowSugg] = useState(false);
   const bottom = useRef(null);
   useEffect(() => { bottom.current?.scrollIntoView({ behavior: "smooth" }); }, [history, iterating]);
-  function send() { const t = input.trim(); if (!t || iterating) return; setInput(""); onIterate(t); }
+  function send() { const t = input.trim(); if (!t || iterating) return; setInput(""); onSend(t); }
   const sel = { background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.white, fontFamily: "inherit", fontSize: 12, padding: "6px 8px", cursor: "pointer", width: "100%" };
-  const suggestions = (school.suggestions || []).slice(0, 4);
+  const collBtn = { width: "100%", textAlign: "left", background: "none", border: `1px solid ${B.border}`, borderRadius: 8, color: B.mutedMid, fontSize: 11.5, padding: "7px 10px", cursor: "pointer", fontFamily: "inherit" };
+  const suggestions = (school.suggestions || []);
   return (
     <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
       <div style={{ padding: "10px 14px 10px", borderBottom: `1px solid ${B.border}` }}>
-        <button onClick={onBack} style={{ background: "none", border: "none", color: B.muted, fontSize: 11.5, cursor: "pointer", fontFamily: "inherit", padding: 0, marginBottom: 6 }}>← All schools</button>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+          <button onClick={onBack} style={{ background: "none", border: "none", color: B.muted, fontSize: 11.5, cursor: "pointer", fontFamily: "inherit", padding: 0 }}>← All schools</button>
+          {canUndo && <button onClick={onUndo} disabled={iterating} title="Undo the last AI change" style={{ background: "rgba(124,58,237,0.1)", border: `1px solid ${T.ba}`, borderRadius: 7, color: T.hi, fontSize: 11, padding: "3px 9px", cursor: "pointer", fontFamily: "inherit", opacity: iterating ? 0.5 : 1 }}>↩ Undo</button>}
+        </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontSize: 20 }}>{school.emoji || "🏫"}</span>
           <div style={{ fontSize: 14, fontWeight: 700, color: B.white, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{school.name}</div>
         </div>
       </div>
-      <div style={{ padding: "10px 14px 0" }}>
-        <button onClick={() => setShowLevers(s => !s)} style={{ width: "100%", textAlign: "left", background: "none", border: `1px solid ${B.border}`, borderRadius: 8, color: B.mutedMid, fontSize: 11.5, padding: "7px 10px", cursor: "pointer", fontFamily: "inherit" }}>{showLevers ? "▾" : "▸"} Quick styles · 0 tokens</button>
+      <div style={{ padding: "10px 14px 0", display: "flex", flexDirection: "column", gap: 8 }}>
+        <button onClick={() => setShowLevers(s => !s)} style={collBtn}>{showLevers ? "▾" : "▸"} Quick styles · 0 tokens</button>
         {showLevers && (
-          <div style={{ display: "grid", gap: 8, marginTop: 8, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 10, padding: 10 }}>
+          <div style={{ display: "grid", gap: 8, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 10, padding: 10 }}>
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}><span style={{ fontSize: 10, color: B.muted, width: 46 }}>Theme</span>{Object.keys(THEMES).map(k => <button key={k} onClick={() => onTheme(k)} title={THEMES[k].label} style={{ width: 22, height: 22, borderRadius: "50%", border: school.theme === k ? `2px solid ${B.white}` : `1px solid ${B.borderMid}`, background: THEMES[k].p, cursor: "pointer" }} />)}</div>
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}><span style={{ fontSize: 10, color: B.muted, width: 46 }}>Voice</span><select value={school.voicePreset || "sage"} onChange={e => onVoice(e.target.value)} style={sel}>{["sage", "drill", "socratic", "scientist", "storyteller", "trickster"].map(v => <option key={v} value={v}>{v[0].toUpperCase() + v.slice(1)}</option>)}{school.voicePreset === "custom" && <option value="custom">Custom</option>}</select></div>
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}><span style={{ fontSize: 10, color: B.muted, width: 46 }}>Font</span><select value={school.font || "inter"} onChange={e => onFont(e.target.value)} style={sel}>{Object.entries(FONTS).map(([k, f]) => <option key={k} value={k}>{f.label}</option>)}</select></div>
@@ -3053,20 +3108,23 @@ function ProjectChat({ rec, iterating, history, onIterate, onBack, onTheme, onVo
             <button onClick={() => onIterate("Unlock all lessons")} style={{ ...sel, cursor: "pointer", textAlign: "center", color: "#A78BFA" }}>🔓 Unlock all lessons</button>
           </div>
         )}
+        {suggestions.length > 0 && <>
+          <button onClick={() => setShowSugg(s => !s)} style={collBtn}>{showSugg ? "▾" : "▸"} Suggestions ({suggestions.length})</button>
+          {showSugg && <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>{suggestions.map((s, i) => <button key={i} onClick={() => onIterate(s)} disabled={iterating} style={{ textAlign: "left", background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 10, padding: "8px 11px", fontSize: 12, color: T.hi, cursor: "pointer", fontFamily: "inherit", lineHeight: 1.4, opacity: iterating ? 0.5 : 1 }}>✨ {s}</button>)}</div>}
+        </>}
       </div>
       <div style={{ flex: 1, overflowY: "auto", padding: "10px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
-        <div style={{ fontSize: 12, color: B.mutedMid, lineHeight: 1.6, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 10, padding: "10px 12px" }}>👋 Your project chat. Try: “add a quiz to lesson 2”, “make the mentor tougher”, “add a daily habit tracker”, “turn this into a practice dashboard”.</div>
-        {suggestions.length > 0 && history.length === 0 && <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>{suggestions.map((s, i) => <button key={i} onClick={() => onIterate(s)} disabled={iterating} style={{ textAlign: "left", background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 10, padding: "8px 11px", fontSize: 12, color: T.hi, cursor: "pointer", fontFamily: "inherit", lineHeight: 1.4, opacity: iterating ? 0.5 : 1 }}>✨ {s}</button>)}</div>}
-        {[...history].reverse().map((h, i) => (
-          <div key={i} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <div style={{ alignSelf: "flex-end", maxWidth: "90%", background: T.ps, border: `1px solid ${T.ba}`, borderRadius: "12px 4px 12px 12px", padding: "8px 11px", fontSize: 12.5, color: B.white, lineHeight: 1.45 }}>{h.instruction}</div>
-            <div style={{ alignSelf: "flex-start", fontSize: 11.5, color: h.status === "done" ? "#4ADE80" : h.status === "error" ? "#F87171" : "#60A5FA" }}>{h.status === "working" ? "⏳ Applying…" : h.status === "done" ? "✓ Applied" : `✕ ${h.error || "Failed"}`}</div>
+        <div style={{ fontSize: 12, color: B.mutedMid, lineHeight: 1.6, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 10, padding: "10px 12px" }}>👋 Ask me anything about this project, or tell me what to change — “add a quiz to lesson 2”, “how could I make this better?”, “add a daily habit tracker”.</div>
+        {history.map((m, i) => (
+          <div key={i} style={{ display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
+            <div style={{ maxWidth: "92%", background: m.role === "user" ? T.ps : B.surface, border: `1px solid ${m.role === "user" ? T.ba : B.border}`, borderRadius: m.role === "user" ? "12px 4px 12px 12px" : "4px 12px 12px 12px", padding: "8px 11px", fontSize: 12.5, lineHeight: 1.5, color: B.white }}>{m.role === "user" ? m.content : <Markdown text={m.content} />}</div>
           </div>
         ))}
+        {iterating && <div style={{ display: "flex", gap: 4, paddingLeft: 4 }}>{[0, 1, 2].map(i => <div key={i} style={{ width: 6, height: 6, borderRadius: "50%", background: T.p, animation: `pulse 1s ${i * 0.2}s infinite` }} />)}</div>}
         <div ref={bottom} />
       </div>
       <div style={{ padding: "10px 12px", borderTop: `1px solid ${B.border}`, display: "flex", gap: 8, alignItems: "flex-end" }}>
-        <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} placeholder={iterating ? "Applying…" : "Describe a change…"} disabled={iterating} rows={2} style={{ flex: 1, background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 10, color: B.white, fontFamily: "inherit", fontSize: 13, lineHeight: 1.5, padding: "8px 11px", resize: "none" }} />
+        <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} placeholder={iterating ? "Working…" : "Ask or describe a change…"} disabled={iterating} rows={2} style={{ flex: 1, background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 10, color: B.white, fontFamily: "inherit", fontSize: 13, lineHeight: 1.5, padding: "8px 11px", resize: "none" }} />
         <button onClick={send} disabled={iterating || !input.trim()} style={{ background: T.p, border: "none", borderRadius: 10, padding: "9px 13px", color: "white", fontFamily: "inherit", fontSize: 15, fontWeight: 700, cursor: "pointer", flexShrink: 0, opacity: (iterating || !input.trim()) ? 0.5 : 1 }}>↑</button>
       </div>
     </div>
@@ -3098,7 +3156,8 @@ export default function Senseito() {
   const [undo, setUndo] = useState(null); // { id, name, timer, restore }
   const [mode, setMode] = useThemeMode();
   const [iterating, setIterating] = useState(false);
-  const [iterHistory, setIterHistory] = useState([]);
+  const [iterHistory, setIterHistory] = useState([]); // chat thread: { role:"user"|"assistant", content }
+  const [versions, setVersions] = useState({}); // id -> [data snapshots] for Undo (in-memory)
   const [aToast, setAToast] = useState(null);
   const aToastTimer = useRef(null);
   const publicBase = typeof window !== "undefined" ? window.location.origin : "https://senseito.app";
@@ -3246,37 +3305,60 @@ export default function Senseito() {
     const p = {}; rec.data.semesters?.forEach(s => s.lessons?.forEach(l => { p[l.number] = (rec.progress || {})[l.number] === "passed" ? "passed" : "active"; }));
     updateSchool(rec.id, { progress: p });
   }
-  async function applyIterate(inst) {
-    const rec = active;
-    if (!inst || iterating || !rec) return;
+  const pushMsg = (m) => setIterHistory(h => [...h, m]);
+  function pushVersion(id, data) { setVersions(v => ({ ...v, [id]: [...(v[id] || []).slice(-7), data] })); }
+  function undoEdit() {
+    const rec = active; if (!rec) return;
+    const stack = versions[rec.id] || []; if (!stack.length) return;
+    const prev = stack[stack.length - 1];
+    setVersions(v => ({ ...v, [rec.id]: stack.slice(0, -1) }));
+    updateSchool(rec.id, { data: prev, revision: (rec.revision || 0) + 1 });
+    pushMsg({ role: "assistant", content: "↩ Reverted to the previous version." });
+    showAToast("↩ Reverted");
+  }
+  // Low-level edit executor: applies a one-line directive to the school (plan-level).
+  async function coreEdit(rec, inst) {
     const school = rec.data;
-    if (/\b(unlock|open|free)\b.*\b(all|every)\b/i.test(inst) && /lesson/i.test(inst)) {
-      unlockAllFor(rec); setIterHistory(h => [{ instruction: inst, status: "done" }, ...h]); showAToast("✓ All lessons unlocked"); return;
+    if (/\b(unlock|open|free)\b.*\b(all|every)\b/i.test(inst) && /lesson/i.test(inst)) { unlockAllFor(rec); return { ok: true, msg: "All lessons unlocked" }; }
+    if (/\breset\b.*\bprogress\b/i.test(inst)) { const p = {}; school.semesters?.forEach((s, si) => s.lessons?.forEach((l, i) => { p[l.number] = (si === 0 && i === 0) ? "active" : "locked"; })); updateSchool(rec.id, { progress: p, xp: 0 }); return { ok: true, msg: "Progress reset" }; }
+    const payload = `CURRENT SCHOOL (plan):\n${JSON.stringify(planOnly(school))}\n\nEDIT INSTRUCTION: ${inst}`;
+    let content = null, lastErr = null;
+    for (let a = 0; a < 2 && !content; a++) {
+      try {
+        const parsed = await apiJSON(ITERATE_SYS, [{ role: "user", content: payload }], 12000, "sonnet");
+        if (parsed.appAction === "unlockAll") { unlockAllFor(rec); return { ok: true, msg: "Unlocked" }; }
+        const c = parsed.school || parsed; if (!c?.name) throw new Error("incomplete"); content = c;
+      } catch (e) { lastErr = e; }
     }
-    if (/\breset\b.*\bprogress\b/i.test(inst)) {
-      const p = {}; school.semesters?.forEach((s, si) => s.lessons?.forEach((l, i) => { p[l.number] = (si === 0 && i === 0) ? "active" : "locked"; }));
-      updateSchool(rec.id, { progress: p, xp: 0 }); setIterHistory(h => [{ instruction: inst, status: "done" }, ...h]); showAToast("✓ Progress reset"); return;
-    }
-    setIterating(true); setIterHistory(h => [{ instruction: inst, status: "working" }, ...h]);
+    if (!content) return { ok: false, msg: /incomplete|JSON|structured/i.test(lastErr?.message || "") ? "Couldn't apply that — try a smaller, more specific change." : (lastErr?.message || "Edit failed") };
+    await fillSchoolBlocks(content, { oldSchool: school, dna: school.knowledgeDNA });
+    pushVersion(rec.id, school); // snapshot for Undo (before applying)
+    updateSchool(rec.id, { data: composeSchool(content, school.knowledgeDNA), revision: (rec.revision || 0) + 1 });
+    return { ok: true, msg: "Change applied" };
+  }
+  // Direct edit (suggestion chips, lesson 'add activity', unlock button).
+  async function applyIterate(inst) {
+    const rec = active; if (!inst || iterating || !rec) return;
+    pushMsg({ role: "user", content: inst }); setIterating(true);
+    const r = await coreEdit(rec, inst);
+    pushMsg({ role: "assistant", content: r.ok ? `✓ ${r.msg || "Done"}` : `✕ ${r.msg || "Failed"}` });
+    showAToast(r.ok ? `✓ ${r.msg}` : `✕ ${r.msg}`, r.ok ? "ok" : "err");
+    setIterating(false);
+  }
+  // Conversational chat: converse with full project knowledge OR execute a clear directive.
+  async function chatSend(text) {
+    const rec = active; if (!text || iterating || !rec) return;
+    pushMsg({ role: "user", content: text }); setIterating(true);
     try {
-      const payload = `CURRENT SCHOOL (plan):\n${JSON.stringify(planOnly(school))}\n\nEDIT INSTRUCTION: ${inst}`;
-      let content = null, lastErr = null;
-      for (let a = 0; a < 2 && !content; a++) {
-        try {
-          const parsed = await apiJSON(ITERATE_SYS, [{ role: "user", content: payload }], 12000, "sonnet");
-          if (parsed.appAction === "unlockAll") { unlockAllFor(rec); setIterHistory(h => h.map((e, i) => i === 0 ? { ...e, status: "done" } : e)); showAToast("✓ Unlocked"); setIterating(false); return; }
-          const c = parsed.school || parsed;
-          if (!c?.name) throw new Error("incomplete");
-          content = c;
-        } catch (e) { lastErr = e; }
+      const thread = iterHistory.filter(m => m.role === "user" || m.role === "assistant").slice(-8).map(m => ({ role: m.role, content: m.content }));
+      const out = await apiJSON(CHAT_SYS(rec.data), [...thread, { role: "user", content: text }], 800, "sonnet");
+      if (out.reply) pushMsg({ role: "assistant", content: out.reply });
+      if (out.action && typeof out.action === "string" && out.action.trim()) {
+        const r = await coreEdit(rec, out.action.trim());
+        pushMsg({ role: "assistant", content: r.ok ? "✓ Applied." : `✕ ${r.msg}` });
+        showAToast(r.ok ? "✓ Applied" : `✕ ${r.msg}`, r.ok ? "ok" : "err");
       }
-      if (!content) throw new Error(/incomplete|JSON|structured/i.test(lastErr?.message || "") ? "Couldn't apply that — try a smaller, more specific change." : (lastErr?.message || "Edit failed"));
-      await fillSchoolBlocks(content, { oldSchool: school, dna: school.knowledgeDNA });
-      updateSchool(rec.id, { data: composeSchool(content, school.knowledgeDNA), revision: (rec.revision || 0) + 1 });
-      setIterHistory(h => h.map((e, i) => i === 0 ? { ...e, status: "done" } : e)); showAToast("✓ Change applied");
-    } catch (err) {
-      setIterHistory(h => h.map((e, i) => i === 0 ? { ...e, status: "error", error: err.message } : e)); showAToast(`✕ ${err.message}`, "err");
-    }
+    } catch (e) { pushMsg({ role: "assistant", content: "Sorry — " + (e.message || "something went wrong.") }); }
     setIterating(false);
   }
   function lvTheme(k) { if (!active) return; updateSchool(active.id, { data: { ...active.data, theme: k } }); showAToast(`✓ Theme: ${THEMES[k]?.label || k}`); }
@@ -3324,7 +3406,7 @@ export default function Senseito() {
         </div>
         {active ? (
           <Boundary resetKey={view} fallback={() => <div style={{ flex: 1, padding: 16, fontSize: 12, color: B.muted }}>Chat hit an error. <button onClick={() => setView("home")} style={{ background: "none", border: "none", color: "#A78BFA", cursor: "pointer", fontFamily: "inherit", fontSize: 12 }}>← Back to schools</button></div>}>
-            <ProjectChat rec={active} iterating={iterating} history={iterHistory} onIterate={applyIterate} onBack={() => { setView("home"); setSideOpen(false); }} onTheme={lvTheme} onVoice={lvVoice} onFont={lvFont} onGami={lvGami} />
+            <ProjectChat rec={active} iterating={iterating} history={iterHistory} onSend={chatSend} onIterate={applyIterate} onBack={() => { setView("home"); setSideOpen(false); }} onTheme={lvTheme} onVoice={lvVoice} onFont={lvFont} onGami={lvGami} onUndo={undoEdit} canUndo={(versions[active.id]?.length || 0) > 0} />
           </Boundary>
         ) : (
         <div style={{ flex: 1, overflowY: "auto", padding: "12px 10px" }}>
