@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, Component } from "react";
 
 // ═════════════════════════════════════════════════════════════
 // SENSEITO — Build any school you can imagine.
@@ -128,6 +128,29 @@ const GLOBAL_CSS = `
 `;
 function GlobalStyle() { return <style>{GLOBAL_CSS}</style>; }
 
+// Error boundary so one render error can never blank the whole app.
+class Boundary extends Component {
+  constructor(p) { super(p); this.state = { err: null }; }
+  static getDerivedStateFromError(err) { return { err }; }
+  componentDidCatch(err) { try { console.error("Senseito render error:", err); } catch { } }
+  componentDidUpdate(prev) { if (prev.resetKey !== this.props.resetKey && this.state.err) this.setState({ err: null }); }
+  render() {
+    if (this.state.err) {
+      if (this.props.fallback) return this.props.fallback(this.state.err, () => this.setState({ err: null }));
+      return (
+        <div style={{ padding: "40px 20px", textAlign: "center", color: "var(--mutedMid)", fontFamily: "'Inter',sans-serif" }}>
+          <div style={{ fontSize: 32, marginBottom: 10 }}>😅</div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "var(--text)", marginBottom: 6 }}>Something glitched while rendering this view.</div>
+          <div style={{ fontSize: 12.5, marginBottom: 16, maxWidth: 460, margin: "0 auto 16px", lineHeight: 1.6 }}>{String(this.state.err?.message || this.state.err).slice(0, 200)}</div>
+          <button onClick={() => this.setState({ err: null })} style={{ background: "#7C3AED", border: "none", borderRadius: 10, color: "white", padding: "9px 18px", cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit", marginRight: 8 }}>Try again</button>
+          <button onClick={() => window.location.reload()} style={{ background: "var(--surface2)", border: "1px solid var(--borderMid)", borderRadius: 10, color: "var(--mutedMid)", padding: "9px 18px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>Reload</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // Dark/light mode, persisted.
 function useThemeMode() {
   const [mode, setMode] = useState(() => { try { return localStorage.getItem("senseito_mode") || "dark"; } catch { return "dark"; } });
@@ -140,6 +163,7 @@ function ThemeToggle({ mode, setMode, style }) {
 
 // Inline-editable text for creators (click to edit, Enter/blur to save).
 function EditableText({ value, onSave, readOnly, style, placeholder }) {
+  value = typeof value === "string" ? value : (value == null ? "" : String(value)); // tolerate non-string AI output
   if (readOnly) return <span style={style}>{value}</span>;
   return <span contentEditable suppressContentEditableWarning data-ph={placeholder || ""}
     title="Click to edit"
@@ -1659,7 +1683,11 @@ const BLOCK_COMPONENTS = {
 function BlockRenderer({ block, onOutput, T, disabled, state, onState, school }) {
   const Comp = BLOCK_COMPONENTS[block?.type];
   if (!Comp) return <div style={{ fontSize: 12, color: B.muted, padding: 14, border: `1px dashed ${B.borderMid}`, borderRadius: 12 }}>Unknown block: {block?.type}</div>;
-  return <Comp data={block.data || {}} onOutput={onOutput} T={T} disabled={disabled} state={state} onState={onState} school={school} />;
+  return (
+    <Boundary fallback={() => <div style={{ fontSize: 12.5, color: "#F87171", padding: 14, border: "1px solid rgba(248,113,113,0.3)", borderRadius: 12 }}>⚠️ This {BLOCK_META[block.type]?.label || block.type} activity couldn't load. Try editing or regenerating it.</div>}>
+      <Comp data={block.data || {}} onOutput={onOutput} T={T} disabled={disabled} state={state} onState={onState} school={school} />
+    </Boundary>
+  );
 }
 
 // Legacy tool types keep their fields at the top level; everything else is a block.
@@ -2517,7 +2545,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
               <div style={{ fontFamily: sk.font, fontSize: "clamp(20px,4vw,32px)", fontWeight: 700, letterSpacing: sk.font.includes("Lora") ? 0 : -1, color: sk.onColor ? "#fff" : B.white, marginBottom: 6 }}><EditableText value={school.name} readOnly={readOnly} onSave={v => onUpdate({ data: { ...school, name: v } })} /></div>
               {sk.rule && <div style={{ width: 48, height: 2, background: T.p, margin: "8px 0 12px" }} />}
               <div style={{ fontSize: 14, color: sk.onColor ? "rgba(255,255,255,0.85)" : T.a, fontStyle: sk.font.includes("Lora") ? "normal" : "italic", marginBottom: 12 }}><EditableText value={school.tagline} readOnly={readOnly} onSave={v => onUpdate({ data: { ...school, tagline: v } })} /></div>
-              <div style={{ fontSize: 13, color: sk.onColor ? "rgba(255,255,255,0.78)" : B.mutedMid, lineHeight: 1.7, maxWidth: 560, margin: sk.align === "center" ? "0 auto" : 0 }}>{school.description}</div>
+              <div style={{ fontSize: 13, color: sk.onColor ? "rgba(255,255,255,0.78)" : B.mutedMid, lineHeight: 1.7, maxWidth: 560, margin: sk.align === "center" ? "0 auto" : 0 }}>{typeof school.description === "string" ? school.description : ""}</div>
             </div>
             <div style={{ padding: "14px 28px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 14 }}>
               <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
@@ -2987,7 +3015,7 @@ function PublicSchool({ slug }) {
       {stud
         ? <div style={{ maxWidth: 860, margin: "16px auto 0", padding: "0 20px" }}><div style={{ background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.3)", borderRadius: 14, padding: "12px 18px", fontSize: 13, color: "#6EE7B7", fontWeight: 600 }}>✓ Enrolled as {stud.user.email} — your progress saves automatically across devices.</div></div>
         : <EnrollCard schoolId={rec.id} mentorName={rec.data?.mentor?.name} T={T} onSignIn={signIn} />}
-      <SchoolPage rec={merged} readOnly onUpdate={(patch) => setLocalState(s => ({ ...s, ...patch }))} />
+      <Boundary><SchoolPage rec={merged} readOnly onUpdate={(patch) => setLocalState(s => ({ ...s, ...patch }))} /></Boundary>
     </div>
   );
 }
@@ -3295,7 +3323,9 @@ export default function Senseito() {
           <button onClick={() => { setView("home"); setSideOpen(false); }} style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "none", background: view === "home" ? "linear-gradient(135deg,#7C3AED,#6D28D9)" : "rgba(124,58,237,0.1)", color: view === "home" ? "white" : "#A78BFA", fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", textAlign: "left", boxShadow: view === "home" ? "0 0 18px rgba(124,58,237,0.25)" : "none" }}>＋ New School</button>
         </div>
         {active ? (
-          <ProjectChat rec={active} iterating={iterating} history={iterHistory} onIterate={applyIterate} onBack={() => { setView("home"); setSideOpen(false); }} onTheme={lvTheme} onVoice={lvVoice} onFont={lvFont} onGami={lvGami} />
+          <Boundary resetKey={view} fallback={() => <div style={{ flex: 1, padding: 16, fontSize: 12, color: B.muted }}>Chat hit an error. <button onClick={() => setView("home")} style={{ background: "none", border: "none", color: "#A78BFA", cursor: "pointer", fontFamily: "inherit", fontSize: 12 }}>← Back to schools</button></div>}>
+            <ProjectChat rec={active} iterating={iterating} history={iterHistory} onIterate={applyIterate} onBack={() => { setView("home"); setSideOpen(false); }} onTheme={lvTheme} onVoice={lvVoice} onFont={lvFont} onGami={lvGami} />
+          </Boundary>
         ) : (
         <div style={{ flex: 1, overflowY: "auto", padding: "12px 10px" }}>
           <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.5, color: B.muted, padding: "0 8px", marginBottom: 8 }}>Your Schools</div>
@@ -3344,9 +3374,11 @@ export default function Senseito() {
         <div style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 0, background: "radial-gradient(ellipse 65% 35% at 50% -5%,rgba(124,58,237,0.1) 0%,transparent 60%)", animation: "aurora 9s ease-in-out infinite" }} />
         <div style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 0, background: "radial-gradient(ellipse 50% 40% at 85% 10%,rgba(6,182,212,0.07) 0%,transparent 55%)", animation: "aurora 11s ease-in-out infinite reverse" }} />
         <div style={{ position: "relative", zIndex: 1 }}>
-          {view === "home" || !active
-            ? <Home onCreated={createSchool} />
-            : <SchoolPage key={active.id} rec={active} onUpdate={(patch) => updateSchool(active.id, patch)} onPublish={publishSchool} publishing={publishing} publicBase={publicBase} token={session?.token} onSetSlug={setCustomSlug} onIterate={applyIterate} iterating={iterating} />}
+          <Boundary resetKey={view}>
+            {view === "home" || !active
+              ? <Home onCreated={createSchool} />
+              : <SchoolPage key={active.id} rec={active} onUpdate={(patch) => updateSchool(active.id, patch)} onPublish={publishSchool} publishing={publishing} publicBase={publicBase} token={session?.token} onSetSlug={setCustomSlug} onIterate={applyIterate} iterating={iterating} />}
+          </Boundary>
         </div>
       </div>
     </div>
