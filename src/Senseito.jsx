@@ -78,10 +78,12 @@ function slugify(s = "") { return s.toLowerCase().replace(/[^a-z0-9]+/g, "-").re
 // ─────────────────────────────────────────────────────────────
 // DESIGN TOKENS
 // ─────────────────────────────────────────────────────────────
+// Base palette via CSS variables so the whole app can flip dark/light. Accent
+// colors (THEMES) stay the same in both modes. (`white` = primary text token.)
 const B = {
-  bg: "#08080F", surface: "#0F0F1C", surface2: "#161626", surface3: "#1D1D30",
-  white: "#F0F0F8", muted: "#55556E", mutedMid: "#8888AA",
-  border: "rgba(255,255,255,0.055)", borderMid: "rgba(255,255,255,0.11)",
+  bg: "var(--bg)", surface: "var(--surface)", surface2: "var(--surface2)", surface3: "var(--surface3)",
+  white: "var(--text)", muted: "var(--muted)", mutedMid: "var(--mutedMid)",
+  border: "var(--border)", borderMid: "var(--borderMid)",
 };
 
 const THEMES = {
@@ -107,12 +109,15 @@ function fontStack(school) { return FONTS[school?.font]?.stack || FONTS.inter.st
 // and the standalone public student view so published schools look identical.
 const GLOBAL_CSS = `
   @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@600;700&family=Inter:wght@400;500;600;700&family=Poppins:wght@400;500;600;700&family=Lora:wght@400;500;600;700&display=swap');
+  :root{ --bg:#08080F; --surface:#0F0F1C; --surface2:#161626; --surface3:#1D1D30; --text:#F0F0F8; --muted:#55556E; --mutedMid:#8888AA; --border:rgba(255,255,255,0.055); --borderMid:rgba(255,255,255,0.11); --side:#0B0B16; }
+  .light{ --bg:#F6F7FB; --surface:#FFFFFF; --surface2:#F2F3F8; --surface3:#E8EAF1; --text:#16161F; --muted:#9A9AAE; --mutedMid:#5A5A70; --border:rgba(10,12,30,0.09); --borderMid:rgba(10,12,30,0.16); --side:#EEF0F6; }
   @keyframes spin{to{transform:rotate(360deg)}}
   @keyframes pulse{0%,80%,100%{transform:translateY(0)}40%{transform:translateY(-5px)}}
   @keyframes shimmer{to{background-position:-200% 0}}
   @keyframes blink{0%,100%{opacity:1}50%{opacity:0.3}}
   @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
   @keyframes aurora{0%,100%{opacity:0.6;transform:translateY(0) scale(1)}50%{opacity:1;transform:translateY(-12px) scale(1.05)}}
+  @keyframes drift{0%{transform:translate(0,0) scale(1)}33%{transform:translate(34px,-26px) scale(1.12)}66%{transform:translate(-22px,22px) scale(0.94)}100%{transform:translate(0,0) scale(1)}}
   *{box-sizing:border-box;margin:0;padding:0}
   textarea,input,select{outline:none}
   textarea::placeholder,input::placeholder{color:#55556E;font-style:italic}
@@ -122,6 +127,16 @@ const GLOBAL_CSS = `
   button:active{transform:scale(0.98)}
 `;
 function GlobalStyle() { return <style>{GLOBAL_CSS}</style>; }
+
+// Dark/light mode, persisted.
+function useThemeMode() {
+  const [mode, setMode] = useState(() => { try { return localStorage.getItem("senseito_mode") || "dark"; } catch { return "dark"; } });
+  useEffect(() => { try { localStorage.setItem("senseito_mode", mode); } catch { } }, [mode]);
+  return [mode, setMode];
+}
+function ThemeToggle({ mode, setMode, style }) {
+  return <button onClick={() => setMode(m => m === "dark" ? "light" : "dark")} title={mode === "dark" ? "Switch to light" : "Switch to dark"} style={{ background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "6px 10px", cursor: "pointer", fontSize: 13, fontFamily: "inherit", ...style }}>{mode === "dark" ? "☀️" : "🌙"}</button>;
+}
 
 // Inline-editable text for creators (click to edit, Enter/blur to save).
 function EditableText({ value, onSave, readOnly, style, placeholder }) {
@@ -2698,9 +2713,16 @@ function Home({ onCreated }) {
   }
 
   return (
-    <div style={{ maxWidth: 760, margin: "0 auto", padding: "0 20px 80px" }}>
+    <div style={{ maxWidth: 760, margin: "0 auto", padding: "0 20px 80px", position: "relative" }}>
       {phase === "idle" && (
-        <div style={{ textAlign: "center", paddingTop: 48, paddingBottom: 44 }}>
+        <div style={{ position: "fixed", inset: 0, overflow: "hidden", pointerEvents: "none", zIndex: -1 }}>
+          <div style={{ position: "absolute", top: "-8%", left: "12%", width: 400, height: 400, borderRadius: "50%", background: "radial-gradient(circle,rgba(124,58,237,0.30),transparent 70%)", filter: "blur(44px)", animation: "drift 19s ease-in-out infinite" }} />
+          <div style={{ position: "absolute", top: "18%", right: "8%", width: 340, height: 340, borderRadius: "50%", background: "radial-gradient(circle,rgba(6,182,212,0.24),transparent 70%)", filter: "blur(44px)", animation: "drift 23s ease-in-out infinite reverse" }} />
+          <div style={{ position: "absolute", bottom: "-6%", left: "38%", width: 320, height: 320, borderRadius: "50%", background: "radial-gradient(circle,rgba(240,171,252,0.18),transparent 70%)", filter: "blur(52px)", animation: "drift 27s ease-in-out infinite" }} />
+        </div>
+      )}
+      {phase === "idle" && (
+        <div style={{ position: "relative", zIndex: 1, textAlign: "center", paddingTop: 48, paddingBottom: 44 }}>
           <div style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "rgba(124,58,237,0.09)", border: "1px solid rgba(124,58,237,0.35)", borderRadius: 100, padding: "5px 14px", fontSize: 11, fontWeight: 700, color: "#F0ABFC", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 22 }}>
             <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#F0ABFC", display: "inline-block" }} /> Powered by Claude AI
           </div>
@@ -2906,6 +2928,7 @@ function PublicSchool({ slug }) {
   const [rec, setRec] = useState(null);
   const [status, setStatus] = useState("loading");
   const [stud, setStud] = useState(null); // signed-in student { token, user }
+  const [mode, setMode] = useThemeMode();
   const lsKey = `senseito_progress_${slug}`;
   const saveT = useRef(null);
   // Progress: localStorage for anonymous; synced to the cloud once signed in.
@@ -2978,11 +3001,12 @@ function PublicSchool({ slug }) {
   const T = THEMES[rec.data?.theme] || THEMES.violet;
   const merged = { ...rec, ...localState };
   return (
-    <div style={{ background: B.bg, minHeight: "100vh", color: B.white, fontFamily: fontStack(rec.data) }}>
+    <div className={mode === "light" ? "light" : undefined} style={{ background: B.bg, minHeight: "100vh", color: B.white, fontFamily: fontStack(rec.data) }}>
       <GlobalStyle />
       <div style={{ borderBottom: `1px solid ${B.border}`, padding: "12px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
         <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 16, fontWeight: 700, color: B.white }}>Sensei<span style={{ background: "linear-gradient(135deg,#7C3AED,#06B6D4)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>to</span></div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <ThemeToggle mode={mode} setMode={setMode} />
           {stud ? <span style={{ fontSize: 12, color: "#6EE7B7" }}>☁️ {stud.user.email}</span>
             : <button onClick={signIn} style={{ fontSize: 12.5, color: "#67E8F9", background: "rgba(6,182,212,0.09)", border: "1px solid rgba(6,182,212,0.3)", borderRadius: 8, padding: "6px 12px", fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>Sign in to save progress</button>}
           <a href="/" style={{ fontSize: 12.5, color: "#A78BFA", textDecoration: "none", border: "1px solid rgba(124,58,237,0.35)", borderRadius: 8, padding: "6px 13px", fontWeight: 600 }}>Build your own →</a>
@@ -3019,6 +3043,7 @@ export default function Senseito() {
   const lsTimer = useRef(null);
   const savedRef = useRef({}); // id -> last-saved rec reference (for single-row saves)
   const [undo, setUndo] = useState(null); // { id, name, timer, restore }
+  const [mode, setMode] = useThemeMode();
   const publicBase = typeof window !== "undefined" ? window.location.origin : "https://senseito.app";
 
   const active = schools.find(s => s.id === view);
@@ -3158,10 +3183,10 @@ export default function Senseito() {
   }
 
   return (
-    <div style={{ background: B.bg, minHeight: "100vh", fontFamily: "'Inter',-apple-system,sans-serif", color: B.white, display: "flex" }}>
+    <div className={mode === "light" ? "light" : undefined} style={{ background: B.bg, minHeight: "100vh", fontFamily: "'Inter',-apple-system,sans-serif", color: B.white, display: "flex" }}>
       <GlobalStyle />
       <style>{`
-        .ol-side{width:236px;flex-shrink:0;background:#0B0B16;border-right:1px solid rgba(255,255,255,0.07);display:flex;flex-direction:column;height:100vh;position:sticky;top:0}
+        .ol-side{width:300px;flex-shrink:0;background:var(--side);border-right:1px solid var(--border);display:flex;flex-direction:column;height:100vh;position:sticky;top:0}
         .ol-burger{display:none}
         .ol-iterate{position:fixed;top:0;right:0;bottom:0;width:350px;max-width:100vw;z-index:150;display:flex;flex-direction:column;box-shadow:-20px 0 60px rgba(0,0,0,0.5)}
         @media(max-width:820px){
@@ -3186,8 +3211,11 @@ export default function Senseito() {
 
       <div className={`ol-side${sideOpen ? " open" : ""}`}>
         <div style={{ padding: "20px 18px 14px", borderBottom: `1px solid ${B.border}` }}>
-          <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 19, fontWeight: 700, letterSpacing: -0.5, color: B.white, marginBottom: 14 }}>
-            Sensei<span style={{ background: "linear-gradient(135deg,#7C3AED,#06B6D4)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>to</span>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+            <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 19, fontWeight: 700, letterSpacing: -0.5, color: B.white }}>
+              Sensei<span style={{ background: "linear-gradient(135deg,#7C3AED,#06B6D4)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>to</span>
+            </div>
+            <ThemeToggle mode={mode} setMode={setMode} />
           </div>
           <button onClick={() => { setView("home"); setSideOpen(false); }} style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "none", background: view === "home" ? "linear-gradient(135deg,#7C3AED,#6D28D9)" : "rgba(124,58,237,0.1)", color: view === "home" ? "white" : "#A78BFA", fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", textAlign: "left", boxShadow: view === "home" ? "0 0 18px rgba(124,58,237,0.25)" : "none" }}>＋ New School</button>
         </div>
