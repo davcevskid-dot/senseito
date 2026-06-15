@@ -2310,7 +2310,7 @@ function IteratePanel({ school, history, loading, onApply, onTheme, onGami, onVo
 // ─────────────────────────────────────────────────────────────
 // SCHOOL PAGE (creator + student)
 // ─────────────────────────────────────────────────────────────
-function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, publicBase, token, onSetSlug }) {
+function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, publicBase, token, onSetSlug, onIterate, iterating = false }) {
   const school = rec.data;
   const T = THEMES[school.theme] || THEMES.violet;
   const sk = skinCfg(school.skin, T);
@@ -2333,9 +2333,6 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const activeTab = SECTIONS.some(s => s.id === tab) ? tab : SECTIONS[0]?.id; // stay valid if layout changes
   const [activeLesson, setActiveLesson] = useState(null);
   const [editingLesson, setEditingLesson] = useState(null);
-  const [showIterate, setShowIterate] = useState(false);
-  const [iterating, setIterating] = useState(false);
-  const [iterateHistory, setIterateHistory] = useState([]);
   const [buildingTool, setBuildingTool] = useState(null);
   const [toast, setToast] = useState(null);
   const toastTimer = useRef(null);
@@ -2382,39 +2379,8 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
     onUpdate({ data });
   }
 
-  async function applyIteration(inst) {
-    if (!inst || iterating || readOnly) return;
-    if (/\b(unlock|open|free)\b.*\b(all|every)\b/i.test(inst) && /lesson/i.test(inst)) {
-      unlockAll(); setIterateHistory(h => [{ instruction: inst, status: "done" }, ...h]); showToast("✓ All lessons unlocked — learn in any order"); return;
-    }
-    if (/\breset\b.*\bprogress\b/i.test(inst)) {
-      const p = {}; school.semesters?.forEach((s, si) => s.lessons?.forEach((l, i) => { p[l.number] = (si === 0 && i === 0) ? "active" : "locked"; }));
-      onUpdate({ progress: p, xp: 0 }); setIterateHistory(h => [{ instruction: inst, status: "done" }, ...h]); showToast("✓ Progress reset"); return;
-    }
-    setIterating(true); setIterateHistory(h => [{ instruction: inst, status: "working" }, ...h]);
-    try {
-      // Edit at the PLAN level (block types only) so the response stays compact and never truncates.
-      const payload = `CURRENT SCHOOL (lessons list only block TYPES):\n${JSON.stringify(planOnly(school))}\n\nEDIT INSTRUCTION: ${inst}`;
-      let content = null, lastErr = null;
-      for (let attempt = 0; attempt < 2 && !content; attempt++) {
-        try {
-          const parsed = await apiJSON(ITERATE_SYS, [{ role: "user", content: payload }], 12000, "sonnet");
-          if (parsed.appAction === "unlockAll") { unlockAll(); setIterateHistory(h => h.map((e, i) => i === 0 ? { ...e, status: "done" } : e)); showToast("✓ All lessons unlocked"); setIterating(false); return; }
-          const c = parsed.school || parsed;
-          if (!c?.name || !Array.isArray(c.semesters) || c.semesters.length === 0) throw new Error("incomplete");
-          content = c;
-        } catch (e) { lastErr = e; }
-      }
-      if (!content) throw new Error(lastErr?.message === "incomplete" || /JSON|structured/i.test(lastErr?.message || "") ? "Couldn't apply that edit — try a smaller, more specific change." : (lastErr?.message || "Edit failed — try rephrasing"));
-      // Preserve unchanged lessons' block data; author only new/changed lessons.
-      await fillSchoolBlocks(content, { oldSchool: school, dna: school.knowledgeDNA });
-      onUpdate({ data: composeSchool(content, school.knowledgeDNA), revision: (rec.revision || 0) + 1 });
-      setIterateHistory(h => h.map((e, i) => i === 0 ? { ...e, status: "done" } : e)); showToast("✓ Change applied — school updated");
-    } catch (err) {
-      setIterateHistory(h => h.map((e, i) => i === 0 ? { ...e, status: "error", error: err.message } : e)); showToast(`✕ ${err.message}`, "err");
-    }
-    setIterating(false);
-  }
+  // Iteration is driven by the project chat in the left sidebar (lifted to app root).
+  const applyIteration = onIterate || (() => { });
 
   async function buildTool(request, key) {
     if (buildingTool || readOnly) return;
@@ -2489,27 +2455,14 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
         onDelete={() => { if (window.confirm("Delete this lesson? This can't be undone.")) { deleteLessonByNumber(editingLesson.number); setEditingLesson(null); showToast("✓ Lesson deleted"); } }}
         onApplyAI={(inst) => applyIteration(inst)} onAuthorBlock={authorBlock}
         onClose={() => setEditingLesson(null)} />}
-      {showIterate && !readOnly && (
-        <IteratePanel school={school} history={iterateHistory} loading={iterating} onApply={applyIteration}
-          onTheme={(k) => { onUpdate({ data: { ...school, theme: k } }); showToast(`✓ Theme: ${THEMES[k].label}`); }}
-          onGami={(gid) => { onUpdate({ data: composeSchool({ ...contentOnly(school), gamiPreset: gid, theme: school.theme }, school.knowledgeDNA) }); showToast(`✓ Gamification: ${GAMI[gid].name}`); }}
-          onVoice={(vp) => { onUpdate({ data: composeSchool({ ...contentOnly(school), voicePreset: vp, systemVoice: undefined, theme: school.theme }, school.knowledgeDNA) }); showToast(`✓ Mentor voice: ${vp[0].toUpperCase() + vp.slice(1)}`); }}
-          onFont={(fk) => { onUpdate({ data: { ...school, font: fk } }); showToast(`✓ Font: ${FONTS[fk]?.label || fk}`); }}
-          onClose={() => setShowIterate(false)} advisorChat={rec.advisorChat || []} onAdvisorChat={(msgs) => onUpdate({ advisorChat: msgs })} onBuildTool={buildTool} buildingTool={buildingTool} />
-      )}
 
-      <div style={{ maxWidth: 860, margin: "0 auto", padding: "0 20px 80px", transition: "margin-right 0.3s", marginRight: (showIterate && !readOnly && !narrow) ? 360 : "auto", marginLeft: (showIterate && !readOnly && !narrow) ? 20 : "auto" }}>
+      <div style={{ maxWidth: 860, margin: "0 auto", padding: "0 20px 80px" }}>
         {!readOnly && (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 0 14px", flexWrap: "wrap", gap: 8 }}>
-            <div style={{ fontSize: 12, color: B.muted }}>📁 Your Schools / <span style={{ color: B.mutedMid }}>{school.name}</span></div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={() => onPublish(rec)} disabled={publishing} style={{ background: rec.published ? "rgba(74,222,128,0.1)" : "linear-gradient(135deg,#059669,#047857)", border: rec.published ? "1px solid rgba(74,222,128,0.35)" : "none", borderRadius: 8, color: rec.published ? "#4ADE80" : "white", padding: "6px 13px", cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit" }}>
-                {publishing ? "Publishing…" : rec.published ? "✓ Published — copy link" : "🌐 Publish"}
-              </button>
-              <button onClick={() => setShowIterate(s => !s)} style={{ background: showIterate ? "rgba(124,58,237,0.2)" : "rgba(124,58,237,0.09)", border: "1px solid rgba(124,58,237,0.35)", borderRadius: 8, color: "#A78BFA", padding: "6px 13px", cursor: "pointer", fontSize: 13, fontWeight: 600, fontFamily: "inherit" }}>
-                {showIterate ? "✕ Close panel" : "✏️ Iterate"}
-              </button>
-            </div>
+            <div style={{ fontSize: 12, color: B.muted }}>💬 Type in the left chat to change anything</div>
+            <button onClick={() => onPublish(rec)} disabled={publishing} style={{ background: rec.published ? "rgba(74,222,128,0.1)" : "linear-gradient(135deg,#059669,#047857)", border: rec.published ? "1px solid rgba(74,222,128,0.35)" : "none", borderRadius: 8, color: rec.published ? "#4ADE80" : "white", padding: "6px 13px", cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit" }}>
+              {publishing ? "Publishing…" : rec.published ? "✓ Published — copy link" : "🌐 Publish"}
+            </button>
           </div>
         )}
 
@@ -3040,6 +2993,59 @@ function PublicSchool({ slug }) {
 }
 
 // ─────────────────────────────────────────────────────────────
+// PROJECT CHAT — the left bar inside a project (Lovable-style). Every
+// message iterates the school; quick "levers" are zero-token tweaks.
+// ─────────────────────────────────────────────────────────────
+function ProjectChat({ rec, iterating, history, onIterate, onBack, onTheme, onVoice, onFont, onGami }) {
+  const school = rec.data; const T = THEMES[school.theme] || THEMES.violet;
+  const [input, setInput] = useState("");
+  const [showLevers, setShowLevers] = useState(false);
+  const bottom = useRef(null);
+  useEffect(() => { bottom.current?.scrollIntoView({ behavior: "smooth" }); }, [history, iterating]);
+  function send() { const t = input.trim(); if (!t || iterating) return; setInput(""); onIterate(t); }
+  const sel = { background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.white, fontFamily: "inherit", fontSize: 12, padding: "6px 8px", cursor: "pointer", width: "100%" };
+  const suggestions = (school.suggestions || []).slice(0, 4);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+      <div style={{ padding: "10px 14px 10px", borderBottom: `1px solid ${B.border}` }}>
+        <button onClick={onBack} style={{ background: "none", border: "none", color: B.muted, fontSize: 11.5, cursor: "pointer", fontFamily: "inherit", padding: 0, marginBottom: 6 }}>← All schools</button>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 20 }}>{school.emoji || "🏫"}</span>
+          <div style={{ fontSize: 14, fontWeight: 700, color: B.white, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{school.name}</div>
+        </div>
+      </div>
+      <div style={{ padding: "10px 14px 0" }}>
+        <button onClick={() => setShowLevers(s => !s)} style={{ width: "100%", textAlign: "left", background: "none", border: `1px solid ${B.border}`, borderRadius: 8, color: B.mutedMid, fontSize: 11.5, padding: "7px 10px", cursor: "pointer", fontFamily: "inherit" }}>{showLevers ? "▾" : "▸"} Quick styles · 0 tokens</button>
+        {showLevers && (
+          <div style={{ display: "grid", gap: 8, marginTop: 8, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 10, padding: 10 }}>
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}><span style={{ fontSize: 10, color: B.muted, width: 46 }}>Theme</span>{Object.keys(THEMES).map(k => <button key={k} onClick={() => onTheme(k)} title={THEMES[k].label} style={{ width: 22, height: 22, borderRadius: "50%", border: school.theme === k ? `2px solid ${B.white}` : `1px solid ${B.borderMid}`, background: THEMES[k].p, cursor: "pointer" }} />)}</div>
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}><span style={{ fontSize: 10, color: B.muted, width: 46 }}>Voice</span><select value={school.voicePreset || "sage"} onChange={e => onVoice(e.target.value)} style={sel}>{["sage", "drill", "socratic", "scientist", "storyteller", "trickster"].map(v => <option key={v} value={v}>{v[0].toUpperCase() + v.slice(1)}</option>)}{school.voicePreset === "custom" && <option value="custom">Custom</option>}</select></div>
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}><span style={{ fontSize: 10, color: B.muted, width: 46 }}>Font</span><select value={school.font || "inter"} onChange={e => onFont(e.target.value)} style={sel}>{Object.entries(FONTS).map(([k, f]) => <option key={k} value={k}>{f.label}</option>)}</select></div>
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}><span style={{ fontSize: 10, color: B.muted, width: 46 }}>Game</span><select value={school.gamification?.preset || "none"} onChange={e => onGami(e.target.value)} style={sel}>{Object.values(GAMI).map(g => <option key={g.id} value={g.id}>{g.name}</option>)}</select></div>
+            <button onClick={() => onIterate("Unlock all lessons")} style={{ ...sel, cursor: "pointer", textAlign: "center", color: "#A78BFA" }}>🔓 Unlock all lessons</button>
+          </div>
+        )}
+      </div>
+      <div style={{ flex: 1, overflowY: "auto", padding: "10px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
+        <div style={{ fontSize: 12, color: B.mutedMid, lineHeight: 1.6, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 10, padding: "10px 12px" }}>👋 Your project chat. Try: “add a quiz to lesson 2”, “make the mentor tougher”, “add a daily habit tracker”, “turn this into a practice dashboard”.</div>
+        {suggestions.length > 0 && history.length === 0 && <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>{suggestions.map((s, i) => <button key={i} onClick={() => onIterate(s)} disabled={iterating} style={{ textAlign: "left", background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 10, padding: "8px 11px", fontSize: 12, color: T.hi, cursor: "pointer", fontFamily: "inherit", lineHeight: 1.4, opacity: iterating ? 0.5 : 1 }}>✨ {s}</button>)}</div>}
+        {[...history].reverse().map((h, i) => (
+          <div key={i} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <div style={{ alignSelf: "flex-end", maxWidth: "90%", background: T.ps, border: `1px solid ${T.ba}`, borderRadius: "12px 4px 12px 12px", padding: "8px 11px", fontSize: 12.5, color: B.white, lineHeight: 1.45 }}>{h.instruction}</div>
+            <div style={{ alignSelf: "flex-start", fontSize: 11.5, color: h.status === "done" ? "#4ADE80" : h.status === "error" ? "#F87171" : "#60A5FA" }}>{h.status === "working" ? "⏳ Applying…" : h.status === "done" ? "✓ Applied" : `✕ ${h.error || "Failed"}`}</div>
+          </div>
+        ))}
+        <div ref={bottom} />
+      </div>
+      <div style={{ padding: "10px 12px", borderTop: `1px solid ${B.border}`, display: "flex", gap: 8, alignItems: "flex-end" }}>
+        <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} placeholder={iterating ? "Applying…" : "Describe a change…"} disabled={iterating} rows={2} style={{ flex: 1, background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 10, color: B.white, fontFamily: "inherit", fontSize: 13, lineHeight: 1.5, padding: "8px 11px", resize: "none" }} />
+        <button onClick={send} disabled={iterating || !input.trim()} style={{ background: T.p, border: "none", borderRadius: 10, padding: "9px 13px", color: "white", fontFamily: "inherit", fontSize: 15, fontWeight: 700, cursor: "pointer", flexShrink: 0, opacity: (iterating || !input.trim()) ? 0.5 : 1 }}>↑</button>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
 // APP ROOT
 // ─────────────────────────────────────────────────────────────
 export default function Senseito() {
@@ -3063,9 +3069,15 @@ export default function Senseito() {
   const savedRef = useRef({}); // id -> last-saved rec reference (for single-row saves)
   const [undo, setUndo] = useState(null); // { id, name, timer, restore }
   const [mode, setMode] = useThemeMode();
+  const [iterating, setIterating] = useState(false);
+  const [iterHistory, setIterHistory] = useState([]);
+  const [aToast, setAToast] = useState(null);
+  const aToastTimer = useRef(null);
   const publicBase = typeof window !== "undefined" ? window.location.origin : "https://senseito.app";
 
   const active = schools.find(s => s.id === view);
+  function showAToast(msg, type = "ok") { setAToast({ msg, type }); clearTimeout(aToastTimer.current); aToastTimer.current = setTimeout(() => setAToast(null), 3500); }
+  useEffect(() => { setIterHistory([]); }, [view]); // fresh chat per project
 
   // auth bootstrap (OAuth hash → session)
   useEffect(() => {
@@ -3201,6 +3213,49 @@ export default function Senseito() {
     } catch (e) { return { ok: false, msg: e.message }; }
   }
 
+  // ── Iteration (driven by the project chat in the left bar) ──
+  function unlockAllFor(rec) {
+    const p = {}; rec.data.semesters?.forEach(s => s.lessons?.forEach(l => { p[l.number] = (rec.progress || {})[l.number] === "passed" ? "passed" : "active"; }));
+    updateSchool(rec.id, { progress: p });
+  }
+  async function applyIterate(inst) {
+    const rec = active;
+    if (!inst || iterating || !rec) return;
+    const school = rec.data;
+    if (/\b(unlock|open|free)\b.*\b(all|every)\b/i.test(inst) && /lesson/i.test(inst)) {
+      unlockAllFor(rec); setIterHistory(h => [{ instruction: inst, status: "done" }, ...h]); showAToast("✓ All lessons unlocked"); return;
+    }
+    if (/\breset\b.*\bprogress\b/i.test(inst)) {
+      const p = {}; school.semesters?.forEach((s, si) => s.lessons?.forEach((l, i) => { p[l.number] = (si === 0 && i === 0) ? "active" : "locked"; }));
+      updateSchool(rec.id, { progress: p, xp: 0 }); setIterHistory(h => [{ instruction: inst, status: "done" }, ...h]); showAToast("✓ Progress reset"); return;
+    }
+    setIterating(true); setIterHistory(h => [{ instruction: inst, status: "working" }, ...h]);
+    try {
+      const payload = `CURRENT SCHOOL (plan):\n${JSON.stringify(planOnly(school))}\n\nEDIT INSTRUCTION: ${inst}`;
+      let content = null, lastErr = null;
+      for (let a = 0; a < 2 && !content; a++) {
+        try {
+          const parsed = await apiJSON(ITERATE_SYS, [{ role: "user", content: payload }], 12000, "sonnet");
+          if (parsed.appAction === "unlockAll") { unlockAllFor(rec); setIterHistory(h => h.map((e, i) => i === 0 ? { ...e, status: "done" } : e)); showAToast("✓ Unlocked"); setIterating(false); return; }
+          const c = parsed.school || parsed;
+          if (!c?.name) throw new Error("incomplete");
+          content = c;
+        } catch (e) { lastErr = e; }
+      }
+      if (!content) throw new Error(/incomplete|JSON|structured/i.test(lastErr?.message || "") ? "Couldn't apply that — try a smaller, more specific change." : (lastErr?.message || "Edit failed"));
+      await fillSchoolBlocks(content, { oldSchool: school, dna: school.knowledgeDNA });
+      updateSchool(rec.id, { data: composeSchool(content, school.knowledgeDNA), revision: (rec.revision || 0) + 1 });
+      setIterHistory(h => h.map((e, i) => i === 0 ? { ...e, status: "done" } : e)); showAToast("✓ Change applied");
+    } catch (err) {
+      setIterHistory(h => h.map((e, i) => i === 0 ? { ...e, status: "error", error: err.message } : e)); showAToast(`✕ ${err.message}`, "err");
+    }
+    setIterating(false);
+  }
+  function lvTheme(k) { if (!active) return; updateSchool(active.id, { data: { ...active.data, theme: k } }); showAToast(`✓ Theme: ${THEMES[k]?.label || k}`); }
+  function lvFont(fk) { if (!active) return; updateSchool(active.id, { data: { ...active.data, font: fk } }); showAToast(`✓ Font: ${FONTS[fk]?.label || fk}`); }
+  function lvVoice(vp) { if (!active) return; updateSchool(active.id, { data: composeSchool({ ...contentOnly(active.data), voicePreset: vp, systemVoice: undefined, theme: active.data.theme }, active.data.knowledgeDNA) }); showAToast(`✓ Voice: ${vp[0].toUpperCase() + vp.slice(1)}`); }
+  function lvGami(gid) { if (!active) return; updateSchool(active.id, { data: composeSchool({ ...contentOnly(active.data), gamiPreset: gid, theme: active.data.theme }, active.data.knowledgeDNA) }); showAToast(`✓ ${GAMI[gid]?.name || gid}`); }
+
   return (
     <div className={mode === "light" ? "light" : undefined} style={{ background: B.bg, minHeight: "100vh", fontFamily: "'Inter',-apple-system,sans-serif", color: B.white, display: "flex" }}>
       <GlobalStyle />
@@ -3221,6 +3276,7 @@ export default function Senseito() {
 
       {accountOpen && <AccountModal session={session} syncState={syncState} schoolCount={schools.length} onSignOut={() => { setSession(null); setSchools([]); setSyncState("idle"); setAccountOpen(false); }} onClose={() => setAccountOpen(false)} />}
 
+      <Toast toast={aToast} />
       {undo && (
         <div style={{ position: "fixed", bottom: 20, left: "50%", transform: "translateX(-50%)", zIndex: 500, background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 12, padding: "10px 14px", display: "flex", alignItems: "center", gap: 14, boxShadow: "0 10px 40px rgba(0,0,0,0.5)", fontSize: 13, color: B.white, animation: "fadeUp 0.3s ease", maxWidth: "92vw" }}>
           <span>Deleted “{undo.name}”</span>
@@ -3238,6 +3294,9 @@ export default function Senseito() {
           </div>
           <button onClick={() => { setView("home"); setSideOpen(false); }} style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "none", background: view === "home" ? "linear-gradient(135deg,#7C3AED,#6D28D9)" : "rgba(124,58,237,0.1)", color: view === "home" ? "white" : "#A78BFA", fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", textAlign: "left", boxShadow: view === "home" ? "0 0 18px rgba(124,58,237,0.25)" : "none" }}>＋ New School</button>
         </div>
+        {active ? (
+          <ProjectChat rec={active} iterating={iterating} history={iterHistory} onIterate={applyIterate} onBack={() => { setView("home"); setSideOpen(false); }} onTheme={lvTheme} onVoice={lvVoice} onFont={lvFont} onGami={lvGami} />
+        ) : (
         <div style={{ flex: 1, overflowY: "auto", padding: "12px 10px" }}>
           <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.5, color: B.muted, padding: "0 8px", marginBottom: 8 }}>Your Schools</div>
           {schools.length === 0 && <div style={{ fontSize: 12, color: B.muted, padding: "14px 8px", lineHeight: 1.6 }}>No schools yet.<br />Build your first one →</div>}
@@ -3260,6 +3319,7 @@ export default function Senseito() {
             );
           })}
         </div>
+        )}
         <div onClick={() => setAccountOpen(true)} style={{ padding: "13px 14px", borderTop: `1px solid ${B.border}`, cursor: "pointer", display: "flex", alignItems: "center", gap: 10 }}
           onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.03)"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
           {session ? (<>
@@ -3286,7 +3346,7 @@ export default function Senseito() {
         <div style={{ position: "relative", zIndex: 1 }}>
           {view === "home" || !active
             ? <Home onCreated={createSchool} />
-            : <SchoolPage key={active.id} rec={active} onUpdate={(patch) => updateSchool(active.id, patch)} onPublish={publishSchool} publishing={publishing} publicBase={publicBase} token={session?.token} onSetSlug={setCustomSlug} />}
+            : <SchoolPage key={active.id} rec={active} onUpdate={(patch) => updateSchool(active.id, patch)} onPublish={publishSchool} publishing={publishing} publicBase={publicBase} token={session?.token} onSetSlug={setCustomSlug} onIterate={applyIterate} iterating={iterating} />}
         </div>
       </div>
     </div>
