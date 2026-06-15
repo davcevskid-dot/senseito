@@ -556,11 +556,22 @@ The creator chats with you to shape this project. Reply in JSON ONLY: { "reply":
 - "How can I improve this?" → suggest 2-3 concrete ideas in the reply (action = null) so they can pick.
 Be concrete about this exact project's sections, lessons, dashboards and tools.`;
 
-function mentorSys(school, lesson) {
+// Turn the per-learner bus into a short context line the mentor can use.
+function busContext(bus) {
+  if (!bus) return "";
+  const lines = [];
+  const st = (bus.struggles || []).slice(-5).map(s => s.label).filter(Boolean);
+  if (st.length) lines.push(`The learner recently STRUGGLED with: ${st.join("; ")}. Weave help on these in naturally — reference them like you noticed.`);
+  const m = Object.entries(bus.metrics || {}).slice(-5).map(([k, v]) => `${k}: ${v}`);
+  if (m.length) lines.push(`Recent numbers the learner logged: ${m.join(", ")}.`);
+  return lines.length ? `\nWHAT YOU KNOW ABOUT THIS LEARNER (from their activity):\n${lines.join("\n")}\n` : "";
+}
+
+function mentorSys(school, lesson, bus) {
   const dna = school.knowledgeDNA ? `\nKNOWLEDGE DNA (your source material — teach from this, use its vocabulary):\n${String(school.knowledgeDNA).slice(0, 4000)}\n` : "";
   return `You are ${school.mentor.name}, an AI mentor inside the "${school.name}" school on Senseito.
 ${school.mentor.systemVoice}
-${dna}
+${dna}${busContext(bus)}
 THIS LESSON: "${lesson.title}" (${lesson.type})
 CONCEPT: ${lesson.concept}
 MISSION: ${lesson.mission}
@@ -579,11 +590,11 @@ RULES:
 - Keep replies under 140 words unless doing a formal evaluation.`;
 }
 
-function mentorOfficeSys(school) {
+function mentorOfficeSys(school, bus) {
   const dna = school.knowledgeDNA ? `\nKNOWLEDGE DNA:\n${String(school.knowledgeDNA).slice(0, 4000)}\n` : "";
   return `You are ${school.mentor.name}, mentor of "${school.name}" on Senseito — holding open OFFICE HOURS.
 ${school.mentor.systemVoice}
-${dna}
+${dna}${busContext(bus)}
 THE SCHOOL: ${school.description} Lessons: ${school.semesters?.flatMap(s => s.lessons?.map(l => l.title)).join("; ")}
 The student can ask you ANYTHING related to this subject. Stay fully in character. Connect answers back to the school's lessons and missions when relevant. Push them toward action, not consumption. Never bullet lists. Replies under 150 words.`;
 }
@@ -823,7 +834,7 @@ function Toast({ toast }) {
 // ─────────────────────────────────────────────────────────────
 // MENTOR LESSON CHAT
 // ─────────────────────────────────────────────────────────────
-function LessonView({ school, lesson, T, onClose, onPass, canEdit, onUpdateBlock, chat, onChat }) {
+function LessonView({ school, lesson, T, onClose, onPass, canEdit, onUpdateBlock, chat, onChat, bus, onIngest }) {
   const [blocks, setBlocks] = useState(lesson.blocks || []);
   const [tab, setTab] = useState("mentor"); // the guided conversation leads; activities are secondary
   const [outputs, setOutputs] = useState({});
@@ -862,7 +873,7 @@ function LessonView({ school, lesson, T, onClose, onPass, canEdit, onUpdateBlock
     const convo = [...msgs.filter(m => m.role !== "system"), { role: "user", content: userMsg }];
     setMsgs(m => [...m, { role: "user", content: userMsg }]); setLoading(true);
     try {
-      const reply = await api(mentorSys(school, lesson), toApiMessages(convo), 600);
+      const reply = await api(mentorSys(school, lesson, bus), toApiMessages(convo), 600);
       setMsgs(m => [...m, { role: "assistant", content: reply }]);
       if (!missionShown && reply.toLowerCase().includes("mission")) setMissionShown(true);
       const transcript = [...convo, { role: "assistant", content: reply }];
@@ -919,7 +930,7 @@ function LessonView({ school, lesson, T, onClose, onPass, canEdit, onUpdateBlock
             {pl.mode && pl.mode !== "default" && <div style={{ fontSize: 11.5, color: T.a, background: T.as_, border: `1px solid ${T.ba}`, borderRadius: 8, padding: "7px 11px" }}>To pass: {(PASS_MODES.find(m => m[0] === pl.mode) || [])[1]}{pl.mode === "threshold" ? ` (${pl.threshold ?? 70}%)` : ""}.</div>}
             {blocks.map((blk, i) => (
               <BrickFrame key={i} T={T} school={school} canEdit={canEdit} blockType={blk.type} ctx={{ title: lesson.title, concept: lesson.concept }} onReplace={(nb) => replaceLessonBlock(i, nb)}>
-                <BlockRenderer block={blk} T={T} school={school} onOutput={(o) => setOutputs(s => ({ ...s, [i]: o }))} />
+                <BlockRenderer block={blk} T={T} school={school} onOutput={(o) => { setOutputs(s => ({ ...s, [i]: o })); onIngest?.({ title: blk.data?.title || lesson.title, lessonId: lesson.number }, o); }} />
               </BrickFrame>
             ))}
             {pl.mode === "manual" && !manualDone && <button onClick={() => setManualDone(true)} style={{ ...pBtn(T), alignSelf: "center" }}>✓ Mark lesson complete</button>}
@@ -963,7 +974,7 @@ function LessonView({ school, lesson, T, onClose, onPass, canEdit, onUpdateBlock
 // ─────────────────────────────────────────────────────────────
 // MENTOR OFFICE HOURS
 // ─────────────────────────────────────────────────────────────
-function MentorOffice({ school, T, chat, onChat }) {
+function MentorOffice({ school, T, chat, onChat, bus }) {
   const msgs = chat?.length ? chat : [{ role: "assistant", content: `Office hours are open. Bring me something real — a question, a struggle, a situation from your life. We'll work on it together.` }];
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -976,7 +987,7 @@ function MentorOffice({ school, T, chat, onChat }) {
     const next = [...msgs, { role: "user", content: userMsg }];
     onChat(next); setLoading(true);
     try {
-      const reply = await api(mentorOfficeSys(school), toApiMessages(next), 600);
+      const reply = await api(mentorOfficeSys(school, bus), toApiMessages(next), 600);
       onChat([...next, { role: "assistant", content: reply }]);
     } catch (e) { onChat([...next, { role: "assistant", content: `Error: ${e.message}` }]); }
     setLoading(false);
@@ -1995,7 +2006,7 @@ function ToolsSection({ rec, T, onUpdate, buildTool, buildingTool, readOnly, onR
 // ─────────────────────────────────────────────────────────────
 // DASHBOARD SECTION — always-on grid of bricks (ungated)
 // ─────────────────────────────────────────────────────────────
-function DashboardSection({ section, rec, T, onUpdate, readOnly, school }) {
+function DashboardSection({ section, rec, T, onUpdate, readOnly, school, onIngest }) {
   const blocks = section.blocks || [];
   const stateFor = (i) => rec.toolStates?.[`${section.id}:${i}`];
   const setStateFor = (i, s) => onUpdate({ toolStates: { ...(rec.toolStates || {}), [`${section.id}:${i}`]: s } });
@@ -2007,7 +2018,7 @@ function DashboardSection({ section, rec, T, onUpdate, readOnly, school }) {
       {blocks.map((b, i) => (
         <BrickFrame key={i} T={T} school={school} canEdit={!readOnly} blockType={b.type} ctx={{ title: section.title, concept: section.intro }} onReplace={(nb) => replaceBlock(i, nb)}>
           <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 16, padding: 16, animation: "fadeUp 0.4s ease backwards", animationDelay: `${Math.min(i, 8) * 55}ms` }}>
-            <BlockRenderer block={b} T={T} school={school} state={stateFor(i)} onState={(s) => setStateFor(i, s)} />
+            <BlockRenderer block={b} T={T} school={school} state={stateFor(i)} onState={(s) => setStateFor(i, s)} onOutput={(o) => onIngest?.({ title: section.title }, o)} />
           </div>
         </BrickFrame>
       ))}
@@ -2465,6 +2476,20 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
     const data = { ...school, semesters: (school.semesters || []).map(sem => ({ ...sem, lessons: (sem.lessons || []).map(l => l.number === lessonNumber ? { ...l, blocks: (l.blocks || []).map((b, j) => j === i ? nb : b) } : l) })) };
     onUpdate({ data });
   }
+  // ── Context Bus: bricks write a STRUGGLE/METRIC stream the mentor reads ──
+  const bus = rec.toolStates?.__bus || { struggles: [], metrics: {} };
+  function ingestOutput(ctx, output) {
+    if (!output || !output.type) return;
+    const cur = rec.toolStates?.__bus || { struggles: [], metrics: {} };
+    const next = { struggles: [...(cur.struggles || [])], metrics: { ...(cur.metrics || {}) } };
+    const key = `${ctx.lessonId ?? ctx.title ?? output.type}:${output.type}`;
+    if (output.passed === false) next.struggles = [...next.struggles.filter(s => s.key !== key), { key, label: ctx.title || output.type, type: output.type, at: Date.now() }].slice(-20);
+    else if (output.passed === true) next.struggles = next.struggles.filter(s => s.key !== key);
+    if (typeof output.score === "number") next.metrics[`${ctx.title || output.type} score`] = String(output.score);
+    if (output.totals?.calories) next.metrics["calories logged"] = String(Math.round(output.totals.calories));
+    if (typeof output.result !== "undefined" && output.result !== null && typeof output.result !== "object") next.metrics[ctx.title || "result"] = String(output.result).slice(0, 40);
+    onUpdate({ toolStates: { ...(rec.toolStates || {}), __bus: next } });
+  }
 
   // Iteration is driven by the project chat in the left sidebar (lifted to app root).
   const applyIteration = onIterate || (() => { });
@@ -2537,7 +2562,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
     <div style={{ position: "relative", fontFamily: fontStack(school) }}>
       <Toast toast={toast} />
       {activeLesson && <LessonView school={school} lesson={activeLesson} T={T} onClose={() => setActiveLesson(null)} onPass={() => handlePass(activeLesson.number)}
-        canEdit={!readOnly} onUpdateBlock={(i, nb) => updateLessonBlock(activeLesson.number, i, nb)}
+        canEdit={!readOnly} onUpdateBlock={(i, nb) => updateLessonBlock(activeLesson.number, i, nb)} bus={bus} onIngest={ingestOutput}
         chat={rec.lessonChats?.[activeLesson.number]} onChat={(msgs) => onUpdate({ lessonChats: { ...(rec.lessonChats || {}), [activeLesson.number]: msgs } })} />}
       {editingLesson && !readOnly && <LessonEditor lesson={editingLesson} T={T} allowed={allowedBlocksFor(school.learningPath)}
         onSave={(draft) => { saveLesson(editingLesson.number, draft); setEditingLesson(null); showToast("✓ Lesson updated"); }}
@@ -2670,10 +2695,10 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
               </div>
             )}
           </>)}
-          {activeTab === "mentor" && <MentorOffice school={school} T={T} chat={rec.mentorChat || []} onChat={(msgs) => onUpdate({ mentorChat: msgs })} />}
+          {activeTab === "mentor" && <MentorOffice school={school} T={T} chat={rec.mentorChat || []} onChat={(msgs) => onUpdate({ mentorChat: msgs })} bus={bus} />}
           {activeTab === "tools" && <ToolsSection rec={rec} T={T} onUpdate={onUpdate} buildTool={buildTool} buildingTool={buildingTool} readOnly={readOnly} onReloadIdeas={reloadIdeas} onEditTool={editTool} />}
           {SECTIONS.filter(s => s.kind === "dashboard").map(sec => activeTab === sec.id
-            ? <DashboardSection key={sec.id} section={sec} rec={rec} T={T} onUpdate={onUpdate} readOnly={readOnly} school={school} />
+            ? <DashboardSection key={sec.id} section={sec} rec={rec} T={T} onUpdate={onUpdate} readOnly={readOnly} school={school} onIngest={ingestOutput} />
             : null)}
         </div>
       </div>
