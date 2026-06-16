@@ -471,7 +471,7 @@ Otherwise return an object with these fields:
 - gamiPreset: one of xp (default), belts (discipline/martial), quest (adventure/story), none
 - layout: best-fit of course | guided | course_toolkit | coach | practice | toolkit | custom
 - sections: ordered array describing the experience — each { kind:"lessons"|"mentor"|"tools"|"dashboard", title (short, subject-flavored, e.g. "Daily Practice"), icon (one emoji), intro (one short line, optional), blockTypes:[2-5 types] (ONLY for dashboard sections — use ONLY the available block types listed in STEP 3, never invent new ones) }. Include a "lessons" section ONLY if you actually provide semesters below.
-- semesters: ONLY if a "lessons" section is included — array of { number, title, theme, weeks, lessons: [ { number, title, type (Dialogue|RolePlay|Mission|Reflection|SkillTest|Quiz|Debate|Journal), concept (1-2 sentences), openingLine (exact first thing the mentor says, in voice), mission, passCriteria (specific, measurable), blockTypes: [ 1-3 block type strings, allowed for the learningPath ] } ] }
+- semesters: ONLY if a "lessons" section is included — array of { number, title, theme, weeks, lessons: [ { number, title, type (Dialogue|RolePlay|Mission|Reflection|SkillTest|Quiz|Debate|Journal), concept (1-2 sentences), openingLine (exact first thing the mentor says, in voice), mission, passCriteria (specific, measurable), passLogic: { mode } where mode is one of "mentor" (the mentor evaluates & decides — best for discussion/skill lessons), "activities" (mentor briefs then assigns a mission; learner completes activities in order — best for hands-on/practice), or "hybrid" (≥70% of activities done AND mentor approves — a balanced default), blockTypes: [ 1-3 block type strings, allowed for the learningPath ] } ] }
 - suggestions: 3-4 short, SPECIFIC improvement ideas for THIS school
 - toolIdeas: 2-3 of { name, why (one line), type (any block type that fits this school) }
 
@@ -574,8 +574,14 @@ function busContext(bus, school) {
   return lines.length ? `\nWHAT YOU KNOW ABOUT THIS LEARNER (from their activity):\n${lines.join("\n")}\n` : "";
 }
 
-function mentorSys(school, lesson, bus) {
+function mentorSys(school, lesson, bus, opts = {}) {
   const dna = school.knowledgeDNA ? `\nKNOWLEDGE DNA (your source material — teach from this, use its vocabulary):\n${String(school.knowledgeDNA).slice(0, 4000)}\n` : "";
+  const modeNote = {
+    mentor: "PASS RULE: YOU are the gate. Finishing the activities is not enough — the student must demonstrate real understanding to you, in their own words, before they pass. Evaluate strictly against the pass criteria; only approve when genuinely earned.",
+    activities: "PASS RULE: First ease the student into the lesson in 2-3 sentences, then assign ONE concrete mission. When you assign it, put it on its OWN final line EXACTLY as: MISSION: <one sentence: exactly what to do and what to report back to you>. The student completes the activities and then reports back — approve only if they truly did it.",
+    hybrid: "PASS RULE: The student passes by doing most of the activities AND convincing you they understand. Evaluate their grasp once they've put in the work.",
+  }[opts.mode] || "PASS RULE: Evaluate the student strictly against the pass criteria; approve only when earned.";
+  const status = opts.activityStatus ? `\nLEARNER'S ACTIVITY STATUS: ${opts.activityStatus}` : "";
   return `You are ${school.mentor.name}, an AI mentor inside the "${school.name}" school on Senseito.
 ${school.mentor.systemVoice}
 ${dna}${busContext(bus, school)}
@@ -583,6 +589,7 @@ THIS LESSON: "${lesson.title}" (${lesson.type})
 CONCEPT: ${lesson.concept}
 MISSION: ${lesson.mission}
 PASS CRITERIA: ${lesson.passCriteria}
+${modeNote}${status}
 LESSON TYPE BEHAVIOR:
 - Quiz: run it live, one question at a time, react to each answer.
 - Debate: take the opposing side and argue hard; the student must defend their position.
@@ -591,8 +598,7 @@ LESSON TYPE BEHAVIOR:
 - Others: teach through dialogue.
 RULES:
 - Never bullet lists. Max 3-4 sentences before asking the student something.
-- Assign the mission naturally mid-conversation when the student shows engagement.
-- When the student reports their mission: evaluate strictly. If they pass, say exactly what proved it. If not, say exactly what's missing — one thing at a time.
+- When the student reports their mission/work: evaluate strictly. If they pass, say exactly what proved it. If not, say exactly what's missing — one thing at a time.
 - You are NOT an assistant. You are a mentor with standards. Stay in character always.
 - Keep replies under 140 words unless doing a formal evaluation.`;
 }
@@ -858,18 +864,23 @@ function LessonView({ school, lesson, T, onClose, onPass, canEdit, onUpdateBlock
   useEffect(() => { if (onChat) onChat(msgs); }, [msgs]); // persist the lesson conversation
   function replaceLessonBlock(i, nb) { setBlocks(bs => bs.map((b, j) => j === i ? nb : b)); onUpdateBlock?.(i, nb); }
 
-  // Pass logic chosen by the creator (defaults to "last activity / mentor").
+  // Pass logic — three canonical modes for locked-lesson schools:
+  //  mentor    : the mentor decides (activities are supplementary).
+  //  activities: mentor briefs + assigns a MISSION; activities unlock in sequence; mentor approves the mission.
+  //  hybrid    : ≥70% of activities done AND the mentor approves.
   const pl = lesson.passLogic || {};
+  const mode = ["mentor", "activities", "hybrid", "manual", "proof"].includes(pl.mode) ? pl.mode : "activities";
+  const total = blocks.length;
   const passedBlocks = blocks.filter((_, i) => outputs[i]?.passed).length;
-  const lastBlockPassed = blocks.length > 0 && outputs[blocks.length - 1]?.passed === true;
-  let activitiesPass;
-  if (pl.mode === "threshold") activitiesPass = blocks.length > 0 && (passedBlocks / blocks.length) * 100 >= (pl.threshold ?? 70);
-  else if (pl.mode === "lastblock") activitiesPass = lastBlockPassed;
-  else if (pl.mode === "proof") activitiesPass = blocks.some((b, i) => (b.type === "image_gate" || b.type === "video_gate") && outputs[i]?.passed);
-  else activitiesPass = lastBlockPassed; // default
-  const passed = pl.mode === "mentor" ? chatPassed
-    : pl.mode === "manual" ? manualDone
-      : (chatPassed || activitiesPass || manualDone);
+  const allActivitiesDone = total > 0 && passedBlocks === total;
+  const briefed = msgs.some(m => m.role === "user"); // mode "activities": activities open after the mentor briefs
+  const mission = [...msgs].reverse().find(m => m.role === "mission")?.content || null;
+  let passed;
+  if (mode === "mentor") passed = chatPassed;
+  else if (mode === "manual") passed = manualDone;
+  else if (mode === "hybrid") passed = total > 0 && (passedBlocks / total) >= 0.7 && chatPassed;
+  else if (mode === "proof") passed = blocks.some((b, i) => (b.type === "image_gate" || b.type === "video_gate") && outputs[i]?.passed);
+  else passed = allActivitiesDone && (mission ? chatPassed : true); // "activities"
 
   // Record the pass the moment it happens (unlocks the next lesson + saves progress),
   // so the student advances even if they close with ✕ instead of clicking Complete.
@@ -882,8 +893,17 @@ function LessonView({ school, lesson, T, onClose, onPass, canEdit, onUpdateBlock
     const convo = [...msgs.filter(m => m.role !== "system"), { role: "user", content: userMsg }];
     setMsgs(m => [...m, { role: "user", content: userMsg }]); setLoading(true);
     try {
-      const reply = await api(mentorSys(school, lesson, bus), toApiMessages(convo), 600);
-      setMsgs(m => [...m, { role: "assistant", content: reply }]);
+      const activityStatus = total ? `${passedBlocks}/${total} activities done —${blocks.map((b, i) => ` ${outputs[i]?.passed ? "✓" : "✗"} ${b.data?.title || BLOCK_META[b.type]?.label || b.type}`).join(",")}` : "this lesson has no activities";
+      const reply = await api(mentorSys(school, lesson, bus, { mode, activityStatus }), toApiMessages(convo), 600);
+      // Mode "activities": capture an assigned MISSION and pin it (stored as a 'mission' message).
+      const mm = reply.match(/MISSION:\s*([\s\S]+)/i);
+      if (mode === "activities" && mm && !mission) {
+        const mtext = mm[1].trim().split("\n")[0];
+        const display = reply.replace(/MISSION:\s*[\s\S]+/i, "").trim();
+        setMsgs(m => [...m, { role: "assistant", content: display || "Here's your mission — check the Activities tab." }, { role: "mission", content: mtext }]);
+      } else {
+        setMsgs(m => [...m, { role: "assistant", content: reply }]);
+      }
       if (!missionShown && reply.toLowerCase().includes("mission")) setMissionShown(true);
       const transcript = [...convo, { role: "assistant", content: reply }];
       // Only spend an eval call when the student said something substantial (skips chit-chat).
@@ -928,22 +948,40 @@ function LessonView({ school, lesson, T, onClose, onPass, canEdit, onUpdateBlock
 
         {tab === "activities" && (
           <div style={{ flex: 1, overflowY: "auto", padding: "18px 22px", display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={{ fontSize: 13, color: B.mutedMid, lineHeight: 1.6 }}>{lesson.concept}</div>
-            {/* Activity progress stepper */}
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <div style={{ flex: 1, display: "flex", gap: 5 }}>
-                {blocks.map((_, i) => <div key={i} style={{ flex: 1, height: 5, borderRadius: 3, background: outputs[i]?.passed ? "#4ADE80" : (outputs[i] ? T.p : B.surface3), transition: "background 0.3s" }} />)}
+            {mode === "activities" && !briefed && !canEdit ? (
+              <div style={{ textAlign: "center", padding: "36px 20px" }}>
+                <div style={{ fontSize: 30, marginBottom: 10 }}>🔒</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: B.white, marginBottom: 6 }}>Talk to your mentor first</div>
+                <div style={{ fontSize: 12.5, color: B.muted, lineHeight: 1.6, maxWidth: 360, margin: "0 auto 14px" }}>{school.mentor.name} will brief you and open your activities.</div>
+                <button onClick={() => setTab("mentor")} style={pBtn(T)}>💬 Go to the lesson chat</button>
               </div>
-              <span style={{ fontSize: 11, color: B.muted, whiteSpace: "nowrap" }}>{passedBlocks}/{blocks.length} done</span>
-            </div>
-            {pl.mode && pl.mode !== "default" && <div style={{ fontSize: 11.5, color: T.a, background: T.as_, border: `1px solid ${T.ba}`, borderRadius: 8, padding: "7px 11px" }}>To pass: {(PASS_MODES.find(m => m[0] === pl.mode) || [])[1]}{pl.mode === "threshold" ? ` (${pl.threshold ?? 70}%)` : ""}.</div>}
-            {blocks.map((blk, i) => (
-              <BrickFrame key={i} T={T} school={school} canEdit={canEdit} blockType={blk.type} ctx={{ title: lesson.title, concept: lesson.concept }} onReplace={(nb) => replaceLessonBlock(i, nb)}>
-                <BlockRenderer block={blk} T={T} school={school} bus={bus} onOutput={(o) => { setOutputs(s => ({ ...s, [i]: o })); onIngest?.({ title: blk.data?.title || lesson.title, lessonId: lesson.number, concepts: blk.data?.concepts }, o); }} />
-              </BrickFrame>
-            ))}
-            {pl.mode === "manual" && !manualDone && <button onClick={() => setManualDone(true)} style={{ ...pBtn(T), alignSelf: "center" }}>✓ Mark lesson complete</button>}
-            {passed && <div style={{ textAlign: "center", padding: "12px 14px", background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.25)", borderRadius: 10, fontSize: 13, color: "#4ADE80", fontWeight: 600 }}>✅ Lesson complete — hit "Complete →" above, or talk it through with your mentor.</div>}
+            ) : (<>
+              <div style={{ fontSize: 13, color: B.mutedMid, lineHeight: 1.6 }}>{lesson.concept}</div>
+              {mission && <div style={{ background: T.as_, border: `1px solid ${T.ba}`, borderRadius: 10, padding: "11px 14px", fontSize: 13, color: T.hi, lineHeight: 1.55 }}>🎯 <strong>Mission:</strong> {mission}<div style={{ fontSize: 11.5, color: B.mutedMid, marginTop: 5 }}>Do it, then report back in the lesson chat — your mentor approves it to pass.</div></div>}
+              {total > 0 && <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ flex: 1, display: "flex", gap: 5 }}>{blocks.map((_, i) => <div key={i} style={{ flex: 1, height: 5, borderRadius: 3, background: outputs[i]?.passed ? "#4ADE80" : (outputs[i] ? T.p : B.surface3), transition: "background 0.3s" }} />)}</div>
+                <span style={{ fontSize: 11, color: B.muted, whiteSpace: "nowrap" }}>{passedBlocks}/{total} done</span>
+              </div>}
+              <div style={{ fontSize: 11.5, color: T.a, background: T.as_, border: `1px solid ${T.ba}`, borderRadius: 8, padding: "7px 11px" }}>
+                {mode === "mentor" ? "To pass: complete the activities, then report to your mentor for evaluation."
+                  : mode === "hybrid" ? "To pass: complete at least 70% of activities, then your mentor approves."
+                    : mode === "manual" ? "To pass: work through these, then mark complete."
+                      : "To pass: complete every activity in order (and your mentor's mission)."}
+              </div>
+              {blocks.map((blk, i) => {
+                const locked = !canEdit && i > 0 && !outputs[i - 1]?.passed; // sequential unlock (creators see all)
+                if (locked) return <div key={i} style={{ background: B.surface2, border: `1px dashed ${B.borderMid}`, borderRadius: 12, padding: "14px 16px", fontSize: 12.5, color: B.muted, display: "flex", alignItems: "center", gap: 8 }}>🔒 {BLOCK_META[blk.type]?.icon} {BLOCK_META[blk.type]?.label || blk.type} — finish the activity above to unlock</div>;
+                return (
+                  <BrickFrame key={i} T={T} school={school} canEdit={canEdit} blockType={blk.type} ctx={{ title: lesson.title, concept: lesson.concept }} onReplace={(nb) => replaceLessonBlock(i, nb)}>
+                    <BlockRenderer block={blk} T={T} school={school} bus={bus} onOutput={(o) => { setOutputs(s => ({ ...s, [i]: o })); onIngest?.({ title: blk.data?.title || lesson.title, lessonId: lesson.number, concepts: blk.data?.concepts }, o); }} />
+                  </BrickFrame>
+                );
+              })}
+              {mode === "manual" && !manualDone && <button onClick={() => setManualDone(true)} style={{ ...pBtn(T), alignSelf: "center" }}>✓ Mark lesson complete</button>}
+              {!passed && allActivitiesDone && (mode === "mentor" || mode === "hybrid" || (mode === "activities" && mission)) &&
+                <button onClick={() => setTab("mentor")} style={{ ...pBtn(T), alignSelf: "center" }}>✅ Activities done — report to {school.mentor.name} →</button>}
+              {passed && <div style={{ textAlign: "center", padding: "12px 14px", background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.25)", borderRadius: 10, fontSize: 13, color: "#4ADE80", fontWeight: 600 }}>✅ Lesson complete — hit "Complete →" above.</div>}
+            </>)}
           </div>
         )}
 
@@ -951,6 +989,7 @@ function LessonView({ school, lesson, T, onClose, onPass, canEdit, onUpdateBlock
           <div style={{ flex: 1, overflowY: "auto", padding: "18px 22px", display: "flex", flexDirection: "column", gap: 12 }}>
             {msgs.map((m, i) => {
               if (m.role === "system") return <div key={i} style={{ textAlign: "center", padding: "10px 14px", background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.25)", borderRadius: 10, fontSize: 13, color: "#4ADE80", fontWeight: 600 }}>{m.content}</div>;
+              if (m.role === "mission") return <div key={i} style={{ padding: "11px 14px", background: T.as_, border: `1px solid ${T.ba}`, borderRadius: 10, fontSize: 13, color: T.hi, lineHeight: 1.55 }}>🎯 <strong>Mission assigned:</strong> {m.content}</div>;
               const isU = m.role === "user";
               return (
                 <div key={i} style={{ display: "flex", justifyContent: isU ? "flex-end" : "flex-start" }}>
@@ -2094,10 +2133,9 @@ function LessonRow({ lesson, idx, T, progress, onEnter, onEdit, onToggleLock, re
 // LESSON EDITOR (creator) — rename, lock, pass logic, edit/delete blocks
 // ─────────────────────────────────────────────────────────────
 const PASS_MODES = [
-  ["default", "Last activity (default)"],
-  ["mentor", "Mentor AI conversation"],
-  ["lastblock", "Last activity must pass"],
-  ["threshold", "% of activities completed"],
+  ["mentor", "Mentor decides (after activities)"],
+  ["activities", "Activities + mentor's mission"],
+  ["hybrid", "70% of activities + mentor approves"],
   ["proof", "Photo / video proof"],
   ["manual", "Manual — student marks done"],
 ];
@@ -2116,7 +2154,7 @@ function blockFields(type) {
   })[type] || [];
 }
 function LessonEditor({ lesson, T, allowed, onSave, onDelete, onApplyAI, onAuthorBlock, onClose }) {
-  const [d, setD] = useState({ ...lesson, blocks: (lesson.blocks || []).map(b => ({ ...b, data: { ...(b.data || {}) } })), passLogic: lesson.passLogic || { mode: "default", threshold: 70 } });
+  const [d, setD] = useState({ ...lesson, blocks: (lesson.blocks || []).map(b => ({ ...b, data: { ...(b.data || {}) } })), passLogic: lesson.passLogic || { mode: "hybrid" } });
   const [addType, setAddType] = useState("");
   const [busyIdx, setBusyIdx] = useState(-1);
   const [adding, setAdding] = useState(false);
@@ -2153,7 +2191,7 @@ function LessonEditor({ lesson, T, allowed, onSave, onDelete, onApplyAI, onAutho
             <div style={{ flex: 1, minWidth: 140 }}><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>Type</div>
               <select value={d.type || "Dialogue"} onChange={e => set({ type: e.target.value })} style={{ ...inp.input, cursor: "pointer" }}>{Object.keys(TM).map(t => <option key={t} value={t}>{t}</option>)}</select></div>
             <div style={{ flex: 1, minWidth: 140 }}><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>Passing logic</div>
-              <select value={d.passLogic?.mode || "default"} onChange={e => set({ passLogic: { ...d.passLogic, mode: e.target.value } })} style={{ ...inp.input, cursor: "pointer" }}>{PASS_MODES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></div>
+              <select value={d.passLogic?.mode || "hybrid"} onChange={e => set({ passLogic: { ...d.passLogic, mode: e.target.value } })} style={{ ...inp.input, cursor: "pointer" }}>{PASS_MODES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></div>
           </div>
           {d.passLogic?.mode === "threshold" && (
             <div><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>Completion threshold (%)</div><input type="number" value={d.passLogic.threshold ?? 70} onChange={e => set({ passLogic: { ...d.passLogic, threshold: +e.target.value } })} style={inp.input} /></div>
