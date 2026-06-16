@@ -471,7 +471,7 @@ Otherwise return an object with these fields:
 - gamiPreset: one of xp (default), belts (discipline/martial), quest (adventure/story), none
 - layout: best-fit of course | guided | course_toolkit | coach | practice | toolkit | custom
 - sections: ordered array describing the experience — each { kind:"lessons"|"mentor"|"tools"|"dashboard", title (short, subject-flavored, e.g. "Daily Practice"), icon (one emoji), intro (one short line, optional), blockTypes:[2-5 types] (ONLY for dashboard sections — use ONLY the available block types listed in STEP 3, never invent new ones) }. Include a "lessons" section ONLY if you actually provide semesters below.
-- semesters: ONLY if a "lessons" section is included — array of { number, title, theme, weeks, lessons: [ { number, title, type (Dialogue|RolePlay|Mission|Reflection|SkillTest|Quiz|Debate|Journal), concept (1-2 sentences), openingLine (exact first thing the mentor says, in voice), mission, passCriteria (specific, measurable), passLogic: { mode } where mode is one of "mentor" (the mentor evaluates & decides — best for discussion/skill lessons), "activities" (mentor briefs then assigns a mission; learner completes activities in order — best for hands-on/practice), or "hybrid" (≥70% of activities done AND mentor approves — a balanced default), blockTypes: [ 1-3 block type strings, allowed for the learningPath ] } ] }
+- semesters: ONLY if a "lessons" section is included — array of { number, title, theme, weeks, lessons: [ { number, title, type (Dialogue|RolePlay|Mission|Reflection|SkillTest|Quiz|Debate|Journal), concept (1-2 sentences), openingLine (exact first thing the mentor says, in voice), mission, passCriteria (specific, measurable), passLogic: { mode } where mode is one of "mentoronly" (pure conversation, NO activities — best for discussion/coaching/Socratic/reflective lessons; for these set blockTypes to []), "mentor" (mentor evaluates & decides after activities — best for skill lessons), "activities" (mentor briefs then assigns a mission; learner completes activities in order — best for hands-on/practice), or "hybrid" (≥70% of activities done AND mentor approves — a balanced default). Pick the mode that best fits each lesson. blockTypes: [ 1-3 block type strings allowed for the learningPath; use [] for mentoronly ] } ] }
 - suggestions: 3-4 short, SPECIFIC improvement ideas for THIS school
 - toolIdeas: 2-3 of { name, why (one line), type (any block type that fits this school) }
 
@@ -577,6 +577,7 @@ function busContext(bus, school) {
 function mentorSys(school, lesson, bus, opts = {}) {
   const dna = school.knowledgeDNA ? `\nKNOWLEDGE DNA (your source material — teach from this, use its vocabulary):\n${String(school.knowledgeDNA).slice(0, 4000)}\n` : "";
   const modeNote = {
+    mentoronly: "PASS RULE: This lesson is a PURE CONVERSATION — there are no activities. Teach the whole concept through dialogue: explain a little, then probe with questions, and only approve when the student has genuinely demonstrated understanding in their own words. You are the only gate.",
     mentor: "PASS RULE: YOU are the gate. Finishing the activities is not enough — the student must demonstrate real understanding to you, in their own words, before they pass. Evaluate strictly against the pass criteria; only approve when genuinely earned.",
     activities: "PASS RULE: First ease the student into the lesson in 2-3 sentences, then assign ONE concrete mission. When you assign it, put it on its OWN final line EXACTLY as: MISSION: <one sentence: exactly what to do and what to report back to you>. The student completes the activities and then reports back — approve only if they truly did it.",
     hybrid: "PASS RULE: The student passes by doing most of the activities AND convincing you they understand. Evaluate their grasp once they've put in the work.",
@@ -680,7 +681,8 @@ async function fillSchoolBlocks(content, { oldSchool = null, dna = null } = {}) 
         && same(old.title, l.title) && same(old.concept, l.concept) && same(old.mission, l.mission) && same(old.passCriteria, l.passCriteria);
       if (unchanged) { l.blocks = old.blocks; delete l.blockTypes; return; }
       if (l.blocks && l.blocks.length && l.blocks.every(b => b.data) && !(l.blockTypes && l.blockTypes.length)) { delete l.blockTypes; return; } // already has data
-      l._types = types.length ? types : ["reading_plain"]; toFill.push(l);
+      if (!types.length) { l.blocks = []; delete l.blockTypes; return; } // mentor-only lesson — no activities
+      l._types = types; toFill.push(l);
     });
     if (!toFill.length) return;
     const lessons = toFill.map(l => ({ number: l.number, title: l.title, type: l.type, concept: l.concept, mission: l.mission, passCriteria: l.passCriteria, blockTypes: l._types }));
@@ -869,14 +871,16 @@ function LessonView({ school, lesson, T, onClose, onPass, canEdit, onUpdateBlock
   //  activities: mentor briefs + assigns a MISSION; activities unlock in sequence; mentor approves the mission.
   //  hybrid    : ≥70% of activities done AND the mentor approves.
   const pl = lesson.passLogic || {};
-  const mode = ["mentor", "activities", "hybrid", "manual", "proof"].includes(pl.mode) ? pl.mode : "activities";
-  const total = blocks.length;
+  const baseMode = ["mentoronly", "mentor", "activities", "hybrid", "manual", "proof"].includes(pl.mode) ? pl.mode : "activities";
+  // No activities at all → behave as mentor-only (unless explicitly manual).
+  const mode = (blocks.length === 0 && baseMode !== "manual") ? "mentoronly" : baseMode;
+  const total = mode === "mentoronly" ? 0 : blocks.length;
   const passedBlocks = blocks.filter((_, i) => outputs[i]?.passed).length;
   const allActivitiesDone = total > 0 && passedBlocks === total;
   const briefed = msgs.some(m => m.role === "user"); // mode "activities": activities open after the mentor briefs
   const mission = [...msgs].reverse().find(m => m.role === "mission")?.content || null;
   let passed;
-  if (mode === "mentor") passed = chatPassed;
+  if (mode === "mentoronly" || mode === "mentor") passed = chatPassed;
   else if (mode === "manual") passed = manualDone;
   else if (mode === "hybrid") passed = total > 0 && (passedBlocks / total) >= 0.7 && chatPassed;
   else if (mode === "proof") passed = blocks.some((b, i) => (b.type === "image_gate" || b.type === "video_gate") && outputs[i]?.passed);
@@ -920,7 +924,7 @@ function LessonView({ school, lesson, T, onClose, onPass, canEdit, onUpdateBlock
     setLoading(false);
   }
 
-  const TABS = [["mentor", "💬 Guided Lesson"], ...(blocks.length ? [["activities", `🧩 Activities (${blocks.length})`]] : [])];
+  const TABS = [["mentor", "💬 Guided Lesson"], ...(blocks.length && mode !== "mentoronly" ? [["activities", `🧩 Activities (${blocks.length})`]] : [])];
 
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(0,0,0,0.82)", backdropFilter: "blur(10px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onClose}>
@@ -2133,12 +2137,21 @@ function LessonRow({ lesson, idx, T, progress, onEnter, onEdit, onToggleLock, re
 // LESSON EDITOR (creator) — rename, lock, pass logic, edit/delete blocks
 // ─────────────────────────────────────────────────────────────
 const PASS_MODES = [
+  ["mentoronly", "Mentor only — pure conversation"],
   ["mentor", "Mentor decides (after activities)"],
   ["activities", "Activities + mentor's mission"],
   ["hybrid", "70% of activities + mentor approves"],
   ["proof", "Photo / video proof"],
   ["manual", "Manual — student marks done"],
 ];
+const PASS_MODE_DESC = {
+  mentoronly: "No activities tab — the mentor guides the whole lesson through conversation and decides when the student has truly understood. Best for discussion, coaching, Socratic or reflective lessons.",
+  mentor: "Students work through the activities, then report to the mentor, who evaluates the conversation and decides if they've genuinely got it.",
+  activities: "The mentor briefs the student and assigns a mission, then they complete the activities in order; the mission passes on the mentor's approval. Best for hands-on practice.",
+  hybrid: "A balance — the student must finish at least 70% of the activities AND convince the mentor. A solid all-rounder.",
+  proof: "The student passes by submitting photo or video proof of real-world work.",
+  manual: "No gate — the student marks the lesson complete themselves (good for optional or reference lessons).",
+};
 function blockFields(type) {
   return ({
     video_embed: [["url", "Video URL (YouTube / Loom)"], ["title", "Title"]],
@@ -2190,12 +2203,10 @@ function LessonEditor({ lesson, T, allowed, onSave, onDelete, onApplyAI, onAutho
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
             <div style={{ flex: 1, minWidth: 140 }}><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>Type</div>
               <select value={d.type || "Dialogue"} onChange={e => set({ type: e.target.value })} style={{ ...inp.input, cursor: "pointer" }}>{Object.keys(TM).map(t => <option key={t} value={t}>{t}</option>)}</select></div>
-            <div style={{ flex: 1, minWidth: 140 }}><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>Passing logic</div>
+            <div style={{ flex: 1, minWidth: 140 }}><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>How to pass this lesson</div>
               <select value={d.passLogic?.mode || "hybrid"} onChange={e => set({ passLogic: { ...d.passLogic, mode: e.target.value } })} style={{ ...inp.input, cursor: "pointer" }}>{PASS_MODES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></div>
           </div>
-          {d.passLogic?.mode === "threshold" && (
-            <div><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>Completion threshold (%)</div><input type="number" value={d.passLogic.threshold ?? 70} onChange={e => set({ passLogic: { ...d.passLogic, threshold: +e.target.value } })} style={inp.input} /></div>
-          )}
+          <div style={{ fontSize: 11.5, color: B.mutedMid, lineHeight: 1.55, background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 8, padding: "8px 11px" }}>{PASS_MODE_DESC[d.passLogic?.mode || "hybrid"] || "Choose how a student proves they've completed this lesson."}</div>
           <div><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>Pass criteria (used by mentor / AI evaluation)</div><textarea value={d.passCriteria || ""} onChange={e => set({ passCriteria: e.target.value })} rows={2} style={inp.input} /></div>
 
           <div>
