@@ -638,7 +638,8 @@ DECIDE which of three modes this message is:
 - "skin": one of ${SKIN_KEYS.join(", ")}
 - "density": "compact" | "cozy" | "spacious"
 - "font": one of ${Object.keys(FONTS).join(", ")}
-- "cover": an https image URL for a hero banner, or "" to remove.
+- "cover": an https image URL for a hero banner, or "" to remove. "coverPos": CSS object-position for the cover focal point (e.g. "50% 25%", "left top").
+- "fontScale": a number 0.8–1.4 for overall text size (1 = default).
 - "hero": { "emoji":false, "tagline":false, "description":false, "off":true } — set a key false to hide that piece; "off":true = minimal title-only header. (For "just a chat, no title/description" set hero.off true.)
 - "overlay": { "type":"mentorFab", "greeting":"<short>" } to add a floating chat bubble, or null to remove.
 - "layout": one of ${Object.keys(LAYOUTS).join(", ")} (only for a wholesale re-arrange into a known shape).
@@ -3293,7 +3294,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
         {iterating && <div style={{ position: "sticky", top: 12, zIndex: 90, marginBottom: 16 }}><BuildProgress title="Applying your change…" pct={iterProg.pct} label={iterProg.label} facts={[]} /></div>}
 
         {school.overlay?.type === "mentorFab" && <MentorFab school={school} bus={bus} T={T} />}
-        <div style={{ display: "flex", flexDirection: "column", gap: dens, opacity: iterating ? 0.35 : 1, filter: iterating ? "saturate(0.6)" : "none", transition: "opacity 0.4s, filter 0.4s", paddingTop: readOnly ? 18 : 0 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: dens, zoom: school.fontScale || 1, opacity: iterating ? 0.35 : 1, filter: iterating ? "saturate(0.6)" : "none", transition: "opacity 0.4s, filter 0.4s", paddingTop: readOnly ? 18 : 0 }}>
           {warnings.length > 0 && (
             <div style={{ background: "rgba(251,191,36,0.06)", border: "1px solid rgba(251,191,36,0.3)", borderRadius: 12, padding: "11px 15px" }}>
               <div onClick={() => setShowWarn(s => !s)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}>
@@ -3315,7 +3316,14 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
           )}
           {/* Banner — varies by the school's visual skin */}
           <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: sk.radius, overflow: "hidden", animation: "fadeUp 0.5s ease" }}>
-            {school.cover && <img src={school.cover} alt="" style={{ width: "100%", height: 170, objectFit: "cover", display: "block" }} />}
+            {school.cover && <div style={{ position: "relative" }}>
+              <img src={school.cover} alt="" style={{ width: "100%", height: 170, objectFit: "cover", objectPosition: school.coverPos || "center", display: "block" }} />
+              {!readOnly && <div style={{ position: "absolute", top: 8, right: 8, display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 3, background: "rgba(0,0,0,0.45)", borderRadius: 8, padding: 4 }} title="Set the cover's focal point">
+                {["0% 0%", "50% 0%", "100% 0%", "0% 50%", "50% 50%", "100% 50%", "0% 100%", "50% 100%", "100% 100%"].map(p => (
+                  <button key={p} onClick={() => onUpdate({ data: { ...school, coverPos: p } })} title={p} style={{ width: 13, height: 13, borderRadius: 3, cursor: "pointer", border: "none", background: (school.coverPos || "50% 50%") === p ? "#fff" : "rgba(255,255,255,0.35)" }} />
+                ))}
+              </div>}
+            </div>}
             <div style={{ padding: sk.align === "center" ? "34px 28px 26px" : "30px 28px 22px", background: T.heroGrad || sk.top, borderBottom: `1px solid ${B.border}`, textAlign: sk.align, position: "relative" }}>
               {sk.accentBar && <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 4, background: `linear-gradient(90deg,${T.p},${T.a})` }} />}
               {hero.emoji !== false && !hero.off && <div style={{ fontSize: sk.emoji, marginBottom: 10 }}>{school.emoji || "🏫"}</div>}
@@ -3826,7 +3834,7 @@ function PublicSchool({ slug }) {
 // PROJECT CHAT — the left bar inside a project (Lovable-style). Every
 // message iterates the school; quick "levers" are zero-token tweaks.
 // ─────────────────────────────────────────────────────────────
-function ProjectChat({ rec, iterating, history, onSend, onIterate, onBack, onTheme, onVoice, onFont, onGami, onUndo, canUndo }) {
+function ProjectChat({ rec, iterating, history, onSend, onIterate, onBack, onTheme, onVoice, onFont, onFontScale, onGami, onUndo, canUndo }) {
   const school = rec.data; const T = themeFor(school);
   const [input, setInput] = useState("");
   const [showLevers, setShowLevers] = useState(false);
@@ -3856,6 +3864,12 @@ function ProjectChat({ rec, iterating, history, onSend, onIterate, onBack, onThe
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}><span style={{ fontSize: 10, color: B.muted, width: 46 }}>Theme</span>{Object.keys(THEMES).map(k => <button key={k} onClick={() => onTheme(k)} title={THEMES[k].label} style={{ width: 22, height: 22, borderRadius: "50%", border: school.theme === k ? `2px solid ${B.white}` : `1px solid ${B.borderMid}`, background: THEMES[k].p, cursor: "pointer" }} />)}</div>
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}><span style={{ fontSize: 10, color: B.muted, width: 46 }}>Voice</span><select value={school.voicePreset || "sage"} onChange={e => onVoice(e.target.value)} style={sel}>{["sage", "drill", "socratic", "scientist", "storyteller", "trickster"].map(v => <option key={v} value={v}>{v[0].toUpperCase() + v.slice(1)}</option>)}{school.voicePreset === "custom" && <option value="custom">Custom</option>}</select></div>
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}><span style={{ fontSize: 10, color: B.muted, width: 46 }}>Font</span><select value={school.font || "inter"} onChange={e => onFont(e.target.value)} style={sel}>{Object.entries(FONTS).map(([k, f]) => <option key={k} value={k}>{f.label}</option>)}</select></div>
+            {onFontScale && <div style={{ display: "flex", gap: 6, alignItems: "center" }}><span style={{ fontSize: 10, color: B.muted, width: 46 }}>Size</span>
+              <button onClick={() => onFontScale((school.fontScale || 1) - 0.1)} title="Smaller" style={{ width: 26, height: 24, borderRadius: 7, border: `1px solid ${B.borderMid}`, background: "none", color: B.mutedMid, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>A−</button>
+              <span style={{ fontSize: 11, color: B.mutedMid, minWidth: 36, textAlign: "center" }}>{Math.round((school.fontScale || 1) * 100)}%</span>
+              <button onClick={() => onFontScale((school.fontScale || 1) + 0.1)} title="Bigger" style={{ width: 26, height: 24, borderRadius: 7, border: `1px solid ${B.borderMid}`, background: "none", color: B.white, cursor: "pointer", fontFamily: "inherit", fontSize: 14, fontWeight: 700 }}>A+</button>
+              {(school.fontScale && school.fontScale !== 1) ? <button onClick={() => onFontScale(1)} style={{ fontSize: 10, background: "none", border: "none", color: B.muted, cursor: "pointer", fontFamily: "inherit" }}>reset</button> : null}
+            </div>}
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}><span style={{ fontSize: 10, color: B.muted, width: 46 }}>Game</span><select value={school.gamification?.preset || "none"} onChange={e => onGami(e.target.value)} style={sel}>{Object.values(GAMI).map(g => <option key={g.id} value={g.id}>{g.name}</option>)}</select></div>
             <button onClick={() => onIterate("Unlock all lessons")} style={{ ...sel, cursor: "pointer", textAlign: "center", color: "#A78BFA" }}>🔓 Unlock all lessons</button>
           </div>
@@ -4115,7 +4129,7 @@ export default function Senseito() {
   function applyDesign(rec, d) {
     if (!d || typeof d !== "object") return false;
     const cur = rec.data; const patch = {};
-    for (const k of ["theme", "skin", "density", "font", "cover"]) if (k in d) patch[k] = d[k];
+    for (const k of ["theme", "skin", "density", "font", "fontScale", "cover", "coverPos"]) if (k in d) patch[k] = d[k];
     if ("palette" in d) patch.palette = d.palette === null ? undefined : { ...(cur.palette || {}), ...(d.palette || {}) };
     if ("hero" in d) patch.hero = d.hero === null ? undefined : { ...(cur.hero || {}), ...(d.hero || {}) };
     if ("overlay" in d) patch.overlay = d.overlay;
@@ -4150,6 +4164,7 @@ export default function Senseito() {
   }
   function lvTheme(k) { if (!active) return; updateSchool(active.id, { data: { ...active.data, theme: k } }); showAToast(`✓ Theme: ${THEMES[k]?.label || k}`); }
   function lvFont(fk) { if (!active) return; updateSchool(active.id, { data: { ...active.data, font: fk } }); showAToast(`✓ Font: ${FONTS[fk]?.label || fk}`); }
+  function lvFontScale(n) { if (!active) return; const v = Math.min(1.4, Math.max(0.8, Math.round((n) * 100) / 100)); updateSchool(active.id, { data: { ...active.data, fontScale: v } }); showAToast(`✓ Text size: ${Math.round(v * 100)}%`); }
   function lvVoice(vp) { if (!active) return; updateSchool(active.id, { data: composeSchool({ ...contentOnly(active.data), voicePreset: vp, systemVoice: undefined, theme: active.data.theme }, active.data.knowledgeDNA) }); showAToast(`✓ Voice: ${vp[0].toUpperCase() + vp.slice(1)}`); }
   function lvGami(gid) { if (!active) return; updateSchool(active.id, { data: composeSchool({ ...contentOnly(active.data), gamiPreset: gid, theme: active.data.theme }, active.data.knowledgeDNA) }); showAToast(`✓ ${GAMI[gid]?.name || gid}`); }
 
@@ -4193,7 +4208,7 @@ export default function Senseito() {
         </div>
         {active ? (
           <Boundary resetKey={view} fallback={() => <div style={{ flex: 1, padding: 16, fontSize: 12, color: B.muted }}>Chat hit an error. <button onClick={() => setView("home")} style={{ background: "none", border: "none", color: "#A78BFA", cursor: "pointer", fontFamily: "inherit", fontSize: 12 }}>← Back to schools</button></div>}>
-            <ProjectChat rec={active} iterating={iterating} history={iterHistory} onSend={chatSend} onIterate={applyIterate} onBack={() => { setView("home"); setSideOpen(false); }} onTheme={lvTheme} onVoice={lvVoice} onFont={lvFont} onGami={lvGami} onUndo={undoEdit} canUndo={(versions[active.id]?.length || 0) > 0} />
+            <ProjectChat rec={active} iterating={iterating} history={iterHistory} onSend={chatSend} onIterate={applyIterate} onBack={() => { setView("home"); setSideOpen(false); }} onTheme={lvTheme} onVoice={lvVoice} onFont={lvFont} onFontScale={lvFontScale} onGami={lvGami} onUndo={undoEdit} canUndo={(versions[active.id]?.length || 0) > 0} />
           </Boundary>
         ) : (
         <div style={{ flex: 1, overflowY: "auto", padding: "12px 10px" }}>
