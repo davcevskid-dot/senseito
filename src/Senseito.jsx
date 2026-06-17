@@ -94,6 +94,38 @@ const THEMES = {
   cyan: { p: "#0891B2", pg: "rgba(8,145,178,0.18)", ps: "rgba(8,145,178,0.09)", a: "#22D3EE", as_: "rgba(34,211,238,0.12)", hi: "#A5F3FC", ba: "rgba(8,145,178,0.4)", gr: "linear-gradient(135deg,rgba(8,145,178,0.22) 0%,rgba(34,211,238,0.08) 100%)", label: "Sanctuary" },
 };
 
+// ── Color utilities (custom palettes + Overseer contrast guardrail) ──
+const HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
+function hexToRgbArr(hex = "") {
+  let h = hex.replace("#", "");
+  if (h.length === 3) h = h.split("").map(c => c + c).join("");
+  return [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16) || 0);
+}
+function hexA(hex, a) { const [r, g, b] = hexToRgbArr(hex); return `rgba(${r},${g},${b},${a})`; }
+function relLum(hex) {
+  const [r, g, b] = hexToRgbArr(hex).map(v => { const s = v / 255; return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4); });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+function contrastRatio(a, b) { const l1 = relLum(a), l2 = relLum(b); const hi = Math.max(l1, l2), lo = Math.min(l1, l2); return (hi + 0.05) / (lo + 0.05); }
+
+// Resolve a school's live theme: a base preset OPTIONALLY overridden by a fully
+// custom palette (school.palette) — arbitrary brand colors + gradients. Derived
+// alpha tokens are computed from base hex so the AI only supplies p/a/hi.
+function themeFor(school) {
+  const base = THEMES[school?.theme] || THEMES.violet;
+  const T = { ...base, grad: `linear-gradient(135deg,${base.p},${base.a})` };
+  const pal = school?.palette;
+  if (pal && typeof pal === "object") {
+    if (HEX_RE.test(pal.p || "")) { T.p = pal.p; T.pg = hexA(pal.p, 0.18); T.ps = hexA(pal.p, 0.09); T.ba = hexA(pal.p, 0.4); }
+    if (HEX_RE.test(pal.a || "")) { T.a = pal.a; T.as_ = hexA(pal.a, 0.12); }
+    if (HEX_RE.test(pal.hi || "")) T.hi = pal.hi;
+    T.gr = (typeof pal.gr === "string" && pal.gr) || `linear-gradient(135deg,${hexA(T.p, 0.22)} 0%,${hexA(T.a, 0.08)} 100%)`;
+    T.grad = (typeof pal.grad === "string" && pal.grad) || `linear-gradient(135deg,${T.p},${T.a})`;
+    if (typeof pal.heroGrad === "string" && pal.heroGrad) T.heroGrad = pal.heroGrad; // optional banner-background gradient
+  }
+  return T;
+}
+
 // Output font presets the creator can pick (applies to whole school, incl. published view).
 const FONTS = {
   inter:   { label: "Inter (default)", stack: "'Inter',-apple-system,sans-serif" },
@@ -515,7 +547,8 @@ BLOCKS: keep each lesson's existing "blockTypes" unless the instruction changes 
 Allowed block types per learning path:
 ${PATH_GUIDE}
 DESIGN FIELDS (Generative UI — set these on the school object when the instruction is about look & feel; keep all other fields intact):
-- "theme": one of ${Object.keys(THEMES).join(", ")} — overall accent color/mood.
+- "theme": one of ${Object.keys(THEMES).join(", ")} — overall accent color/mood (the base preset).
+- "palette": FULL custom colors — overrides the preset. Object with any of: "p" (primary, hex like "#FF5A1F"), "a" (accent/secondary hex), "hi" (highlight hex), "gr" (a soft background gradient CSS string), "grad" (a strong button/FAB gradient CSS string e.g. "linear-gradient(135deg,#FF5A1F,#FFB72B)"), "heroGrad" (a gradient CSS string used as the hero banner background — keep it DARK/saturated since light text sits on it). Use this when the user names specific colors or asks for a gradient ("make the primary teal", "add an orange→pink gradient on the hero"). Supply hex values for p/a/hi; the app derives the lighter/translucent shades. To reset to a preset, set "palette": null. Don't worry about perfect contrast — the Overseer flags low-contrast picks for the user to confirm.
 - "skin": one of aurora, minimal, zen, bold, editorial, playful — banner/card visual style.
 - "density": "compact" | "cozy" | "spacious" — vertical spacing between sections.
 - "cover": an https image URL to show as a hero cover banner (use a real, stable Unsplash-style URL only if the user supplies or clearly wants one; otherwise omit). To remove a cover, set "cover": "".
@@ -564,11 +597,26 @@ function schoolSummary(school) {
 const CHAT_SYS = (school) => `You are the Senseito build assistant for the project "${school.name}". You know it fully:
 ${schoolSummary(school)}
 Available block types: ${ALL_BLOCKS.join(", ")}.
-The creator chats with you to shape this project. Reply in JSON ONLY: { "reply": "<conversational reply, under 90 words>", "action": <null OR ONE precise one-line edit instruction for the school editor> }.
-- Question / discussion / vague ask → give a sharp, specific answer grounded in THIS project; if you need clarity, ask ONE question; action = null.
-- Clear directive (add/remove/change/expand something) → set "action" to a precise one-line instruction the editor can execute, and a short "reply" confirming it.
-- "How can I improve this?" → suggest 2-3 concrete ideas in the reply (action = null) so they can pick.
-Be concrete about this exact project's sections, lessons, dashboards and tools.`;
+The creator chats with you to shape this project. Reply in JSON ONLY:
+{ "reply": "<conversational reply, under 90 words>", "action": <null OR one precise one-line CONTENT/STRUCTURE edit instruction>, "design": <null OR an object that patches VISUAL/LAYOUT fields directly> }
+
+DECIDE which of three modes this message is:
+1) JUST TALKING — a question, brainstorming, asking your opinion/advice, or thinking out loud ("what do you think of…", "should I…", "how would you design…", "explain…"). Then reply helpfully and set BOTH action and design to null. DO NOT edit the school. If their wish is ambiguous, ASK ONE clarifying question in the reply and keep action/design null — wait for their answer before changing anything.
+2) DESIGN / LAYOUT change — they want to change how it LOOKS or is ARRANGED (colors, gradient, theme, font, spacing/density, cover image, hero title/tagline/description, a floating chat bubble, which sections exist or their order/columns, "just one chat in the middle, no title", etc.). Put the change in "design" (action = null). NEVER turn a design request into a learning activity/block. "add a cover" = a hero cover image, NOT a photo-upload activity.
+3) CONTENT / STRUCTURE change — add/remove/rewrite lessons, activities, bricks, dashboards, tools, copy. Put a precise one-line instruction in "action" (design = null).
+
+"design" object — include ONLY the keys you're changing:
+- "theme": one of ${Object.keys(THEMES).join(", ")}
+- "palette": custom colors, any of { "p":"#hex" (primary), "a":"#hex" (accent), "hi":"#hex" (highlight), "grad":"linear-gradient(...)" (button/FAB), "heroGrad":"linear-gradient(...)" (hero background, keep it dark) }. Set "palette": null to reset to the preset. Use this whenever they name colors or ask for a gradient.
+- "skin": one of ${SKIN_KEYS.join(", ")}
+- "density": "compact" | "cozy" | "spacious"
+- "font": one of ${Object.keys(FONTS).join(", ")}
+- "cover": an https image URL for a hero banner, or "" to remove.
+- "hero": { "emoji":false, "tagline":false, "description":false, "off":true } — set a key false to hide that piece; "off":true = minimal title-only header. (For "just a chat, no title/description" set hero.off true.)
+- "overlay": { "type":"mentorFab", "greeting":"<short>" } to add a floating chat bubble, or null to remove.
+- "layout": one of ${Object.keys(LAYOUTS).join(", ")} (only for a wholesale re-arrange into a known shape).
+Don't invent image URLs — if they want a cover but gave no link, ASK for one (mode 1) instead of guessing.
+Be concrete about THIS project's sections, lessons, dashboards and tools.`;
 
 function conceptLabelOf(school, id) { return (school?.concepts || []).find(c => c.id === id)?.label || id; }
 // Turn the per-learner bus into a short context line the mentor/bricks can use.
@@ -809,6 +857,14 @@ function normalizeSections(content) {
 // ─────────────────────────────────────────────────────────────
 function lintSchool(school) {
   const out = [];
+  // Contrast guardrail for custom palettes (runs even without a concept graph).
+  const pal = school?.palette;
+  if (pal && typeof pal === "object") {
+    if (HEX_RE.test(pal.p || "") && contrastRatio("#FFFFFF", pal.p) < 3.0) // WCAG AA large/bold-text threshold; buttons are 13px bold
+      out.push({ level: "warn", msg: `Your primary color ${pal.p} is light — white button text on it may be hard to read.`, fix: `Darken the custom primary color so white button text stays clearly legible (keep the same hue, use a deeper shade).` });
+    if (HEX_RE.test(pal.p || "") && HEX_RE.test(pal.a || "") && contrastRatio(pal.p, pal.a) < 1.3)
+      out.push({ level: "info", msg: `Your primary (${pal.p}) and accent (${pal.a}) colors are nearly identical, so accents won't stand out.`, fix: `Pick an accent color that's clearly distinct from the primary.` });
+  }
   const concepts = school?.concepts || [];
   if (!concepts.length) return out;
   const byId = {}; concepts.forEach(c => { byId[c.id] = c; });
@@ -2199,7 +2255,7 @@ function MentorFab({ school, bus, T }) {
     setLoading(false);
   }
   return (<>
-    <button onClick={() => setOpen(o => !o)} title={`Chat with ${school.mentor?.name || "your mentor"}`} style={{ position: "fixed", bottom: 20, right: 20, zIndex: 140, width: 56, height: 56, borderRadius: "50%", background: `linear-gradient(135deg,${T.p},${T.p}CC)`, border: "none", color: "white", fontSize: 22, cursor: "pointer", boxShadow: `0 8px 30px ${T.pg}` }}>{open ? "✕" : "💬"}</button>
+    <button onClick={() => setOpen(o => !o)} title={`Chat with ${school.mentor?.name || "your mentor"}`} style={{ position: "fixed", bottom: 20, right: 20, zIndex: 140, width: 56, height: 56, borderRadius: "50%", background: T.grad, border: "none", color: "white", fontSize: 22, cursor: "pointer", boxShadow: `0 8px 30px ${T.pg}` }}>{open ? "✕" : "💬"}</button>
     {open && (
       <div style={{ position: "fixed", bottom: 86, right: 20, zIndex: 140, width: 340, maxWidth: "92vw", height: 460, maxHeight: "72vh", background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 16, display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 20px 60px rgba(0,0,0,0.5)", animation: "fadeUp 0.2s ease" }}>
         <div style={{ padding: "12px 16px", borderBottom: `1px solid ${B.border}`, background: B.surface2, fontSize: 13, fontWeight: 700, color: B.white }}>🎓 {school.mentor?.name || "Mentor"}</div>
@@ -2627,7 +2683,7 @@ function IteratePanel({ school, history, loading, onApply, onTheme, onGami, onVo
 // ─────────────────────────────────────────────────────────────
 function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, publicBase, token, onSetSlug, onIterate, iterating = false }) {
   const school = rec.data;
-  const T = THEMES[school.theme] || THEMES.violet;
+  const T = themeFor(school);
   const sk = skinCfg(school.skin, T);
   const hero = school.hero || {}; // { emoji?, tagline?, description?, off? } — false hides; cover via school.cover
   const dens = ({ compact: 11, cozy: 18, spacious: 28 })[school.density] || 18; // vertical rhythm between sections
@@ -2877,7 +2933,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
           {/* Banner — varies by the school's visual skin */}
           <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: sk.radius, overflow: "hidden", animation: "fadeUp 0.5s ease" }}>
             {school.cover && <img src={school.cover} alt="" style={{ width: "100%", height: 170, objectFit: "cover", display: "block" }} />}
-            <div style={{ padding: sk.align === "center" ? "34px 28px 26px" : "30px 28px 22px", background: sk.top, borderBottom: `1px solid ${B.border}`, textAlign: sk.align, position: "relative" }}>
+            <div style={{ padding: sk.align === "center" ? "34px 28px 26px" : "30px 28px 22px", background: T.heroGrad || sk.top, borderBottom: `1px solid ${B.border}`, textAlign: sk.align, position: "relative" }}>
               {sk.accentBar && <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 4, background: `linear-gradient(90deg,${T.p},${T.a})` }} />}
               {hero.emoji !== false && !hero.off && <div style={{ fontSize: sk.emoji, marginBottom: 10 }}>{school.emoji || "🏫"}</div>}
               <div style={{ fontFamily: sk.font, fontSize: "clamp(20px,4vw,32px)", fontWeight: 700, letterSpacing: sk.font.includes("Lora") ? 0 : -1, color: sk.onColor ? "#fff" : B.white, marginBottom: 6 }}><EditableText value={school.name} readOnly={readOnly} onSave={v => onUpdate({ data: { ...school, name: v } })} /></div>
@@ -3108,7 +3164,7 @@ function Home({ onCreated }) {
           <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.5, color: B.muted, marginBottom: 12, textAlign: "center" }}>Or open a ready-made school — instantly, free</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))", gap: 12 }}>
             {EXAMPLE_SCHOOLS.map((ex, i) => {
-              const ET = THEMES[ex.theme] || THEMES.violet;
+              const ET = themeFor(ex);
               return (
                 <button key={i} onClick={() => onCreated(composeSchool(ex))} style={{ textAlign: "left", background: ET.gr, border: `1px solid ${ET.ba}`, borderRadius: 16, padding: "16px 16px", cursor: "pointer", fontFamily: "inherit", animation: "fadeUp 0.5s ease backwards", animationDelay: `${i * 80}ms`, transition: "transform 0.15s" }}
                   onMouseEnter={e => e.currentTarget.style.transform = "translateY(-3px)"} onMouseLeave={e => e.currentTarget.style.transform = "none"}>
@@ -3325,7 +3381,7 @@ function PublicSchool({ slug }) {
   );
 
   const signIn = () => { const redirect = encodeURIComponent(window.location.href.split("#")[0]); window.location.href = `${SUPA_URL}/auth/v1/authorize?provider=google&redirect_to=${redirect}`; };
-  const T = THEMES[rec.data?.theme] || THEMES.violet;
+  const T = themeFor(rec.data);
   const merged = { ...rec, ...localState };
   return (
     <div className={mode === "light" ? "light" : undefined} style={{ background: B.bg, minHeight: "100vh", color: B.white, fontFamily: fontStack(rec.data) }}>
@@ -3352,7 +3408,7 @@ function PublicSchool({ slug }) {
 // message iterates the school; quick "levers" are zero-token tweaks.
 // ─────────────────────────────────────────────────────────────
 function ProjectChat({ rec, iterating, history, onSend, onIterate, onBack, onTheme, onVoice, onFont, onGami, onUndo, canUndo }) {
-  const school = rec.data; const T = THEMES[school.theme] || THEMES.violet;
+  const school = rec.data; const T = themeFor(school);
   const [input, setInput] = useState("");
   const [showLevers, setShowLevers] = useState(false);
   const [showSugg, setShowSugg] = useState(false);
@@ -3622,7 +3678,20 @@ export default function Senseito() {
     showAToast(r.ok ? `✓ ${r.msg}` : `✕ ${r.msg}`, r.ok ? "ok" : "err");
     setIterating(false);
   }
-  // Conversational chat: converse with full project knowledge OR execute a clear directive.
+  // Apply a VISUAL/LAYOUT patch directly — never re-authors content (fast, safe).
+  function applyDesign(rec, d) {
+    if (!d || typeof d !== "object") return false;
+    const cur = rec.data; const patch = {};
+    for (const k of ["theme", "skin", "density", "font", "cover"]) if (k in d) patch[k] = d[k];
+    if ("palette" in d) patch.palette = d.palette === null ? undefined : { ...(cur.palette || {}), ...(d.palette || {}) };
+    if ("hero" in d) patch.hero = d.hero === null ? undefined : { ...(cur.hero || {}), ...(d.hero || {}) };
+    if ("overlay" in d) patch.overlay = d.overlay;
+    if (!Object.keys(patch).length) return false;
+    pushVersion(rec.id, cur); // snapshot for Undo
+    updateSchool(rec.id, { data: { ...cur, ...patch } });
+    return true;
+  }
+  // Conversational chat: converse / advise, OR apply a design patch, OR execute a content edit.
   async function chatSend(text) {
     const rec = active; if (!text || iterating || !rec) return;
     pushMsg({ role: "user", content: text }); setIterating(true);
@@ -3630,6 +3699,14 @@ export default function Senseito() {
       const thread = iterHistory.filter(m => m.role === "user" || m.role === "assistant").slice(-8).map(m => ({ role: m.role, content: m.content }));
       const out = await apiJSON(CHAT_SYS(rec.data), [...thread, { role: "user", content: text }], 800, "sonnet");
       if (out.reply) pushMsg({ role: "assistant", content: out.reply });
+      const d = out.design && typeof out.design === "object" ? out.design : null;
+      if (d) {
+        if (applyDesign(rec, d)) { pushMsg({ role: "assistant", content: "✓ Design updated." }); showAToast("✓ Design updated", "ok"); }
+        if (d.layout && LAYOUTS[d.layout]) {
+          const r = await coreEdit(rec, `Re-arrange this school into the "${d.layout}" layout (${LAYOUTS[d.layout].kinds.join(" + ")}), preserving all existing lesson and dashboard content.`);
+          showAToast(r.ok ? "✓ Layout updated" : `✕ ${r.msg}`, r.ok ? "ok" : "err");
+        }
+      }
       if (out.action && typeof out.action === "string" && out.action.trim()) {
         const r = await coreEdit(rec, out.action.trim());
         pushMsg({ role: "assistant", content: r.ok ? "✓ Applied." : `✕ ${r.msg}` });
@@ -3690,7 +3767,7 @@ export default function Senseito() {
           <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.5, color: B.muted, padding: "0 8px", marginBottom: 8 }}>Your Schools</div>
           {schools.length === 0 && <div style={{ fontSize: 12, color: B.muted, padding: "14px 8px", lineHeight: 1.6 }}>No schools yet.<br />Build your first one →</div>}
           {schools.map(r => {
-            const T = THEMES[r.data.theme] || THEMES.violet;
+            const T = themeFor(r.data);
             const total = r.data.semesters?.reduce((a, s) => a + (s.lessons?.length || 0), 0) || 0;
             const done = Object.values(r.progress || {}).filter(v => v === "passed").length;
             const isActive = view === r.id;
