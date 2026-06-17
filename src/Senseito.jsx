@@ -616,9 +616,9 @@ REASON: one sentence`;
 // Compact description of the whole project for the build assistant.
 function schoolSummary(school) {
   const secs = getSections(school).map(s => `${s.kind}:"${s.title}"`).join(", ");
-  const lessons = (school.semesters || []).flatMap(s => (s.lessons || []).map(l => `#${l.number} ${l.title} [${(l.blocks || []).map(b => b.type).join("/") || "—"}]`)).join("; ");
+  const sems = (school.semesters || []).map((s, i) => `Semester/Part ${s.number || i + 1}: "${s.title}" → ${(s.lessons || []).map(l => `#${l.number} ${l.title} [${(l.blocks || []).map(b => b.type).join("/") || "—"}]`).join("; ") || "no lessons"}`).join("\n  ");
   const dash = (school.sections || []).filter(s => s.kind === "dashboard").map(s => `"${s.title}" [${(s.blocks || []).map(b => b.type).join("/")}]`).join("; ");
-  return `Name: ${school.name}. Subject/path: ${school.learningPath || "mixed"}. Layout sections: ${secs}. Lessons: ${lessons || "none"}. Dashboards: ${dash || "none"}. Mentor: ${school.mentor?.name || "—"} (${school.voicePreset || "sage"} voice). Theme: ${school.theme}, skin: ${school.skin || "aurora"}.`;
+  return `Name: ${school.name}. Subject/path: ${school.learningPath || "mixed"}. Layout sections: ${secs}.\nSemesters/Parts (${(school.semesters || []).length}):\n  ${sems || "none"}\nDashboards: ${dash || "none"}. Mentor: ${school.mentor?.name || "—"} (${school.voicePreset || "sage"} voice). Theme: ${school.theme}, skin: ${school.skin || "aurora"}.`;
 }
 // The build assistant: knows the full project; converses OR emits a precise edit directive.
 const CHAT_SYS = (school) => `You are the Senseito build assistant for the project "${school.name}". You know it fully:
@@ -916,36 +916,55 @@ const SEMANTIC_SYS = `You are the Senseito Overseer reviewing a learning experie
 2) TONE / CONSISTENCY — lessons that clash with the mentor's stated voice, or jarring jumps in difficulty or style.
 You receive a compact outline. Return ONLY JSON: {"issues":[{"level":"info"|"warn","msg":"<=22 words, specific, name the lesson(s)","fix":"<one-line edit instruction the editor can apply>"}]}. At most 3 issues, highest-value first. If it's genuinely clean, return {"issues":[]}. Be conservative — only flag clear, real problems, never nitpicks.`;
 
+const STOPWORDS = new Set(["the", "a", "an", "and", "or", "of", "to", "in", "on", "for", "with", "your", "you", "its", "it", "done", "right", "&", "—", "-", "is", "are", "how", "what", "why"]);
+function keyWords(s) { return String(s || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(w => w.length > 3 && !STOPWORDS.has(w)); }
+// A lesson "teaches" a concept if a block is tagged with it OR the lesson's
+// title/concept text mentions it (label substring, or ≥half its key words).
+function lessonTeaches(lesson, concept) {
+  const ids = new Set((lesson.blocks || []).flatMap(b => b.data?.concepts || []));
+  if (ids.has(concept.id)) return true;
+  const text = `${lesson.title || ""} ${lesson.concept || ""}`.toLowerCase();
+  const label = String(concept.label || "").toLowerCase();
+  if (label && text.includes(label)) return true;
+  const kw = keyWords(concept.label);
+  if (!kw.length) return false;
+  const hit = kw.filter(w => text.includes(w)).length;
+  return hit / kw.length >= 0.5;
+}
 function lintSchool(school) {
   const out = [];
-  // Contrast guardrail for custom palettes (runs even without a concept graph).
+  // ── Design / contrast guardrails (run even without a concept graph) ──
   const pal = school?.palette;
+  const DARK_SURFACE = "#0F0F1C", LIGHT_SURFACE = "#FFFFFF";
   if (pal && typeof pal === "object") {
     if (HEX_RE.test(pal.p || "") && contrastRatio("#FFFFFF", pal.p) < 3.0) // WCAG AA large/bold-text threshold; buttons are 13px bold
       out.push({ level: "warn", msg: `Your primary color ${pal.p} is light — white button text on it may be hard to read.`, fix: `Darken the custom primary color so white button text stays clearly legible (keep the same hue, use a deeper shade).` });
     if (HEX_RE.test(pal.p || "") && HEX_RE.test(pal.a || "") && contrastRatio(pal.p, pal.a) < 1.3)
       out.push({ level: "info", msg: `Your primary (${pal.p}) and accent (${pal.a}) colors are nearly identical, so accents won't stand out.`, fix: `Pick an accent color that's clearly distinct from the primary.` });
+    // Accent/highlight text legibility on the page surfaces (catches "black on black").
+    [["highlight", pal.hi], ["accent", pal.a]].forEach(([nm, hex]) => {
+      if (HEX_RE.test(hex || "") && contrastRatio(hex, DARK_SURFACE) < 2.0 && contrastRatio(hex, LIGHT_SURFACE) < 2.0)
+        out.push({ level: "warn", msg: `Your ${nm} color ${hex} barely contrasts with the page — text in it will be very hard to read.`, fix: `Choose a ${nm} color with stronger contrast against the background.` });
+    });
   }
   const concepts = school?.concepts || [];
-  if (!concepts.length) return out;
-  const byId = {}; concepts.forEach(c => { byId[c.id] = c; });
   const lessons = (school.semesters || []).flatMap(s => s.lessons || []);
-  if (!lessons.length) return out;
+  if (!concepts.length || !lessons.length) return out.slice(0, 7);
+  const byId = {}; concepts.forEach(c => { byId[c.id] = c; });
+  // First lesson index that teaches each concept — TEXT-AWARE, not just block tags.
   const firstTaught = {};
-  lessons.forEach((l, idx) => (l.blocks || []).forEach(b => (b.data?.concepts || []).forEach(cid => { if (firstTaught[cid] === undefined) firstTaught[cid] = idx; })));
-  // Prerequisite-order violations.
+  concepts.forEach(c => { const idx = lessons.findIndex(l => lessonTeaches(l, c)); if (idx >= 0) firstTaught[c.id] = idx; });
+  // Prerequisite-order violations — only when BOTH ends are actually taught somewhere.
   lessons.forEach((l, idx) => {
-    const used = new Set((l.blocks || []).flatMap(b => b.data?.concepts || []));
-    used.forEach(cid => (byId[cid]?.prereq || []).forEach(pid => {
+    concepts.filter(c => firstTaught[c.id] === idx).forEach(c => (c.prereq || []).forEach(pid => {
       const pAt = firstTaught[pid];
-      if (pAt !== undefined && pAt > idx) out.push({ level: "warn", msg: `Lesson ${l.number} "${l.title}" uses “${byId[cid]?.label || cid}”, but its prerequisite “${byId[pid]?.label || pid}” isn't taught until Lesson ${lessons[pAt]?.number}.`, fix: `Add a short intro to "${byId[pid]?.label || pid}" in Lesson ${l.number}, or move it earlier.` });
+      if (pAt !== undefined && pAt > idx) out.push({ level: "warn", msg: `Lesson ${l.number} “${l.title}” builds on “${byId[pid]?.label || pid}”, which isn't introduced until Lesson ${lessons[pAt]?.number}.`, fix: `Briefly introduce "${byId[pid]?.label || pid}" before Lesson ${l.number}, or move that lesson earlier.` });
     }));
   });
-  // Concepts in the map that nothing teaches.
-  concepts.forEach(c => { if (firstTaught[c.id] === undefined) out.push({ level: "info", msg: `“${c.label}” is in your knowledge map but no activity covers it yet.`, fix: `Add an activity that teaches "${c.label}".` }); });
-  // dedupe by msg, cap.
+  // Concepts in the map that NOTHING (tag or text) covers.
+  concepts.forEach(c => { if (firstTaught[c.id] === undefined) out.push({ level: "info", msg: `“${c.label}” is in your knowledge map but no lesson seems to cover it yet.`, fix: `Add a lesson or activity that teaches "${c.label}".` }); });
   const seen = new Set();
-  return out.filter(w => { if (seen.has(w.msg)) return false; seen.add(w.msg); return true; }).slice(0, 6);
+  return out.filter(w => { if (seen.has(w.msg)) return false; seen.add(w.msg); return true; }).slice(0, 7);
 }
 
 const DNA_THRESHOLD = 3000;
@@ -3066,6 +3085,12 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
     if (!title) return;
     onUpdate({ data: { ...school, sections: SECTIONS.map(s => ({ ...s })).map(s => s.id === id ? { ...s, title } : s) } });
   }
+  function deleteSemester(si) {
+    const sem = school.semesters?.[si]; if (!sem) return;
+    if (!window.confirm(`Delete "${sem.title}" and its ${sem.lessons?.length || 0} lesson(s)? This can be undone with ↩ Undo.`)) return;
+    onUpdate({ data: { ...school, semesters: school.semesters.filter((_, i) => i !== si) } });
+  }
+  const setSemField = (si, field, v) => onUpdate({ data: { ...school, semesters: school.semesters.map((s, i) => i === si ? { ...s, [field]: v } : s) } });
   const [activeLesson, setActiveLesson] = useState(null);
   const [editingLesson, setEditingLesson] = useState(null);
   const [buildingTool, setBuildingTool] = useState(null);
@@ -3359,10 +3384,13 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, padding: "2px 4px" }}>
                   <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
                     <span style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 2, color: T.p }}>Part {sem.number || si + 1}</span>
-                    <span style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 18, fontWeight: 700, color: B.white, letterSpacing: -0.3 }}><EditableText value={sem.title} readOnly={readOnly} onSave={v => onUpdate({ data: { ...school, semesters: school.semesters.map((s, i) => i === si ? { ...s, title: v } : s) } })} /></span>
-                    {sem.theme && <span style={{ fontSize: 12, color: B.muted }}>· {sem.theme}</span>}
+                    <span style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 18, fontWeight: 700, color: B.white, letterSpacing: -0.3 }}><EditableText value={sem.title} readOnly={readOnly} onSave={v => setSemField(si, "title", v)} /></span>
+                    {(sem.theme || !readOnly) && <span style={{ fontSize: 12, color: B.muted }}>· <EditableText value={sem.theme} readOnly={readOnly} placeholder="describe this part…" onSave={v => setSemField(si, "theme", v)} /></span>}
                   </div>
-                  {sem.weeks && <div style={{ fontSize: 11, color: T.a, fontWeight: 700, background: T.as_, border: `1px solid ${T.ba}`, borderRadius: 100, padding: "4px 11px" }}>{sem.weeks}</div>}
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    {sem.weeks && <div style={{ fontSize: 11, color: T.a, fontWeight: 700, background: T.as_, border: `1px solid ${T.ba}`, borderRadius: 100, padding: "4px 11px" }}>{/^\d+$/.test(String(sem.weeks)) ? `${sem.weeks} weeks` : sem.weeks}</div>}
+                    {!readOnly && <button onClick={() => deleteSemester(si)} title="Delete this part/semester" style={{ background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.3)", borderRadius: 8, color: "#F87171", padding: "4px 9px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit", fontWeight: 700 }}>🗑 Delete part</button>}
+                  </div>
                 </div>
                 {sem.lessons?.map((l, li) => <LessonRow key={li} lesson={l} idx={li} T={T} progress={progress} mentorName={school.mentor?.name} onEnter={setActiveLesson} onEdit={setEditingLesson} onToggleLock={toggleLock} readOnly={readOnly} />)}
               </div>
