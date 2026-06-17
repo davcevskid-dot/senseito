@@ -303,6 +303,7 @@ const BLOCK_META = {
   image_gate:          { label: "Image Gate",          icon: "📷", cat: "Proof" },
   video_gate:          { label: "Video Gate",          icon: "🎬", cat: "Proof" },
   // Information & context
+  review:              { label: "Spaced Review",       icon: "🔁", cat: "Knowledge" },
   reading_plain:       { label: "Reading",             icon: "📄", cat: "Info" },
   video_embed:         { label: "Video Embed",         icon: "▶️", cat: "Info" },
   quiz:                { label: "Quiz",                icon: "❓", cat: "Info" },
@@ -337,6 +338,7 @@ Every block's data MAY include "concepts": [concept ids from the school's concep
 - audio_pitcher: { prompt, criteria }
 - image_gate: { instruction, criteria }
 - video_gate: { instruction }
+- review: { count?:5 } — spaced repetition: auto-resurfaces the learner's weakest concepts (from their mastery) and quizzes recall. No content needed. Great on a dashboard for courses.
 - reading_plain: { content (markdown) }
 - video_embed: { url, title }
 - quiz: { questions:[{q, options:[4], answer (0-3), explain}] (3-6) }
@@ -448,7 +450,7 @@ Decide which SECTIONS this experience needs, based on the subject. Section kinds
 - "mentor": an always-available AI mentor for open questions/coaching.
 - "tools": a place where the learner builds and uses their own interactive tools.
 - "dashboard": an always-on grid of bricks the learner returns to (NOT gated). Perfect for practice-driven subjects — e.g. yoga → pose gallery + breath timer + streak tracker; trading → trade journal + metric tracker; meditation → reflection timer + mood quadrant.
-Pick ONLY the sections that genuinely fit. A yoga/habit/practice experience might be a dashboard + mentor with NO lessons at all; a philosophy course might be lessons + mentor. Honor any structure the creator asked for. Each dashboard section carries its own blockTypes the learner uses directly — these MUST be INTERACTIVE/TRACKING bricks (e.g. habit_checker, heatmap, metric_tracker, macro_tracker, mood_quadrant, reflection_timer, weekly_planner, calculator, flashcard, quiz, video_embed). NEVER put reading_plain or reading in a dashboard — a dashboard is for doing, not reading.
+Pick ONLY the sections that genuinely fit. A yoga/habit/practice experience might be a dashboard + mentor with NO lessons at all; a philosophy course might be lessons + mentor. Honor any structure the creator asked for. Each dashboard section carries its own blockTypes the learner uses directly — these MUST be INTERACTIVE/TRACKING bricks (e.g. habit_checker, heatmap, metric_tracker, macro_tracker, mood_quadrant, reflection_timer, weekly_planner, calculator, flashcard, quiz, video_embed, review). For any course with lessons, a "review" brick on a dashboard is excellent (spaced repetition of weak concepts). NEVER put reading_plain or reading in a dashboard — a dashboard is for doing, not reading.
 
 STEP 3 — PLAN BLOCKS PER LESSON (TYPES ONLY).
 For each lesson choose 1-3 DISTINCT block TYPES (never repeat the same type within a lesson) from the chosen path's ALLOWED list ONLY (never a forbidden one), ordered pedagogically (e.g. reading → practice → check); the LAST should prove mastery. List ONLY the type strings now — their detailed contents are generated later, so keep this plan compact.
@@ -1779,6 +1781,47 @@ function CustomBlock({ data = {}, onOutput, T, disabled, school }) {
 }
 
 // ── BlockRenderer: routes a block to its component ──
+// ── Spaced Review ── (consumes concept mastery from the bus; resurfaces weak concepts)
+function ReviewBlock({ data = {}, onOutput, T, disabled, school, bus }) {
+  const N = data.count || 5;
+  const [queue] = useState(() => {
+    const cs = (school?.concepts || []).map(c => ({ id: c.id, label: c.label, m: bus?.mastery?.[c.id] ?? 0 }));
+    const weak = cs.filter(c => c.m < 0.85).sort((a, b) => a.m - b.m);
+    return (weak.length ? weak : cs).slice(0, N);
+  });
+  const [i, setI] = useState(0); const [q, setQ] = useState(""); const [ans, setAns] = useState(""); const [fb, setFb] = useState("");
+  const [loading, setLoading] = useState(false); const [started, setStarted] = useState(false); const [done, setDone] = useState(false);
+  const cur = queue[i];
+  async function ask() {
+    setLoading(true); setFb(""); setAns("");
+    try { const text = await api(`${blockMentor(school)} Ask ONE short, specific recall question that tests the concept "${cur.label}". Output ONLY the question.`, [{ role: "user", content: "Generate the question." }], 150); setQ(text.trim()); }
+    catch { setQ(`In your own words, explain: ${cur.label}`); }
+    setLoading(false); setStarted(true);
+  }
+  async function grade() {
+    if (!ans.trim()) return; setLoading(true);
+    try { const r = await api(`${blockMentor(school)} Grade the student's answer about "${cur.label}". The question was: "${q}". Reply EXACTLY:\nVERDICT: PASS or NOTYET\nFEEDBACK: one short sentence.`, [{ role: "user", content: ans }], 200); const ok = /VERDICT:\s*PASS/i.test(r); const f = (r.match(/FEEDBACK:\s*([\s\S]*)/i)?.[1] || r).trim(); setFb((ok ? "✓ " : "✗ ") + f); onOutput?.({ type: "review", concept: cur.id, passed: ok }); }
+    catch (e) { setFb("Error: " + e.message); }
+    setLoading(false);
+  }
+  function next() { if (i + 1 >= queue.length) { setDone(true); onOutput?.({ type: "review", passed: true, reviewed: queue.length }); } else { setI(i + 1); setQ(""); setAns(""); setFb(""); setStarted(false); } }
+  if (!queue.length) return <BlockShell type="review" sub="Complete a few activities first — then this resurfaces what you're shakiest on."><div style={{ fontSize: 13, color: B.muted }}>Nothing to review yet.</div></BlockShell>;
+  if (done) return <BlockShell type="review" passed={true} sub="Review complete"><div style={{ fontSize: 13, color: B.white }}>Nice — you reviewed {queue.length} concept{queue.length > 1 ? "s" : ""}. Come back to keep them sharp.</div></BlockShell>;
+  return (<BlockShell type="review" sub={`Spaced review · ${i + 1}/${queue.length} · focusing on your weakest spots`}>
+    <div style={{ marginBottom: 10 }}><span style={{ fontSize: 11, fontWeight: 700, color: T.p, textTransform: "uppercase", letterSpacing: 0.6 }}>{cur.label}</span></div>
+    {!started ? <button onClick={ask} disabled={disabled || loading} style={pBtn(T)}>{loading ? "…" : "Start review →"}</button> : <>
+      <div style={{ background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 10, padding: "11px 14px", fontSize: 14, color: B.white, marginBottom: 10, lineHeight: 1.6 }}>{q}</div>
+      {!fb ? <>
+        <textarea value={ans} onChange={e => setAns(e.target.value)} disabled={disabled} rows={3} placeholder="Answer from memory…" style={{ ...bx.input, fontSize: 13 }} />
+        <button onClick={grade} disabled={!ans.trim() || loading || disabled} style={{ ...pBtn(T), marginTop: 8, opacity: (!ans.trim() || loading) ? 0.5 : 1 }}>{loading ? "Checking…" : "Check"}</button>
+      </> : <>
+        <div style={{ fontSize: 13, color: fb.startsWith("✓") ? "#4ADE80" : "#F87171", marginBottom: 10, lineHeight: 1.6 }}><Markdown text={fb} /></div>
+        <button onClick={next} style={pBtn(T)}>{i + 1 >= queue.length ? "Finish" : "Next →"}</button>
+      </>}
+    </>}
+  </BlockShell>);
+}
+
 const BLOCK_COMPONENTS = {
   flashcard: FlashcardBlock, reading: ReadingBlock, mindmap: MindMapBlock, essay: EssayBlock, debate: DebateBlock,
   code_sandbox: CodeSandboxBlock, terminal: TerminalBlock, sequencer: SequencerBlock,
@@ -1787,7 +1830,7 @@ const BLOCK_COMPONENTS = {
   roleplay: RoleplayBlock, objection_handler: ObjectionHandlerBlock, interview_simulator: InterviewSimulatorBlock, audio_pitcher: AudioPitcherBlock,
   image_gate: ImageGateBlock, video_gate: VideoGateBlock,
   reading_plain: ReadingPlainBlock, video_embed: VideoEmbedBlock, quiz: QuizBlock, calculator: CalculatorBlock,
-  custom: CustomBlock,
+  review: ReviewBlock, custom: CustomBlock,
 };
 function BlockRenderer({ block, onOutput, T, disabled, state, onState, school, bus }) {
   const Comp = BLOCK_COMPONENTS[block?.type];
@@ -2554,7 +2597,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
     if (!output || !output.type) return;
     const cur = rec.toolStates?.__bus || { struggles: [], metrics: {}, mastery: {} };
     const next = { struggles: [...(cur.struggles || [])], metrics: { ...(cur.metrics || {}) }, mastery: { ...(cur.mastery || {}) } };
-    const concepts = (ctx.concepts || []).filter(Boolean);
+    const concepts = (output.concept ? [output.concept] : (ctx.concepts || [])).filter(Boolean);
     if (typeof output.passed === "boolean" && concepts.length) {
       concepts.forEach(cid => { const prev = next.mastery[cid] ?? 0.5; next.mastery[cid] = Math.round((prev * 0.6 + (output.passed ? 1 : 0) * 0.4) * 100) / 100; });
     }
