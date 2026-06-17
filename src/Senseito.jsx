@@ -306,6 +306,7 @@ const BLOCK_META = {
   review:              { label: "Spaced Review",       icon: "🔁", cat: "Knowledge" },
   reading_plain:       { label: "Reading",             icon: "📄", cat: "Info" },
   video_embed:         { label: "Video Embed",         icon: "▶️", cat: "Info" },
+  embed:               { label: "Embed / Resource",    icon: "🔗", cat: "Info" },
   quiz:                { label: "Quiz",                icon: "❓", cat: "Info" },
   calculator:          { label: "Calculator",          icon: "🧮", cat: "Info" },
 };
@@ -341,6 +342,7 @@ Every block's data MAY include "concepts": [concept ids from the school's concep
 - review: { count?:5 } — spaced repetition: auto-resurfaces the learner's weakest concepts (from their mastery) and quizzes recall. No content needed. Great on a dashboard for courses.
 - reading_plain: { content (markdown) }
 - video_embed: { url, title }
+- embed: { url, title, height? } — embeds an external resource (Google Drive file/folder, Google Docs/Sheets/Slides, Figma, a PDF, or any https page). Use this for "connect Google Drive", "attach a doc", "embed a figma", external reference material. If you don't have a real URL, OMIT this block (or leave url empty — it shows a "needs setup" prompt) rather than inventing one.
 - quiz: { questions:[{q, options:[4], answer (0-3), explain}] (3-6) }
 - calculator: numeric → { title, fields:[{label,key}], expression (JS using keys, e.g. "weight/(height*height)"), unit }; OR AI/text → { title, mode:"ai", fields:[{label,key,type:"text"}], rubric (what to compute, e.g. "count the verbs in the sentence") } — use AI mode whenever the answer needs language/judgement, not just arithmetic`;
 
@@ -1741,6 +1743,37 @@ function VideoEmbedBlock({ data = {}, onOutput, T, disabled }) {
   </BlockShell>);
 }
 
+// ── Embed / Resource (Google Drive, Docs, Figma, PDFs, any https) ──
+function EmbedBlock({ data = {}, onOutput, T, disabled }) {
+  const [done, setDone] = useState(false);
+  const url = (data.url || "").trim();
+  function toEmbed(u) {
+    if (!/^https:\/\//i.test(u)) return null; // https only — no http/js/data URIs
+    let m;
+    if ((m = u.match(/drive\.google\.com\/file\/d\/([\w-]+)/))) return `https://drive.google.com/file/d/${m[1]}/preview`;
+    if ((m = u.match(/drive\.google\.com\/drive\/folders\/([\w-]+)/))) return `https://drive.google.com/embeddedfolderview?id=${m[1]}#grid`;
+    if ((m = u.match(/docs\.google\.com\/(document|spreadsheets|presentation)\/d\/([\w-]+)/))) return `https://docs.google.com/${m[1]}/d/${m[2]}/preview`;
+    if (/figma\.com\/(file|design|proto|board)\//i.test(u)) return `https://www.figma.com/embed?embed_host=senseito&url=${encodeURIComponent(u)}`;
+    return u; // generic https resource (PDF / site) — rendered sandboxed
+  }
+  const src = toEmbed(url);
+  if (!src) return (<BlockShell type="embed" sub={data.title}>
+    <div style={{ border: `1px dashed ${B.borderMid}`, borderRadius: 10, padding: "22px 16px", textAlign: "center", color: B.mutedMid, fontSize: 13 }}>
+      🔗 This resource isn’t set up yet.
+      <div style={{ fontSize: 12, color: B.muted, marginTop: 6 }}>Add a Google Drive, Docs, Figma or PDF link via the chat or this brick’s ✨ Tweak.</div>
+    </div>
+  </BlockShell>);
+  return (<BlockShell type="embed" passed={done} sub={data.title}>
+    <div style={{ borderRadius: 10, overflow: "hidden", border: `1px solid ${B.border}`, marginBottom: 10 }}>
+      <iframe title={data.title || "resource"} src={src} sandbox="allow-scripts allow-same-origin allow-popups allow-forms" allowFullScreen style={{ width: "100%", height: data.height || 460, border: "none", display: "block", background: "#fff" }} />
+    </div>
+    <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+      <a href={url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: T.a, textDecoration: "none", fontWeight: 600 }}>Open in new tab ↗</a>
+      {!done && <button onClick={() => { setDone(true); onOutput?.({ type: "embed", viewed: true, passed: true }); }} disabled={disabled} style={pBtn(T)}>Mark reviewed ✓</button>}
+    </div>
+  </BlockShell>);
+}
+
 // ── 27. Quiz ──
 function QuizBlock({ data = {}, onOutput, T, disabled }) {
   const questions = data.questions || []; const [ans, setAns] = useState({});
@@ -1865,7 +1898,7 @@ const BLOCK_COMPONENTS = {
   macro_tracker: MacroTrackerBlock, heatmap: HeatmapBlock, habit_checker: HabitCheckerBlock, metric_tracker: MetricTrackerBlock, weekly_planner: WeeklyPlannerBlock, mood_quadrant: MoodQuadrantBlock,
   roleplay: RoleplayBlock, objection_handler: ObjectionHandlerBlock, interview_simulator: InterviewSimulatorBlock, audio_pitcher: AudioPitcherBlock,
   image_gate: ImageGateBlock, video_gate: VideoGateBlock,
-  reading_plain: ReadingPlainBlock, video_embed: VideoEmbedBlock, quiz: QuizBlock, calculator: CalculatorBlock,
+  reading_plain: ReadingPlainBlock, video_embed: VideoEmbedBlock, embed: EmbedBlock, quiz: QuizBlock, calculator: CalculatorBlock,
   review: ReviewBlock, custom: CustomBlock,
 };
 function BlockRenderer({ block, onOutput, T, disabled, state, onState, school, bus }) {
@@ -2270,6 +2303,7 @@ const PASS_MODE_DESC = {
 function blockFields(type) {
   return ({
     video_embed: [["url", "Video URL (YouTube / Loom)"], ["title", "Title"]],
+    embed: [["url", "Resource URL (Drive, Docs, Figma, PDF…)"], ["title", "Title"]],
     reading_plain: [["content", "Content (markdown)", "area"]],
     reading: [["passage", "Passage", "area"]],
     image_gate: [["instruction", "Instruction"], ["criteria", "Pass criteria"]],
