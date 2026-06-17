@@ -44,7 +44,12 @@ async function apiJSON(system, messages, maxTokens = 4000, model) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data.error) throw new Error(data.error || `Proxy ${res.status}`);
   if (data.json === undefined) throw new Error("No structured output returned");
-  return data.json;
+  let j = data.json;
+  // Unwrap a raw tool_use block if the proxy returned the wrapper instead of its
+  // input (the structured tool is named "return_json" — without this the wrapper's
+  // own keys leak through, e.g. a school named "return_json" with no lessons).
+  if (j && typeof j === "object" && !Array.isArray(j) && j.input && typeof j.input === "object" && (j.type === "tool_use" || j.name === "return_json" || j.name === "json")) j = j.input;
+  return j;
 }
 
 function toApiMessages(msgs) {
@@ -2619,6 +2624,21 @@ function LessonRow({ lesson, idx, T, progress, onEnter, onEdit, onToggleLock, re
   );
 }
 
+// Inline "add a lesson" composer (creator) — type a topic, the editor adds it.
+function AddLessonBar({ onAdd, T, disabled }) {
+  const [open, setOpen] = useState(false); const [text, setText] = useState("");
+  const submit = () => { const t = text.trim(); if (!t) return; onAdd(t); setText(""); setOpen(false); };
+  if (!open) return <button onClick={() => setOpen(true)} disabled={disabled} style={{ width: "100%", background: "none", border: `1px dashed ${B.borderMid}`, borderRadius: 14, color: B.mutedMid, padding: "13px", cursor: "pointer", fontSize: 13.5, fontFamily: "inherit", fontWeight: 700, opacity: disabled ? 0.5 : 1 }}>＋ Add a lesson</button>;
+  return (
+    <div style={{ display: "flex", gap: 8, background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 14, padding: 10 }}>
+      <input autoFocus value={text} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === "Enter") submit(); if (e.key === "Escape") setOpen(false); }} placeholder='What should the new lesson teach? e.g. "Learn about your mind"'
+        style={{ flex: 1, background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 10, color: B.white, fontFamily: "inherit", fontSize: 13, padding: "10px 13px" }} />
+      <button onClick={submit} disabled={!text.trim() || disabled} style={{ ...pBtn(T), opacity: (!text.trim() || disabled) ? 0.5 : 1 }}>{disabled ? "Adding…" : "Add lesson"}</button>
+      <button onClick={() => setOpen(false)} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 10, color: B.mutedMid, padding: "0 12px", cursor: "pointer", fontFamily: "inherit", fontSize: 13 }}>✕</button>
+    </div>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────
 // LESSON EDITOR (creator) — rename, lock, pass logic, edit/delete blocks
 // ─────────────────────────────────────────────────────────────
@@ -3035,6 +3055,17 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
     setTab("mentor"); setAddSecOpen(false);
   }
   const hasKind = (k) => SECTIONS.some(s => s.kind === k);
+  const dragIdx = useRef(null);
+  function reorderSections(from, to) {
+    const arr = SECTIONS.map(s => ({ ...s }));
+    if (from == null || to == null || from === to || from < 0 || to < 0 || from >= arr.length || to >= arr.length) return;
+    const [m] = arr.splice(from, 1); arr.splice(to, 0, m);
+    onUpdate({ data: { ...school, sections: arr } });
+  }
+  function renameSection(id, title) {
+    if (!title) return;
+    onUpdate({ data: { ...school, sections: SECTIONS.map(s => ({ ...s })).map(s => s.id === id ? { ...s, title } : s) } });
+  }
   const [activeLesson, setActiveLesson] = useState(null);
   const [editingLesson, setEditingLesson] = useState(null);
   const [buildingTool, setBuildingTool] = useState(null);
@@ -3266,7 +3297,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
               <div style={{ fontFamily: sk.font, fontSize: "clamp(20px,4vw,32px)", fontWeight: 700, letterSpacing: sk.font.includes("Lora") ? 0 : -1, color: sk.onColor ? "#fff" : B.white, marginBottom: 6 }}><EditableText value={school.name} readOnly={readOnly} onSave={v => onUpdate({ data: { ...school, name: v } })} /></div>
               {sk.rule && !hero.off && <div style={{ width: 48, height: 2, background: T.p, margin: "8px 0 12px" }} />}
               {hero.tagline !== false && !hero.off && <div style={{ fontSize: 14, color: sk.onColor ? "rgba(255,255,255,0.85)" : T.a, fontStyle: sk.font.includes("Lora") ? "normal" : "italic", marginBottom: 12 }}><EditableText value={school.tagline} readOnly={readOnly} onSave={v => onUpdate({ data: { ...school, tagline: v } })} /></div>}
-              {hero.description !== false && !hero.off && <div style={{ fontSize: 13, color: sk.onColor ? "rgba(255,255,255,0.78)" : B.mutedMid, lineHeight: 1.7, maxWidth: 560, margin: sk.align === "center" ? "0 auto" : 0 }}>{typeof school.description === "string" ? school.description : ""}</div>}
+              {hero.description !== false && !hero.off && <div style={{ fontSize: 13, color: sk.onColor ? "rgba(255,255,255,0.78)" : B.mutedMid, lineHeight: 1.7, maxWidth: 560, margin: sk.align === "center" ? "0 auto" : 0 }}><EditableText value={flattenText(school.description)} readOnly={readOnly} placeholder="Add a description…" onSave={v => onUpdate({ data: { ...school, description: v } })} /></div>}
             </div>
             <div style={{ padding: "14px 28px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 14 }}>
               <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
@@ -3284,8 +3315,15 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
           {/* Tabs */}
           <div style={{ position: "sticky", top: 10, zIndex: 80 }}>
             <div style={{ display: "flex", gap: 4, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: 5, backdropFilter: "blur(8px)" }}>
-              {TABS.map(([k, l]) => (
-                <button key={k} onClick={() => setTab(k)} style={{ flex: "1 1 auto", minWidth: 90, padding: "10px 8px", borderRadius: 10, border: "none", background: activeTab === k ? `linear-gradient(135deg,${T.p},${T.p}CC)` : "transparent", color: activeTab === k ? "white" : B.mutedMid, fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", boxShadow: activeTab === k ? `0 0 16px ${T.pg}` : "none", transition: "all 0.2s" }}>{l}</button>
+              {TABS.map(([k, l], ti) => (
+                <button key={k} draggable={!readOnly}
+                  onDragStart={() => { dragIdx.current = ti; }}
+                  onDragOver={e => { if (!readOnly) e.preventDefault(); }}
+                  onDrop={e => { if (readOnly) return; e.preventDefault(); reorderSections(dragIdx.current, ti); dragIdx.current = null; }}
+                  onClick={() => setTab(k)}
+                  onDoubleClick={() => { if (readOnly) return; const cur = SECTIONS.find(s => s.id === k); const t = window.prompt("Rename this tab:", cur?.title || ""); if (t && t.trim()) renameSection(k, t.trim()); }}
+                  title={readOnly ? "" : "Drag to reorder · double-click to rename"}
+                  style={{ flex: "1 1 auto", minWidth: 90, padding: "10px 8px", borderRadius: 10, border: "none", background: activeTab === k ? `linear-gradient(135deg,${T.p},${T.p}CC)` : "transparent", color: activeTab === k ? "white" : B.mutedMid, fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: readOnly ? "pointer" : "grab", boxShadow: activeTab === k ? `0 0 16px ${T.pg}` : "none", transition: "all 0.2s" }}>{l}</button>
               ))}
               {!readOnly && <button onClick={() => setAddSecOpen(o => !o)} title="Add or manage sections" style={{ flexShrink: 0, width: 40, padding: "10px 0", borderRadius: 10, border: `1px dashed ${B.borderMid}`, background: addSecOpen ? T.ps : "transparent", color: addSecOpen ? T.hi : B.mutedMid, fontFamily: "inherit", fontSize: 17, fontWeight: 700, cursor: "pointer" }}>＋</button>}
             </div>
@@ -3310,10 +3348,10 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
           </div>
 
           {activeTab === "lessons" && (<>
-            {school.transformation && (
+            {(school.transformation || !readOnly) && (
               <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: "16px 22px" }}>
                 <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.5, color: T.p, marginBottom: 5 }}>Your Transformation</div>
-                <div style={{ fontSize: 13, color: B.white, lineHeight: 1.65 }}>{flattenText(school.transformation)}</div>
+                <div style={{ fontSize: 13, color: B.white, lineHeight: 1.65 }}><EditableText value={flattenText(school.transformation)} readOnly={readOnly} placeholder="Describe the before→after transformation…" onSave={v => onUpdate({ data: { ...school, transformation: v } })} /></div>
               </div>
             )}
             {school.semesters?.map((sem, si) => (
@@ -3329,6 +3367,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
                 {sem.lessons?.map((l, li) => <LessonRow key={li} lesson={l} idx={li} T={T} progress={progress} mentorName={school.mentor?.name} onEnter={setActiveLesson} onEdit={setEditingLesson} onToggleLock={toggleLock} readOnly={readOnly} />)}
               </div>
             ))}
+            {!readOnly && <AddLessonBar T={T} disabled={iterating} onAdd={(topic) => onIterate(`Add ONE new lesson about "${topic}" to the end of the lessons. Give it a fitting title, concept, mission, passCriteria and 1-3 activities allowed for the ${school.learningPath || "mixed"} learning path. Keep the school name and ALL existing lessons exactly as they are.`)} />}
             {school.gamification && (
               <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 18, padding: 26 }}>
                 <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 15, fontWeight: 700, color: B.white, marginBottom: 18 }}>🎮 {GAMI[school.gamification.preset]?.name || "Gamification"}</div>
@@ -4014,10 +4053,20 @@ export default function Senseito() {
       try {
         const parsed = await apiJSON(ITERATE_SYS, [{ role: "user", content: payload }], 12000, "sonnet");
         if (parsed.appAction === "unlockAll") { unlockAllFor(rec); return { ok: true, msg: "Unlocked" }; }
-        const c = parsed.school || parsed; if (!c?.name) throw new Error("incomplete"); content = c;
+        const c = parsed.school || parsed; if (!c?.name) throw new Error("incomplete");
+        if (/^(return_?json|json|school)$/i.test(String(c.name).trim())) throw new Error("garbled");
+        content = c;
       } catch (e) { lastErr = e; }
     }
-    if (!content) return { ok: false, msg: /incomplete|JSON|structured/i.test(lastErr?.message || "") ? "Couldn't apply that — try a smaller, more specific change." : (lastErr?.message || "Edit failed") };
+    if (!content) return { ok: false, msg: /incomplete|JSON|structured|garbled/i.test(lastErr?.message || "") ? "Couldn't apply that cleanly — please try again or rephrase." : (lastErr?.message || "Edit failed") };
+    // Guard: keep the original name unless the instruction is clearly about renaming.
+    if (!/\b(rename|re-?title|call it|name it|title)\b/i.test(inst)) content.name = school.name;
+    // Guard: don't let an edit silently delete all lessons unless that's the ask.
+    const oldLessons = (school.semesters || []).reduce((a, s) => a + (s.lessons?.length || 0), 0);
+    const newLessons = (content.semesters || []).reduce((a, s) => a + (s.lessons?.length || 0), 0);
+    if (oldLessons >= 2 && newLessons === 0 && !/\b(remove|delete|clear|no lessons|chat[- ]?only|just (a )?chat|without lessons)\b/i.test(inst)) {
+      return { ok: false, msg: "That change would have wiped all your lessons, so I held off. Try rephrasing or be more specific." };
+    }
     setIterProg({ pct: 45, label: "Rewriting the affected lessons…" });
     await fillSchoolBlocks(content, { oldSchool: school, dna: school.knowledgeDNA, onProgress: (d, t) => setIterProg({ pct: 45 + Math.round((d / t) * 50), label: `Authoring activities… (${d}/${t})` }) });
     setIterProg({ pct: 100, label: "Applying changes…" });
