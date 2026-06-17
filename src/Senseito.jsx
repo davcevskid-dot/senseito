@@ -512,6 +512,14 @@ SECTIONS: the experience is made of "sections" (kinds: lessons, mentor, tools, d
 BLOCKS: keep each lesson's existing "blockTypes" unless the instruction changes them. When ADDING or RE-ORIENTING lessons, give each 1-3 blockTypes allowed for the school's learningPath (see list). Do NOT output block data — only type names. Block contents are authored in a separate step.
 Allowed block types per learning path:
 ${PATH_GUIDE}
+DESIGN FIELDS (Generative UI — set these on the school object when the instruction is about look & feel; keep all other fields intact):
+- "theme": one of ${Object.keys(THEMES).join(", ")} — overall accent color/mood.
+- "skin": one of aurora, minimal, zen, bold, editorial, playful — banner/card visual style.
+- "density": "compact" | "cozy" | "spacious" — vertical spacing between sections.
+- "cover": an https image URL to show as a hero cover banner (use a real, stable Unsplash-style URL only if the user supplies or clearly wants one; otherwise omit). To remove a cover, set "cover": "".
+- "hero": { "emoji": false to hide the emoji, "tagline": false to hide the tagline, "description": false to hide the description, "off": true for a minimal title-only header }. Omit a key (or set true) to keep it showing.
+- "overlay": { "type": "mentorFab", "greeting": "<short greeting>" } to add a floating chat bubble that opens the mentor. Set "overlay": null to remove it.
+Interpret natural requests: "make it calmer/airier" → density spacious + a soft theme; "remove the description"/"just the title" → hero settings; "add a chat bubble"/"floating mentor" → overlay mentorFab; "add a cover/header image" → cover.
 SPECIAL CASE: lesson locking/unlocking and progress are managed by the app. If the instruction is purely about unlocking lessons or progress, return ONLY: {"appAction": "unlockAll"}.`;
 
 const TOOLBUILDER_SYS = `You are the Senseito Tool Builder AI. Build ONE interactive learning tool as a JSON object: { type, title, description, data }.
@@ -2141,6 +2149,42 @@ function ToolsSection({ rec, T, onUpdate, buildTool, buildingTool, readOnly, onR
 }
 
 // ─────────────────────────────────────────────────────────────
+// MENTOR FAB — floating chat bubble overlay (Layer 3 wrapper around the mentor)
+// ─────────────────────────────────────────────────────────────
+function MentorFab({ school, bus, T }) {
+  const [open, setOpen] = useState(false);
+  const greeting = school.overlay?.greeting || `Hi! I'm ${school.mentor?.name || "your mentor"}. Ask me anything.`;
+  const [msgs, setMsgs] = useState([{ role: "assistant", content: greeting }]);
+  const [input, setInput] = useState(""); const [loading, setLoading] = useState(false);
+  const bottom = useRef(null);
+  useEffect(() => { bottom.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs, loading, open]);
+  async function send() {
+    const t = input.trim(); if (!t || loading) return; setInput("");
+    const next = [...msgs, { role: "user", content: t }]; setMsgs(next); setLoading(true);
+    try { const r = await api(mentorOfficeSys(school, bus), toApiMessages(next), 500); setMsgs([...next, { role: "assistant", content: r }]); }
+    catch (e) { setMsgs([...next, { role: "assistant", content: "Error: " + e.message }]); }
+    setLoading(false);
+  }
+  return (<>
+    <button onClick={() => setOpen(o => !o)} title={`Chat with ${school.mentor?.name || "your mentor"}`} style={{ position: "fixed", bottom: 20, right: 20, zIndex: 140, width: 56, height: 56, borderRadius: "50%", background: `linear-gradient(135deg,${T.p},${T.p}CC)`, border: "none", color: "white", fontSize: 22, cursor: "pointer", boxShadow: `0 8px 30px ${T.pg}` }}>{open ? "✕" : "💬"}</button>
+    {open && (
+      <div style={{ position: "fixed", bottom: 86, right: 20, zIndex: 140, width: 340, maxWidth: "92vw", height: 460, maxHeight: "72vh", background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 16, display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 20px 60px rgba(0,0,0,0.5)", animation: "fadeUp 0.2s ease" }}>
+        <div style={{ padding: "12px 16px", borderBottom: `1px solid ${B.border}`, background: B.surface2, fontSize: 13, fontWeight: 700, color: B.white }}>🎓 {school.mentor?.name || "Mentor"}</div>
+        <div style={{ flex: 1, overflowY: "auto", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
+          {msgs.map((m, i) => (<div key={i} style={{ display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}><div style={{ maxWidth: "85%", background: m.role === "user" ? T.ps : B.surface2, border: `1px solid ${m.role === "user" ? T.ba : B.border}`, borderRadius: m.role === "user" ? "12px 4px 12px 12px" : "4px 12px 12px 12px", padding: "8px 11px", fontSize: 13, lineHeight: 1.55, color: B.white }}>{m.role === "user" ? m.content : <Markdown text={m.content} />}</div></div>))}
+          {loading && <div style={{ display: "flex", gap: 4, paddingLeft: 4 }}>{[0, 1, 2].map(i => <div key={i} style={{ width: 6, height: 6, borderRadius: "50%", background: T.p, animation: `pulse 1s ${i * 0.2}s infinite` }} />)}</div>}
+          <div ref={bottom} />
+        </div>
+        <div style={{ padding: "10px 12px", borderTop: `1px solid ${B.border}`, display: "flex", gap: 8 }}>
+          <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); send(); } }} placeholder="Ask…" style={{ flex: 1, background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 10, color: B.white, fontFamily: "inherit", fontSize: 13, padding: "8px 11px" }} />
+          <button onClick={send} disabled={loading || !input.trim()} style={{ background: T.p, border: "none", borderRadius: 10, padding: "8px 12px", color: "white", fontSize: 14, fontWeight: 700, cursor: "pointer", opacity: (loading || !input.trim()) ? 0.5 : 1 }}>↑</button>
+        </div>
+      </div>
+    )}
+  </>);
+}
+
+// ─────────────────────────────────────────────────────────────
 // DASHBOARD SECTION — always-on grid of bricks (ungated)
 // ─────────────────────────────────────────────────────────────
 function DashboardSection({ section, rec, T, onUpdate, readOnly, school, onIngest }) {
@@ -2551,6 +2595,8 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const school = rec.data;
   const T = THEMES[school.theme] || THEMES.violet;
   const sk = skinCfg(school.skin, T);
+  const hero = school.hero || {}; // { emoji?, tagline?, description?, off? } — false hides; cover via school.cover
+  const dens = ({ compact: 11, cozy: 18, spacious: 28 })[school.density] || 18; // vertical rhythm between sections
   const [leads, setLeads] = useState(null);
   const [students, setStudents] = useState(null);
   const [showLeads, setShowLeads] = useState(false);
@@ -2773,7 +2819,8 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
 
         {iterating && <div style={{ position: "sticky", top: 12, zIndex: 90, marginBottom: 16 }}><LoaderCard title="Applying your change…" steps={ITERATE_STEPS} stepIdx={iterStep} sub="The school below will refresh in place" /></div>}
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 18, opacity: iterating ? 0.35 : 1, filter: iterating ? "saturate(0.6)" : "none", transition: "opacity 0.4s, filter 0.4s", paddingTop: readOnly ? 18 : 0 }}>
+        {school.overlay?.type === "mentorFab" && <MentorFab school={school} bus={bus} T={T} />}
+        <div style={{ display: "flex", flexDirection: "column", gap: dens, opacity: iterating ? 0.35 : 1, filter: iterating ? "saturate(0.6)" : "none", transition: "opacity 0.4s, filter 0.4s", paddingTop: readOnly ? 18 : 0 }}>
           {warnings.length > 0 && (
             <div style={{ background: "rgba(251,191,36,0.06)", border: "1px solid rgba(251,191,36,0.3)", borderRadius: 12, padding: "11px 15px" }}>
               <div onClick={() => setShowWarn(s => !s)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}>
@@ -2795,13 +2842,14 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
           )}
           {/* Banner — varies by the school's visual skin */}
           <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: sk.radius, overflow: "hidden", animation: "fadeUp 0.5s ease" }}>
+            {school.cover && <img src={school.cover} alt="" style={{ width: "100%", height: 170, objectFit: "cover", display: "block" }} />}
             <div style={{ padding: sk.align === "center" ? "34px 28px 26px" : "30px 28px 22px", background: sk.top, borderBottom: `1px solid ${B.border}`, textAlign: sk.align, position: "relative" }}>
               {sk.accentBar && <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 4, background: `linear-gradient(90deg,${T.p},${T.a})` }} />}
-              <div style={{ fontSize: sk.emoji, marginBottom: 10 }}>{school.emoji || "🏫"}</div>
+              {hero.emoji !== false && !hero.off && <div style={{ fontSize: sk.emoji, marginBottom: 10 }}>{school.emoji || "🏫"}</div>}
               <div style={{ fontFamily: sk.font, fontSize: "clamp(20px,4vw,32px)", fontWeight: 700, letterSpacing: sk.font.includes("Lora") ? 0 : -1, color: sk.onColor ? "#fff" : B.white, marginBottom: 6 }}><EditableText value={school.name} readOnly={readOnly} onSave={v => onUpdate({ data: { ...school, name: v } })} /></div>
-              {sk.rule && <div style={{ width: 48, height: 2, background: T.p, margin: "8px 0 12px" }} />}
-              <div style={{ fontSize: 14, color: sk.onColor ? "rgba(255,255,255,0.85)" : T.a, fontStyle: sk.font.includes("Lora") ? "normal" : "italic", marginBottom: 12 }}><EditableText value={school.tagline} readOnly={readOnly} onSave={v => onUpdate({ data: { ...school, tagline: v } })} /></div>
-              <div style={{ fontSize: 13, color: sk.onColor ? "rgba(255,255,255,0.78)" : B.mutedMid, lineHeight: 1.7, maxWidth: 560, margin: sk.align === "center" ? "0 auto" : 0 }}>{typeof school.description === "string" ? school.description : ""}</div>
+              {sk.rule && !hero.off && <div style={{ width: 48, height: 2, background: T.p, margin: "8px 0 12px" }} />}
+              {hero.tagline !== false && !hero.off && <div style={{ fontSize: 14, color: sk.onColor ? "rgba(255,255,255,0.85)" : T.a, fontStyle: sk.font.includes("Lora") ? "normal" : "italic", marginBottom: 12 }}><EditableText value={school.tagline} readOnly={readOnly} onSave={v => onUpdate({ data: { ...school, tagline: v } })} /></div>}
+              {hero.description !== false && !hero.off && <div style={{ fontSize: 13, color: sk.onColor ? "rgba(255,255,255,0.78)" : B.mutedMid, lineHeight: 1.7, maxWidth: 560, margin: sk.align === "center" ? "0 auto" : 0 }}>{typeof school.description === "string" ? school.description : ""}</div>}
             </div>
             <div style={{ padding: "14px 28px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 14 }}>
               <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
