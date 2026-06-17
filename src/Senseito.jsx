@@ -724,13 +724,17 @@ function planOnly(school) {
 
 // Author block DATA for a school plan, one semester at a time (parallel, budgeted).
 // Reuses existing block data for lessons that are unchanged; fills new/changed ones.
-async function fillSchoolBlocks(content, { oldSchool = null, dna = null } = {}) {
+async function fillSchoolBlocks(content, { oldSchool = null, dna = null, onProgress = null } = {}) {
   const oldByNum = {};
   (oldSchool?.semesters || []).forEach(s => (s.lessons || []).forEach(l => { oldByNum[l.number] = l; }));
   const same = (a, b) => (a || "") === (b || "");
   const conceptList = (content.concepts || []).map(c => `${c.id}:${c.label}`).join(", ");
   const ctxHeader = `SCHOOL: ${content.name} — ${content.description}\nLEARNING PATH: ${content.learningPath || "mixed"}\nMENTOR: ${content.mentorName || content.mentor?.name || ""} (voice: ${content.voicePreset || "sage"})${conceptList ? `\nCONCEPTS (tag each block's data.concepts with the relevant ids): ${conceptList}` : ""}${dna ? `\nKNOWLEDGE DNA:\n${String(dna).slice(0, 2500)}` : ""}`;
-  await Promise.all((content.semesters || []).map(async (sem) => {
+  const semList = content.semesters || [];
+  const dashList = (content.sections || []).filter(s => s.kind === "dashboard");
+  const total = semList.length + dashList.length || 1;
+  let done = 0; const tick = () => { done++; try { onProgress && onProgress(done, total); } catch { /* ignore */ } };
+  await Promise.all(semList.map((sem) => (async () => {
     const toFill = [];
     (sem.lessons || []).forEach(l => {
       const old = oldByNum[l.number];
@@ -756,10 +760,10 @@ async function fillSchoolBlocks(content, { oldSchool = null, dna = null } = {}) 
     } catch {
       toFill.forEach(l => { l.blocks = dedupeBlocks((l._types || ["reading_plain"]).map(t => fallbackBlock(t, l))); delete l._types; delete l.blockTypes; });
     }
-  }));
+  })().finally(tick)));
 
   // Author block data for any DASHBOARD sections (always-on grids of bricks).
-  await Promise.all((content.sections || []).filter(s => s.kind === "dashboard").map(async (sec) => {
+  await Promise.all(dashList.map((sec) => (async () => {
     const oldSec = (oldSchool?.sections || []).find(o => o.id === sec.id && o.kind === "dashboard");
     const oldTypes = (oldSec?.blocks || []).map(b => b.type);
     const types = (sec.blockTypes && sec.blockTypes.length) ? sec.blockTypes : oldTypes;
@@ -776,7 +780,7 @@ async function fillSchoolBlocks(content, { oldSchool = null, dna = null } = {}) 
     } catch {
       sec.blocks = dedupeBlocks(t2.map(t => fallbackBlock(t, ctxLesson))); delete sec.blockTypes;
     }
-  }));
+  })().finally(tick)));
   return content;
 }
 
@@ -922,6 +926,70 @@ function LoaderCard({ title, steps, stepIdx, sub }) {
 
 const BUILD_STEPS = ["Reading your vision...", "Distilling source material...", "Synthesizing curriculum structure...", "Summoning your mentor...", "Designing missions & pass criteria...", "Suggesting tools & improvements...", "Finalizing School DNA..."];
 const ITERATE_STEPS = ["Reading your instruction...", "Re-architecting the school...", "Rewriting affected lessons...", "Refreshing suggestions...", "Applying changes..."];
+
+// Fun, real facts pulled FROM the school being built — shown while the user waits.
+function schoolFacts(content) {
+  const f = [];
+  const lessons = (content.semesters || []).flatMap(s => s.lessons || []);
+  const mentor = content.mentorName || content.mentor?.name;
+  if (mentor) f.push(`Your mentor will be ${mentor}.`);
+  if (lessons.length) f.push(`Mapping out ${lessons.length} lesson${lessons.length > 1 ? "s" : ""}${(content.semesters || []).length > 1 ? ` across ${content.semesters.length} chapters` : ""}.`);
+  lessons.slice(0, 4).forEach((l, i) => l.title && f.push(`Lesson ${i + 1}: “${l.title}”`));
+  if ((content.concepts || []).length) f.push(`Connecting ${content.concepts.length} key concepts into a knowledge map.`);
+  const secs = (content.sections || []).map(s => SECTION_META[s.kind]?.title).filter(Boolean);
+  if (secs.length) f.push(`Arranging your space: ${[...new Set(secs)].join(" · ")}.`);
+  if (content.sampleLine) f.push(`${mentor || "Your mentor"}: “${String(content.sampleLine).slice(0, 90)}”`);
+  if (content.description) f.push(`“${String(content.description).slice(0, 110)}”`);
+  return f;
+}
+
+// Real progress UI for builds/updates: smooth trickle bar (never stalls), live
+// label, and rotating fun facts from the user's own school so the wait feels alive.
+function BuildProgress({ pct = 0, label = "", facts = [], title = "Building your school…" }) {
+  const start = useRef(Date.now());
+  const [disp, setDisp] = useState(Math.max(3, pct));
+  const [fi, setFi] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => {
+      const elapsed = (Date.now() - start.current) / 1000;
+      const trickle = 95 * (1 - Math.exp(-elapsed / 40)); // creeps toward 95 over ~2 min
+      setDisp(d => { const target = pct >= 100 ? 100 : Math.max(pct, trickle, d); return d + (target - d) * 0.22; });
+    }, 200);
+    return () => clearInterval(id);
+  }, [pct]);
+  useEffect(() => { if (!facts.length) return; setFi(0); const id = setInterval(() => setFi(i => (i + 1) % facts.length), 2900); return () => clearInterval(id); }, [facts.length]);
+  const shown = Math.min(100, Math.round(disp));
+  const eta = pct >= 100 ? "Done!" : shown < 35 ? "about a minute or two" : shown < 75 ? "under a minute" : "almost there";
+  return (
+    <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 18, padding: "34px 30px", position: "relative", overflow: "hidden" }}>
+      <div style={{ position: "absolute", inset: 0, background: "linear-gradient(110deg,transparent 30%,rgba(124,58,237,0.07) 50%,transparent 70%)", backgroundSize: "200% 100%", animation: "shimmer 1.8s linear infinite" }} />
+      <div style={{ position: "relative" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+          <div style={{ width: 38, height: 38, position: "relative", flexShrink: 0 }}>
+            <div style={{ position: "absolute", inset: 0, borderRadius: "50%", border: "3px solid rgba(124,58,237,0.14)", borderTopColor: "#7C3AED", animation: "spin 1s linear infinite" }} />
+            <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>🏫</div>
+          </div>
+          <div>
+            <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 18, fontWeight: 700, color: B.white }}>{title}</div>
+            <div style={{ fontSize: 12.5, color: B.mutedMid, marginTop: 2 }}>{label || "Getting started…"}</div>
+          </div>
+        </div>
+        <div style={{ height: 9, borderRadius: 6, background: B.surface2, overflow: "hidden", border: `1px solid ${B.border}` }}>
+          <div style={{ height: "100%", width: `${shown}%`, borderRadius: 6, background: "linear-gradient(90deg,#7C3AED,#06B6D4)", transition: "width 0.3s ease" }} />
+        </div>
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: B.muted, marginTop: 7 }}>
+          <span>{shown}%</span><span>{eta}</span>
+        </div>
+        {facts.length > 0 && (
+          <div key={fi} style={{ marginTop: 18, background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 11, padding: "12px 14px", fontSize: 13, color: B.white, lineHeight: 1.5, animation: "fadeUp 0.5s ease" }}>
+            💡 {facts[fi]}
+          </div>
+        )}
+        <div style={{ fontSize: 11.5, color: B.muted, marginTop: 14, textAlign: "center" }}>Richer schools take a minute or two — please keep this tab open, it’s worth the wait.</div>
+      </div>
+    </div>
+  );
+}
 
 function useTicker(active, length, ms = 950) {
   const [i, setI] = useState(0);
@@ -2681,7 +2749,7 @@ function IteratePanel({ school, history, loading, onApply, onTheme, onGami, onVo
 // ─────────────────────────────────────────────────────────────
 // SCHOOL PAGE (creator + student)
 // ─────────────────────────────────────────────────────────────
-function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, publicBase, token, onSetSlug, onIterate, iterating = false }) {
+function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, publicBase, token, onSetSlug, onIterate, iterating = false, iterProg = { pct: 0, label: "" } }) {
   const school = rec.data;
   const T = themeFor(school);
   const sk = skinCfg(school.skin, T);
@@ -2712,7 +2780,6 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const [buildingTool, setBuildingTool] = useState(null);
   const [toast, setToast] = useState(null);
   const toastTimer = useRef(null);
-  const iterStep = useTicker(iterating, ITERATE_STEPS.length, 900);
 
   const progress = rec.progress || {};
   const xp = rec.xp || 0;
@@ -2907,7 +2974,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
           </div>
         )}
 
-        {iterating && <div style={{ position: "sticky", top: 12, zIndex: 90, marginBottom: 16 }}><LoaderCard title="Applying your change…" steps={ITERATE_STEPS} stepIdx={iterStep} sub="The school below will refresh in place" /></div>}
+        {iterating && <div style={{ position: "sticky", top: 12, zIndex: 90, marginBottom: 16 }}><BuildProgress title="Applying your change…" pct={iterProg.pct} label={iterProg.label} facts={[]} /></div>}
 
         {school.overlay?.type === "mentorFab" && <MentorFab school={school} bus={bus} T={T} />}
         <div style={{ display: "flex", flexDirection: "column", gap: dens, opacity: iterating ? 0.35 : 1, filter: iterating ? "saturate(0.6)" : "none", transition: "opacity 0.4s, filter 0.4s", paddingTop: readOnly ? 18 : 0 }}>
@@ -3031,7 +3098,7 @@ function Home({ onCreated }) {
   const [struct, setStruct] = useState({ layout: "auto", depth: "auto", interactivity: "auto" });
   const [showStruct, setShowStruct] = useState(false);
   const taRef = useRef(null);
-  const stepIdx = useTicker(phase === "building", BUILD_STEPS.length, 950);
+  const [prog, setProg] = useState({ pct: 0, label: "", facts: [] });
 
   function structHint() {
     const h = [];
@@ -3050,12 +3117,13 @@ function Home({ onCreated }) {
   }
 
   async function runBuild(source) {
-    setPhase("building"); setError("");
+    setPhase("building"); setError(""); setProg({ pct: 4, label: "Reading your vision…", facts: [] });
     try {
       let vision = source; let dna = null;
-      if (source.length > DNA_THRESHOLD) { dna = await api(DISTILL_SYS, [{ role: "user", content: source.slice(0, 30000) }], 1200); vision = (prompt || source).slice(0, 600); }
+      if (source.length > DNA_THRESHOLD) { setProg(p => ({ ...p, pct: 10, label: "Distilling your source material…" })); dna = await api(DISTILL_SYS, [{ role: "user", content: source.slice(0, 30000) }], 1200); vision = (prompt || source).slice(0, 600); }
 
       // PHASE 1 — compact plan (structure + block TYPES only). Always small, never truncates.
+      setProg(p => ({ ...p, pct: 18, label: "Designing your curriculum & mentor…" }));
       const planMsg = `Plan a school for this concept: ${vision}${dna ? `\n\nKNOWLEDGE DNA (teach THIS):\n${dna}` : ""}${structHint()}`;
       const plan = await apiJSON(ARCHITECT_SYS, [{ role: "user", content: planMsg }], 6000, "sonnet");
       if (plan.needMoreInfo) { setClarifyQ(plan.needMoreInfo); setClarifyA(""); setPhase("clarify"); return; }
@@ -3063,7 +3131,10 @@ function Home({ onCreated }) {
       if (!content?.name || !Array.isArray(content.semesters) || !content.semesters.some(s => s.lessons?.length)) throw new Error("Couldn't draft the lessons — please try again or simplify the prompt.");
 
       // PHASE 2 — author block data per semester (parallel, budgeted, graceful fallback).
-      await fillSchoolBlocks(content, { dna });
+      const facts = schoolFacts(content);
+      setProg({ pct: 30, label: `Writing the lessons for “${content.name}”…`, facts });
+      await fillSchoolBlocks(content, { dna, onProgress: (d, t) => setProg(p => ({ ...p, pct: 30 + Math.round((d / t) * 64), label: `Authoring activities… (${d}/${t} done)` })) });
+      setProg(p => ({ ...p, pct: 100, label: "Finishing up…" }));
 
       onCreated(composeSchool(content, dna));
     } catch (e) { setError(e.message || "Build failed — try again."); setPhase("error"); }
@@ -3216,7 +3287,7 @@ function Home({ onCreated }) {
           </div>
         </div>
       )}
-      {phase === "building" && <div style={{ marginTop: 28 }}><LoaderCard title="Building your school…" steps={BUILD_STEPS} stepIdx={stepIdx} sub="Design, voice & gamification come from templates — AI writes the soul" /></div>}
+      {phase === "building" && <div style={{ marginTop: 28 }}><BuildProgress pct={prog.pct} label={prog.label} facts={prog.facts} /></div>}
       {phase === "error" && (
         <div style={{ background: "rgba(239,68,68,0.07)", border: "1px solid rgba(239,68,68,0.22)", borderRadius: 14, padding: "16px 20px", marginTop: 16, display: "flex", alignItems: "center", gap: 12 }}>
           <span style={{ fontSize: 20 }}>⚠️</span><div style={{ fontSize: 13, color: B.mutedMid }}>{error} — adjust your prompt and try again.</div>
@@ -3489,6 +3560,7 @@ export default function Senseito() {
   const [undo, setUndo] = useState(null); // { id, name, timer, restore }
   const [mode, setMode] = useThemeMode();
   const [iterating, setIterating] = useState(false);
+  const [iterProg, setIterProg] = useState({ pct: 0, label: "" });
   const [iterHistory, setIterHistory] = useState([]); // chat thread: { role:"user"|"assistant", content }
   const [versions, setVersions] = useState({}); // id -> [data snapshots] for Undo (in-memory)
   const [aToast, setAToast] = useState(null);
@@ -3655,6 +3727,7 @@ export default function Senseito() {
     if (/\b(unlock|open|free)\b.*\b(all|every)\b/i.test(inst) && /lesson/i.test(inst)) { unlockAllFor(rec); return { ok: true, msg: "All lessons unlocked" }; }
     if (/\breset\b.*\bprogress\b/i.test(inst)) { const p = {}; school.semesters?.forEach((s, si) => s.lessons?.forEach((l, i) => { p[l.number] = (si === 0 && i === 0) ? "active" : "locked"; })); updateSchool(rec.id, { progress: p, xp: 0 }); return { ok: true, msg: "Progress reset" }; }
     const payload = `CURRENT SCHOOL (plan):\n${JSON.stringify(planOnly(school))}\n\nEDIT INSTRUCTION: ${inst}`;
+    setIterProg({ pct: 22, label: "Re-architecting your school…" });
     let content = null, lastErr = null;
     for (let a = 0; a < 2 && !content; a++) {
       try {
@@ -3664,7 +3737,9 @@ export default function Senseito() {
       } catch (e) { lastErr = e; }
     }
     if (!content) return { ok: false, msg: /incomplete|JSON|structured/i.test(lastErr?.message || "") ? "Couldn't apply that — try a smaller, more specific change." : (lastErr?.message || "Edit failed") };
-    await fillSchoolBlocks(content, { oldSchool: school, dna: school.knowledgeDNA });
+    setIterProg({ pct: 45, label: "Rewriting the affected lessons…" });
+    await fillSchoolBlocks(content, { oldSchool: school, dna: school.knowledgeDNA, onProgress: (d, t) => setIterProg({ pct: 45 + Math.round((d / t) * 50), label: `Authoring activities… (${d}/${t})` }) });
+    setIterProg({ pct: 100, label: "Applying changes…" });
     pushVersion(rec.id, school); // snapshot for Undo (before applying)
     updateSchool(rec.id, { data: composeSchool(content, school.knowledgeDNA), revision: (rec.revision || 0) + 1 });
     return { ok: true, msg: "Change applied" };
@@ -3672,7 +3747,7 @@ export default function Senseito() {
   // Direct edit (suggestion chips, lesson 'add activity', unlock button).
   async function applyIterate(inst) {
     const rec = active; if (!inst || iterating || !rec) return;
-    pushMsg({ role: "user", content: inst }); setIterating(true);
+    pushMsg({ role: "user", content: inst }); setIterating(true); setIterProg({ pct: 8, label: "Reading your school…" });
     const r = await coreEdit(rec, inst);
     pushMsg({ role: "assistant", content: r.ok ? `✓ ${r.msg || "Done"}` : `✕ ${r.msg || "Failed"}` });
     showAToast(r.ok ? `✓ ${r.msg}` : `✕ ${r.msg}`, r.ok ? "ok" : "err");
@@ -3694,7 +3769,7 @@ export default function Senseito() {
   // Conversational chat: converse / advise, OR apply a design patch, OR execute a content edit.
   async function chatSend(text) {
     const rec = active; if (!text || iterating || !rec) return;
-    pushMsg({ role: "user", content: text }); setIterating(true);
+    pushMsg({ role: "user", content: text }); setIterating(true); setIterProg({ pct: 8, label: "Thinking…" });
     try {
       const thread = iterHistory.filter(m => m.role === "user" || m.role === "assistant").slice(-8).map(m => ({ role: m.role, content: m.content }));
       const out = await apiJSON(CHAT_SYS(rec.data), [...thread, { role: "user", content: text }], 800, "sonnet");
@@ -3813,7 +3888,7 @@ export default function Senseito() {
           <Boundary resetKey={view}>
             {view === "home" || !active
               ? <Home onCreated={createSchool} />
-              : <SchoolPage key={active.id} rec={active} onUpdate={(patch) => updateSchool(active.id, patch)} onPublish={publishSchool} publishing={publishing} publicBase={publicBase} token={session?.token} onSetSlug={setCustomSlug} onIterate={applyIterate} iterating={iterating} />}
+              : <SchoolPage key={active.id} rec={active} onUpdate={(patch) => updateSchool(active.id, patch)} onPublish={publishSchool} publishing={publishing} publicBase={publicBase} token={session?.token} onSetSlug={setCustomSlug} onIterate={applyIterate} iterating={iterating} iterProg={iterProg} />}
           </Boundary>
         </div>
       </div>
