@@ -158,6 +158,9 @@ const GLOBAL_CSS = `
   ::-webkit-scrollbar-track{background:transparent}
   button:active{transform:scale(0.98)}
   .dashGrid{display:grid;gap:14px}
+  .dashGrid>*{min-width:0}
+  .dashGrid pre,.dashGrid code,.dashGrid textarea,.dashGrid img,.dashGrid iframe{max-width:100%}
+  .dashGrid pre,.dashGrid code{white-space:pre-wrap;overflow-wrap:anywhere}
   @media(max-width:680px){.dashGrid{grid-template-columns:1fr !important}}
 `;
 function GlobalStyle() { return <style>{GLOBAL_CSS}</style>; }
