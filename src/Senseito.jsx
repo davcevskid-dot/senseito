@@ -388,7 +388,7 @@ Every block's data MAY include "concepts": [concept ids from the school's concep
 - image_gate: { instruction, criteria }
 - video_gate: { instruction }
 - review: { count?:5 } — spaced repetition: auto-resurfaces the learner's weakest concepts (from their mastery) and quizzes recall. No content needed. Great on a dashboard for courses.
-- reading_plain: { content (markdown) }
+- reading_plain: { content (markdown), image?:"https… optional top image" }
 - video_embed: { url, title }
 - embed: { url, title, height? } — embeds an external resource (Google Drive file/folder, Google Docs/Sheets/Slides, Figma, a PDF, or any https page). Use this for "connect Google Drive", "attach a doc", "embed a figma", external reference material. If you don't have a real URL, OMIT this block (or leave url empty — it shows a "needs setup" prompt) rather than inventing one.
 - quiz: { questions:[{q, options:[4], answer (0-3), explain}] (3-6) }
@@ -1092,7 +1092,11 @@ function Toast({ toast }) {
 // ─────────────────────────────────────────────────────────────
 // MENTOR LESSON CHAT
 // ─────────────────────────────────────────────────────────────
-function LessonView({ school, lesson, T, onClose, onPass, canEdit, onUpdateBlock, chat, onChat, bus, onIngest }) {
+function LessonView({ school, lesson, T: Tprop, onClose, onPass, canEdit, onUpdateBlock, chat, onChat, bus, onIngest }) {
+  // Per-lesson accent override (lesson.accent) recolors the whole lesson modal.
+  const T = (lesson.accent && HEX_RE.test(lesson.accent))
+    ? { ...Tprop, p: lesson.accent, pg: hexA(lesson.accent, 0.18), ps: hexA(lesson.accent, 0.09), as_: hexA(lesson.accent, 0.12), ba: hexA(lesson.accent, 0.4), hi: lesson.accent, gr: `linear-gradient(135deg,${hexA(lesson.accent, 0.22)},${hexA(lesson.accent, 0.08)})`, grad: `linear-gradient(135deg,${lesson.accent},${lesson.accent}CC)` }
+    : Tprop;
   const [blocks, setBlocks] = useState(lesson.blocks || []);
   const [tab, setTab] = useState("mentor"); // the guided conversation leads; activities are secondary
   const [outputs, setOutputs] = useState({});
@@ -1170,6 +1174,7 @@ function LessonView({ school, lesson, T, onClose, onPass, canEdit, onUpdateBlock
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(0,0,0,0.82)", backdropFilter: "blur(10px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onClose}>
       <div style={{ background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 20, width: "100%", maxWidth: 680, height: "86vh", maxHeight: 760, display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: `0 0 80px ${T.pg}` }} onClick={e => e.stopPropagation()}>
+        {/^https:\/\//i.test(lesson.cover || "") && <img src={lesson.cover} alt="" style={{ width: "100%", height: 130, objectFit: "cover", objectPosition: lesson.coverPos || "center", display: "block", flexShrink: 0 }} />}
         <div style={{ padding: "16px 22px", borderBottom: `1px solid ${B.border}`, background: B.surface2, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div>
             <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.5, color: T.p, marginBottom: 3 }}>{TM[lesson.type]?.icon} {lesson.type} · {lesson.title}</div>
@@ -1529,6 +1534,7 @@ function ReadingBlock({ data = {}, onOutput, T, disabled, school }) {
     setPassed(true); onOutput?.({ type: "reading", highlightCount: phrases.length, explanations: exp, passed: true }); setLoading(false);
   }
   return (<BlockShell type="reading" passed={passed} sub="Read, then tap each key phrase you'd highlight.">
+    {/^https:\/\//i.test(data.image || "") && <img src={data.image} alt="" style={{ width: "100%", borderRadius: 10, marginBottom: 12, display: "block", border: `1px solid ${B.border}` }} />}
     <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 10, padding: "12px 14px", fontSize: 14, lineHeight: 1.75, color: B.white, marginBottom: 12 }}>{data.passage}</div>
     <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 12 }}>
       {phrases.map((p, i) => (
@@ -1962,6 +1968,7 @@ function VideoGateBlock({ data = {}, onOutput, T, disabled, school }) {
 function ReadingPlainBlock({ data = {}, onOutput, T, disabled }) {
   const [passed, setPassed] = useState(false);
   return (<BlockShell type="reading_plain" passed={passed}>
+    {/^https:\/\//i.test(data.image || "") && <img src={data.image} alt="" style={{ width: "100%", borderRadius: 10, marginBottom: 12, display: "block", border: `1px solid ${B.border}` }} />}
     <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 10, padding: "14px 16px", marginBottom: 12 }}><Markdown text={data.content || ""} /></div>
     {!passed && <button onClick={() => { setPassed(true); onOutput?.({ type: "reading_plain", read: true, passed: true }); }} disabled={disabled} style={pBtn(T)}>Mark as read ✓</button>}
   </BlockShell>);
@@ -2687,8 +2694,8 @@ function blockFields(type) {
     image: [["url", "Image URL (https)"], ["caption", "Caption"]],
     cta_button: [["label", "Button label"], ["url", "Link URL (https)"], ["align", "Align (left/center/right)"]],
     stat_grid: [["title", "Title (optional)"]],
-    reading_plain: [["content", "Content (markdown)", "area"]],
-    reading: [["passage", "Passage", "area"]],
+    reading_plain: [["content", "Content (markdown)", "area"], ["image", "Image URL (https, optional)"]],
+    reading: [["passage", "Passage", "area"], ["image", "Image URL (https, optional)"]],
     image_gate: [["instruction", "Instruction"], ["criteria", "Pass criteria"]],
     video_gate: [["instruction", "Instruction"]],
     essay: [["prompt", "Prompt", "area"]],
@@ -2732,6 +2739,15 @@ function LessonEditor({ lesson, T, allowed, onSave, onDelete, onApplyAI, onAutho
         <div style={{ flex: 1, overflowY: "auto", padding: "18px 22px", display: "flex", flexDirection: "column", gap: 14 }}>
           <div><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>Title</div><input value={d.title || ""} onChange={e => set({ title: e.target.value })} style={inp.input} /></div>
           <div><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>Concept</div><textarea value={d.concept || ""} onChange={e => set({ concept: e.target.value })} rows={2} style={inp.input} /></div>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ flex: 2, minWidth: 180 }}><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>Cover image URL (optional)</div><input value={d.cover || ""} onChange={e => set({ cover: e.target.value })} placeholder="https://…" style={inp.input} /></div>
+            <div><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>Accent color</div>
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <input type="color" value={d.accent || "#7C3AED"} onChange={e => set({ accent: e.target.value })} title="Recolors this lesson" style={{ width: 36, height: 34, border: "none", background: "none", cursor: "pointer", padding: 0 }} />
+                {d.accent && <button onClick={() => set({ accent: undefined })} style={{ fontSize: 10, background: "none", border: "none", color: B.muted, cursor: "pointer", fontFamily: "inherit" }}>clear</button>}
+              </div>
+            </div>
+          </div>
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
             <div style={{ flex: 1, minWidth: 140 }}><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>Type</div>
               <select value={d.type || "Dialogue"} onChange={e => set({ type: e.target.value })} style={{ ...inp.input, cursor: "pointer" }}>{Object.keys(TM).map(t => <option key={t} value={t}>{t}</option>)}</select></div>
