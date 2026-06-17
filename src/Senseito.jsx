@@ -525,7 +525,7 @@ Otherwise return an object with these fields:
 - mentorName: if the creator named a specific mentor/character/persona, USE EXACTLY THAT; else invent a fitting name
 - mentorPersonality (2 sentences), sampleLine (one powerful thing they'd say to a struggling student, in their exact voice)
 - systemVoice: ONLY if voicePreset is custom — 3-4 sentences capturing exactly how they speak, vocabulary, catchphrases, what they'd NEVER say. Else omit.
-- transformation: vivid before/after of the student
+- transformation: ONE vivid sentence (a plain STRING, not an object) describing the student's before→after journey
 - gamiPreset: one of xp (default), belts (discipline/martial), quest (adventure/story), none
 - layout: best-fit of course | guided | course_toolkit | coach | practice | toolkit | custom
 - sections: ordered array describing the experience — each { kind:"lessons"|"mentor"|"tools"|"dashboard", title (short, subject-flavored, e.g. "Daily Practice"), icon (one emoji), intro (one short line, optional), blockTypes:[2-5 types] (ONLY for dashboard sections — use ONLY the available block types listed in STEP 3, never invent new ones) }. Include a "lessons" section ONLY if you actually provide semesters below.
@@ -698,6 +698,18 @@ The student can ask you ANYTHING related to this subject. Stay fully in characte
 // ─────────────────────────────────────────────────────────────
 // COMPOSE
 // ─────────────────────────────────────────────────────────────
+// Coerce an AI field that should be a string but sometimes comes back as an
+// object (e.g. transformation as {before, after}) into safe display text.
+function flattenText(v) {
+  if (v == null) return "";
+  if (typeof v === "string") return v;
+  if (Array.isArray(v)) return v.map(flattenText).filter(Boolean).join(" ");
+  if (typeof v === "object") {
+    if (v.before || v.after) return [v.before, v.after].filter(Boolean).join(" → ");
+    return Object.values(v).map(flattenText).filter(Boolean).join(" — ");
+  }
+  return String(v);
+}
 function composeSchool(content, dna) {
   const voice = content.systemVoice || VOICES[content.voicePreset] || VOICES.sage;
   const preset = GAMI[content.gamiPreset] || GAMI.xp;
@@ -707,6 +719,7 @@ function composeSchool(content, dna) {
     ...content,
     learningPath,
     ...(sections ? { sections } : {}),
+    transformation: flattenText(content.transformation),
     theme: THEMES[content.theme] ? content.theme : "violet",
     mentor: {
       name: content.mentorName || "The Mentor",
@@ -3300,7 +3313,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
             {school.transformation && (
               <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: "16px 22px" }}>
                 <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.5, color: T.p, marginBottom: 5 }}>Your Transformation</div>
-                <div style={{ fontSize: 13, color: B.white, lineHeight: 1.65 }}>{school.transformation}</div>
+                <div style={{ fontSize: 13, color: B.white, lineHeight: 1.65 }}>{flattenText(school.transformation)}</div>
               </div>
             )}
             {school.semesters?.map((sem, si) => (
