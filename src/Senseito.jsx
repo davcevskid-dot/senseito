@@ -793,6 +793,34 @@ function normalizeSections(content) {
   });
 }
 
+// ─────────────────────────────────────────────────────────────
+// OVERSEER (educational linter) — deterministic structural checks over the
+// concept graph. Free graph queries, no AI. Advises; never blocks.
+// ─────────────────────────────────────────────────────────────
+function lintSchool(school) {
+  const out = [];
+  const concepts = school?.concepts || [];
+  if (!concepts.length) return out;
+  const byId = {}; concepts.forEach(c => { byId[c.id] = c; });
+  const lessons = (school.semesters || []).flatMap(s => s.lessons || []);
+  if (!lessons.length) return out;
+  const firstTaught = {};
+  lessons.forEach((l, idx) => (l.blocks || []).forEach(b => (b.data?.concepts || []).forEach(cid => { if (firstTaught[cid] === undefined) firstTaught[cid] = idx; })));
+  // Prerequisite-order violations.
+  lessons.forEach((l, idx) => {
+    const used = new Set((l.blocks || []).flatMap(b => b.data?.concepts || []));
+    used.forEach(cid => (byId[cid]?.prereq || []).forEach(pid => {
+      const pAt = firstTaught[pid];
+      if (pAt !== undefined && pAt > idx) out.push({ level: "warn", msg: `Lesson ${l.number} "${l.title}" uses “${byId[cid]?.label || cid}”, but its prerequisite “${byId[pid]?.label || pid}” isn't taught until Lesson ${lessons[pAt]?.number}.`, fix: `Add a short intro to "${byId[pid]?.label || pid}" in Lesson ${l.number}, or move it earlier.` });
+    }));
+  });
+  // Concepts in the map that nothing teaches.
+  concepts.forEach(c => { if (firstTaught[c.id] === undefined) out.push({ level: "info", msg: `“${c.label}” is in your knowledge map but no activity covers it yet.`, fix: `Add an activity that teaches "${c.label}".` }); });
+  // dedupe by msg, cap.
+  const seen = new Set();
+  return out.filter(w => { if (seen.has(w.msg)) return false; seen.add(w.msg); return true; }).slice(0, 6);
+}
+
 const DNA_THRESHOLD = 3000;
 const YT_RE = /(youtube\.com\/watch|youtu\.be\/|youtube\.com\/shorts)/i;
 
@@ -2528,6 +2556,9 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const [showLeads, setShowLeads] = useState(false);
   const [slugInput, setSlugInput] = useState(rec.published_slug || "");
   const [savingSlug, setSavingSlug] = useState(false);
+  const [dismissedWarn, setDismissedWarn] = useState({});
+  const [showWarn, setShowWarn] = useState(false);
+  const warnings = readOnly ? [] : lintSchool(school).filter(w => !dismissedWarn[w.msg]);
   const [narrow, setNarrow] = useState(() => typeof window !== "undefined" && window.innerWidth < 900);
   useEffect(() => { const f = () => setNarrow(window.innerWidth < 900); window.addEventListener("resize", f); return () => window.removeEventListener("resize", f); }, []);
   useEffect(() => {
@@ -2743,6 +2774,25 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
         {iterating && <div style={{ position: "sticky", top: 12, zIndex: 90, marginBottom: 16 }}><LoaderCard title="Applying your change…" steps={ITERATE_STEPS} stepIdx={iterStep} sub="The school below will refresh in place" /></div>}
 
         <div style={{ display: "flex", flexDirection: "column", gap: 18, opacity: iterating ? 0.35 : 1, filter: iterating ? "saturate(0.6)" : "none", transition: "opacity 0.4s, filter 0.4s", paddingTop: readOnly ? 18 : 0 }}>
+          {warnings.length > 0 && (
+            <div style={{ background: "rgba(251,191,36,0.06)", border: "1px solid rgba(251,191,36,0.3)", borderRadius: 12, padding: "11px 15px" }}>
+              <div onClick={() => setShowWarn(s => !s)} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}>
+                <span style={{ fontSize: 12.5, fontWeight: 700, color: "#FBBF24" }}>🛡️ Overseer: {warnings.length} thing{warnings.length > 1 ? "s" : ""} to check</span>
+                <span style={{ fontSize: 12, color: B.muted }}>{showWarn ? "▾" : "▸"}</span>
+              </div>
+              {showWarn && <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 10 }}>
+                {warnings.map((w, i) => (
+                  <div key={i} style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 9, padding: "9px 12px" }}>
+                    <div style={{ fontSize: 12.5, color: B.white, lineHeight: 1.5, marginBottom: 6 }}>{w.level === "warn" ? "🟡 " : "🔵 "}{w.msg}</div>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <button onClick={() => onIterate(w.fix)} disabled={iterating} style={{ background: T.p, border: "none", borderRadius: 7, color: "white", padding: "4px 11px", cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit", opacity: iterating ? 0.5 : 1 }}>✨ Fix it</button>
+                      <button onClick={() => setDismissedWarn(d => ({ ...d, [w.msg]: true }))} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 7, color: B.mutedMid, padding: "4px 11px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit" }}>Dismiss</button>
+                    </div>
+                  </div>
+                ))}
+              </div>}
+            </div>
+          )}
           {/* Banner — varies by the school's visual skin */}
           <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: sk.radius, overflow: "hidden", animation: "fadeUp 0.5s ease" }}>
             <div style={{ padding: sk.align === "center" ? "34px 28px 26px" : "30px 28px 22px", background: sk.top, borderBottom: `1px solid ${B.border}`, textAlign: sk.align, position: "relative" }}>
