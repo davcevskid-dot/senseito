@@ -2121,11 +2121,30 @@ const BLOCK_COMPONENTS = {
   divider: DividerBlock, callout: CalloutBlock, image: ImageBlock, cta_button: CtaButtonBlock, stat_grid: StatGridBlock,
   review: ReviewBlock, custom: CustomBlock,
 };
+// Concepts the learner is currently weak on that THIS brick teaches/tests.
+function weakLabelsFor(bus, school, concepts) {
+  if (!bus?.mastery || !Array.isArray(concepts) || !concepts.length) return [];
+  return [...new Set(concepts.filter(c => (bus.mastery[c] ?? 1) < 0.5).map(c => conceptLabelOf(school, c)))].filter(Boolean).slice(0, 3);
+}
+// Cross-cutting "connection": any concept-tagged brick reacts to what the learner
+// struggled with elsewhere (Context Bus) — shown above the brick automatically.
+function FocusBanner({ labels, T }) {
+  if (!labels?.length) return null;
+  return (
+    <div style={{ display: "flex", gap: 8, alignItems: "flex-start", background: T.as_, border: `1px solid ${T.ba}`, borderRadius: 10, padding: "8px 12px", marginBottom: 10 }}>
+      <span style={{ fontSize: 14, lineHeight: 1.3 }}>🎯</span>
+      <span style={{ fontSize: 12, color: T.hi, lineHeight: 1.5 }}><strong>Focus:</strong> you've been shaky on {labels.join(", ")} — this one will help shore that up.</span>
+    </div>
+  );
+}
 function BlockRenderer({ block, onOutput, T, disabled, state, onState, school, bus }) {
   const Comp = BLOCK_COMPONENTS[block?.type];
   if (!Comp) return <div style={{ fontSize: 12, color: B.muted, padding: 14, border: `1px dashed ${B.borderMid}`, borderRadius: 12 }}>Unknown block: {block?.type}</div>;
+  const isDesign = BLOCK_META[block?.type]?.cat === "Design"; // dividers/images etc. never show learner hints
+  const focus = isDesign ? [] : weakLabelsFor(bus, school, block?.data?.concepts);
   return (
     <Boundary fallback={() => <div style={{ fontSize: 12.5, color: "#F87171", padding: 14, border: "1px solid rgba(248,113,113,0.3)", borderRadius: 12 }}>⚠️ This {BLOCK_META[block.type]?.label || block.type} activity couldn't load. Try editing or regenerating it.</div>}>
+      <FocusBanner labels={focus} T={T} />
       <Comp data={block.data || {}} onOutput={onOutput} T={T} disabled={disabled} state={state} onState={onState} school={school} bus={bus} />
     </Boundary>
   );
