@@ -2894,7 +2894,30 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   }, [rec.published, rec.id, token]); // eslint-disable-line
   const SECTIONS = getSections(school);
   const [tab, setTab] = useState(() => SECTIONS[0]?.id || "mentor");
+  const [addSecOpen, setAddSecOpen] = useState(false);
   const activeTab = SECTIONS.some(s => s.id === tab) ? tab : SECTIONS[0]?.id; // stay valid if layout changes
+  // ── Section management (the "+" between tabs + layout presets) ──
+  function addSection(kind) {
+    const base = SECTIONS.map(s => ({ ...s })); const n = base.length;
+    let id = kind === "dashboard" ? `dashboard_${n}` : kind;
+    while (base.some(s => s.id === id)) id = `${id}_${n}`;
+    const sec = { id, kind, title: SECTION_META[kind]?.title || "Section", icon: SECTION_META[kind]?.icon || "•", ...(kind === "dashboard" ? { blocks: [], cols: 1 } : {}) };
+    onUpdate({ data: { ...school, sections: [...base, sec] } });
+    setTab(id); setAddSecOpen(false);
+  }
+  function removeSection(id) {
+    const left = SECTIONS.filter(s => s.id !== id).map(s => ({ ...s }));
+    if (!left.length) return;
+    onUpdate({ data: { ...school, sections: left } });
+    if (tab === id) setTab(left[0].id);
+    setAddSecOpen(false);
+  }
+  function singleChatPreset() {
+    const secs = [{ id: "mentor", kind: "mentor", title: "Chat", icon: "💬" }];
+    onUpdate({ data: { ...school, sections: secs, hero: { ...(school.hero || {}), off: true } } });
+    setTab("mentor"); setAddSecOpen(false);
+  }
+  const hasKind = (k) => SECTIONS.some(s => s.kind === k);
   const [activeLesson, setActiveLesson] = useState(null);
   const [editingLesson, setEditingLesson] = useState(null);
   const [buildingTool, setBuildingTool] = useState(null);
@@ -3109,7 +3132,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
                   <div key={i} style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 9, padding: "9px 12px" }}>
                     <div style={{ fontSize: 12.5, color: B.white, lineHeight: 1.5, marginBottom: 6 }}>{w.level === "warn" ? "🟡 " : "🔵 "}{w.msg}</div>
                     <div style={{ display: "flex", gap: 6 }}>
-                      <button onClick={() => onIterate(w.fix)} disabled={iterating} style={{ background: T.p, border: "none", borderRadius: 7, color: "white", padding: "4px 11px", cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit", opacity: iterating ? 0.5 : 1 }}>✨ Fix it</button>
+                      <button onClick={() => { setDismissedWarn(d => ({ ...d, [w.msg]: true })); onIterate(w.fix); }} disabled={iterating} style={{ background: T.p, border: "none", borderRadius: 7, color: "white", padding: "4px 11px", cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit", opacity: iterating ? 0.5 : 1 }}>✨ Fix it</button>
                       <button onClick={() => setDismissedWarn(d => ({ ...d, [w.msg]: true }))} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 7, color: B.mutedMid, padding: "4px 11px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit" }}>Dismiss</button>
                     </div>
                   </div>
@@ -3142,10 +3165,31 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
           </div>
 
           {/* Tabs */}
-          <div style={{ display: "flex", gap: 4, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: 5, position: "sticky", top: 10, zIndex: 80, backdropFilter: "blur(8px)" }}>
-            {TABS.map(([k, l]) => (
-              <button key={k} onClick={() => setTab(k)} style={{ flex: "1 1 auto", minWidth: 90, padding: "10px 8px", borderRadius: 10, border: "none", background: activeTab === k ? `linear-gradient(135deg,${T.p},${T.p}CC)` : "transparent", color: activeTab === k ? "white" : B.mutedMid, fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", boxShadow: activeTab === k ? `0 0 16px ${T.pg}` : "none", transition: "all 0.2s" }}>{l}</button>
-            ))}
+          <div style={{ position: "sticky", top: 10, zIndex: 80 }}>
+            <div style={{ display: "flex", gap: 4, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: 5, backdropFilter: "blur(8px)" }}>
+              {TABS.map(([k, l]) => (
+                <button key={k} onClick={() => setTab(k)} style={{ flex: "1 1 auto", minWidth: 90, padding: "10px 8px", borderRadius: 10, border: "none", background: activeTab === k ? `linear-gradient(135deg,${T.p},${T.p}CC)` : "transparent", color: activeTab === k ? "white" : B.mutedMid, fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", boxShadow: activeTab === k ? `0 0 16px ${T.pg}` : "none", transition: "all 0.2s" }}>{l}</button>
+              ))}
+              {!readOnly && <button onClick={() => setAddSecOpen(o => !o)} title="Add or manage sections" style={{ flexShrink: 0, width: 40, padding: "10px 0", borderRadius: 10, border: `1px dashed ${B.borderMid}`, background: addSecOpen ? T.ps : "transparent", color: addSecOpen ? T.hi : B.mutedMid, fontFamily: "inherit", fontSize: 17, fontWeight: 700, cursor: "pointer" }}>＋</button>}
+            </div>
+            {!readOnly && addSecOpen && (() => {
+              const mi = { textAlign: "left", background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 9, color: B.white, padding: "9px 12px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" };
+              return (
+                <div style={{ position: "absolute", right: 0, top: "calc(100% + 6px)", zIndex: 95, background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 12, padding: 11, width: 250, boxShadow: "0 14px 44px rgba(0,0,0,0.45)" }}>
+                  <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: B.muted, marginBottom: 8 }}>Add a section</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <button onClick={() => addSection("dashboard")} style={mi}>🧭 Dashboard — grid of bricks</button>
+                    {!hasKind("lessons") && <button onClick={() => addSection("lessons")} style={mi}>📚 Lessons</button>}
+                    {!hasKind("mentor") && <button onClick={() => addSection("mentor")} style={mi}>🎓 Mentor chat</button>}
+                    {!hasKind("tools") && <button onClick={() => addSection("tools")} style={mi}>🛠️ Tools</button>}
+                  </div>
+                  <div style={{ height: 1, background: B.border, margin: "10px 0" }} />
+                  <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: B.muted, marginBottom: 8 }}>Presets</div>
+                  <button onClick={singleChatPreset} style={{ ...mi, width: "100%" }}>💬 Single centered chat (no tabs)</button>
+                  {SECTIONS.length > 1 && <button onClick={() => removeSection(activeTab)} style={{ ...mi, width: "100%", marginTop: 8, color: "#F87171", border: "1px solid rgba(248,113,113,0.3)", background: "rgba(248,113,113,0.06)" }}>🗑 Remove “{(SECTIONS.find(s => s.id === activeTab)?.title) || "this section"}”</button>}
+                </div>
+              );
+            })()}
           </div>
 
           {activeTab === "lessons" && (<>
