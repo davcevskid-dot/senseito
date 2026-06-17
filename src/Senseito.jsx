@@ -878,6 +878,23 @@ function normalizeSections(content) {
 // OVERSEER (educational linter) — deterministic structural checks over the
 // concept graph. Free graph queries, no AI. Advises; never blocks.
 // ─────────────────────────────────────────────────────────────
+// Compact, content-only signature of a school for the semantic Overseer. Changes
+// only when teaching content changes (NOT on color/layout edits) so the AI pass
+// is skipped for pure design tweaks.
+function semanticOutline(school) {
+  if (!school) return "";
+  const lessons = (school.semesters || []).flatMap(s => s.lessons || []);
+  if (!lessons.length) return "";
+  const head = `SCHOOL: ${school.name} — ${school.description || ""}\nMENTOR VOICE: ${school.mentor?.name || ""} | ${school.mentor?.personality || school.voicePreset || ""} | sample: "${(school.mentor?.sampleLine || "").slice(0, 90)}"`;
+  const ls = lessons.map((l, i) => `${i + 1}. ${l.title} — ${(l.concept || "").slice(0, 90)} [${(l.blocks || []).map(b => b.type).join(",")}]`).join("\n");
+  const cs = (school.concepts || []).map(c => c.label).join(", ");
+  return `${head}\nCONCEPTS: ${cs}\nLESSONS:\n${ls}`;
+}
+const SEMANTIC_SYS = `You are the Senseito Overseer reviewing a learning experience for exactly two things:
+1) REDUNDANCY — two or more lessons/activities that teach the SAME idea with no added depth, or an activity that adds nothing.
+2) TONE / CONSISTENCY — lessons that clash with the mentor's stated voice, or jarring jumps in difficulty or style.
+You receive a compact outline. Return ONLY JSON: {"issues":[{"level":"info"|"warn","msg":"<=22 words, specific, name the lesson(s)","fix":"<one-line edit instruction the editor can apply>"}]}. At most 3 issues, highest-value first. If it's genuinely clean, return {"issues":[]}. Be conservative — only flag clear, real problems, never nitpicks.`;
+
 function lintSchool(school) {
   const out = [];
   // Contrast guardrail for custom palettes (runs even without a concept graph).
@@ -2882,7 +2899,25 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const [savingSlug, setSavingSlug] = useState(false);
   const [dismissedWarn, setDismissedWarn] = useState({});
   const [showWarn, setShowWarn] = useState(false);
-  const warnings = readOnly ? [] : lintSchool(school).filter(w => !dismissedWarn[w.msg]);
+  // Semantic Overseer — debounced cheap-AI pass for redundancy/tone, cached by content.
+  const [semWarn, setSemWarn] = useState([]);
+  const semCache = useRef({});
+  const semOutline = readOnly ? "" : semanticOutline(school);
+  useEffect(() => {
+    if (!semOutline) { setSemWarn([]); return; }
+    if (semCache.current[semOutline]) { setSemWarn(semCache.current[semOutline]); return; }
+    let cancelled = false;
+    const id = setTimeout(async () => {
+      try {
+        const out = await apiJSON(SEMANTIC_SYS, [{ role: "user", content: semOutline }], 500, "haiku");
+        const issues = (out.issues || []).filter(x => x && x.msg).slice(0, 3).map(x => ({ level: x.level === "warn" ? "warn" : "info", msg: String(x.msg), fix: String(x.fix || ""), semantic: true }));
+        semCache.current[semOutline] = issues;
+        if (!cancelled) setSemWarn(issues);
+      } catch { /* ignore — semantic pass is best-effort */ }
+    }, 5000);
+    return () => { cancelled = true; clearTimeout(id); };
+  }, [semOutline]);
+  const warnings = readOnly ? [] : [...lintSchool(school), ...semWarn].filter(w => !dismissedWarn[w.msg]).slice(0, 7);
   const [narrow, setNarrow] = useState(() => typeof window !== "undefined" && window.innerWidth < 900);
   useEffect(() => { const f = () => setNarrow(window.innerWidth < 900); window.addEventListener("resize", f); return () => window.removeEventListener("resize", f); }, []);
   useEffect(() => {
