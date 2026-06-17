@@ -1416,17 +1416,46 @@ function MicButton({ onText, T }) {
 }
 
 // ── 1. Flashcards ──
-function FlashcardBlock({ data = {}, onOutput, T, disabled }) {
-  const cards = data.cards || []; const [i, setI] = useState(0); const [flip, setFlip] = useState(false);
+// Adaptive drill: cheap-AI generates extra practice items targeting the learner's
+// weak concepts — the connective tissue that makes practice bricks bus-aware.
+async function aiDrill(school, weakLabels, kind) {
+  const ctx = `School: "${school?.name || ""}" — ${school?.description || ""}. The learner is weak on: ${weakLabels.join(", ")}. Make items that specifically shore up THOSE weak spots, in this school's subject.`;
+  if (kind === "flashcard") {
+    const out = await apiJSON(`Create 5 focused flashcards. Return ONLY JSON {"cards":[{"front","back"}]}.`, [{ role: "user", content: ctx }], 600, "haiku");
+    return (out.cards || []).filter(c => c && c.front && c.back).slice(0, 5);
+  }
+  if (kind === "quiz") {
+    const out = await apiJSON(`Create 3 focused multiple-choice questions. Return ONLY JSON {"questions":[{"q","options":[4 strings],"answer":0-3,"explain"}]}.`, [{ role: "user", content: ctx }], 800, "haiku");
+    return (out.questions || []).filter(q => q && q.q && Array.isArray(q.options) && q.options.length === 4).slice(0, 3);
+  }
+  return [];
+}
+// Shown when a brick result is weak — a real handoff to the mentor on the concept.
+function HandoffHint({ labels, T }) {
+  if (!labels?.length) return null;
+  return <div style={{ marginTop: 10, background: "rgba(56,189,248,0.07)", border: "1px solid rgba(56,189,248,0.3)", borderRadius: 10, padding: "9px 12px", fontSize: 12.5, color: B.white, lineHeight: 1.55 }}>🤝 Still shaky on <strong>{labels.join(", ")}</strong>? Open the <strong>Mentor</strong> and ask them to walk you through it — they already know you struggled here.</div>;
+}
+function FlashcardBlock({ data = {}, onOutput, T, disabled, school, bus }) {
+  const baseCards = data.cards || [];
+  const weak = weakLabelsFor(bus, school, data.concepts);
+  const [extra, setExtra] = useState([]); const [drilling, setDrilling] = useState(false);
+  const cards = [...extra, ...baseCards];
+  const [i, setI] = useState(0); const [flip, setFlip] = useState(false);
   const [rev, setRev] = useState([]); const [passed, setPassed] = useState(false);
+  const [weakResult, setWeakResult] = useState(false);
+  async function drill() {
+    if (drilling) return; setDrilling(true);
+    try { const c = await aiDrill(school, weak, "flashcard"); if (c.length) { setExtra(c); setI(0); setFlip(false); setRev([]); setPassed(false); } } catch { }
+    setDrilling(false);
+  }
   if (!cards.length) return <BlockShell type="flashcard" sub="No cards." />;
   function rate(d) {
     const next = [...rev, d]; setRev(next); setFlip(false);
-    if (next.length >= cards.length) { const ok = next.filter(x => x !== "again").length >= cards.length * 0.8; setPassed(true); onOutput?.({ type: "flashcard", cardsReviewed: next.length, passed: ok }); }
+    if (next.length >= cards.length) { const ok = next.filter(x => x !== "again").length >= cards.length * 0.8; setPassed(true); setWeakResult(!ok); onOutput?.({ type: "flashcard", cardsReviewed: next.length, passed: ok, concept: data.concepts?.[0] }); }
     else setI(i + 1);
   }
   const c = cards[Math.min(i, cards.length - 1)];
-  return (<BlockShell type="flashcard" passed={passed} sub={`Card ${Math.min(i + 1, cards.length)} of ${cards.length}`}>
+  return (<BlockShell type="flashcard" passed={passed} sub={`Card ${Math.min(i + 1, cards.length)} of ${cards.length}${extra.length ? " · focused round" : ""}`}>
     {!passed ? (<>
       <div onClick={() => setFlip(f => !f)} style={{ minHeight: 120, display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 12, padding: 20, cursor: "pointer", fontSize: 15, color: B.white, lineHeight: 1.6 }}>
         {flip ? c.back : c.front}
@@ -1437,7 +1466,13 @@ function FlashcardBlock({ data = {}, onOutput, T, disabled }) {
           <button key={k} disabled={disabled} onClick={() => rate(k)} style={{ background: B.surface, border: `1px solid ${col}`, borderRadius: 9, color: col, padding: "8px 16px", cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit" }}>{l}</button>
         ))}
       </div>}
-    </>) : <div style={{ textAlign: "center", color: B.mutedMid, fontSize: 13 }}>Deck complete — {rev.filter(x => x !== "again").length}/{cards.length} known.</div>}
+    </>) : <>
+      <div style={{ textAlign: "center", color: B.mutedMid, fontSize: 13 }}>Deck complete — {rev.filter(x => x !== "again").length}/{cards.length} known.</div>
+      {weakResult && <HandoffHint labels={weak.length ? weak : null} T={T} />}
+    </>}
+    {weak.length > 0 && !disabled && <div style={{ textAlign: "center", marginTop: 10 }}>
+      <button onClick={drill} disabled={drilling} style={{ background: "none", border: `1px solid ${T.ba}`, borderRadius: 9, color: T.hi, padding: "7px 14px", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>{drilling ? "Building…" : `🎯 Drill my weak spots (${weak.join(", ")})`}</button>
+    </div>}
   </BlockShell>);
 }
 
@@ -1994,10 +2029,18 @@ function StatGridBlock({ data = {}, T, school, bus }) {
 }
 
 // ── 27. Quiz ──
-function QuizBlock({ data = {}, onOutput, T, disabled }) {
-  const questions = data.questions || []; const [ans, setAns] = useState({});
-  const answered = questions.every((_, i) => ans[i] !== undefined); const score = questions.filter((q, i) => ans[i] === q.answer).length;
-  useEffect(() => { if (answered && questions.length) { const passed = score >= questions.length * 0.7; onOutput?.({ type: "quiz", score, passed }); } }, [answered]); // eslint-disable-line
+function QuizBlock({ data = {}, onOutput, T, disabled, school, bus }) {
+  const weak = weakLabelsFor(bus, school, data.concepts);
+  const [extra, setExtra] = useState([]); const [drilling, setDrilling] = useState(false);
+  const questions = [...(data.questions || []), ...extra]; const [ans, setAns] = useState({});
+  const answered = questions.length > 0 && questions.every((_, i) => ans[i] !== undefined); const score = questions.filter((q, i) => ans[i] === q.answer).length;
+  const lowScore = answered && score < questions.length * 0.7;
+  useEffect(() => { if (answered && questions.length) { const passed = score >= questions.length * 0.7; onOutput?.({ type: "quiz", score, passed, concept: data.concepts?.[0] }); } }, [answered]); // eslint-disable-line
+  async function drill() {
+    if (drilling) return; setDrilling(true);
+    try { const q = await aiDrill(school, weak, "quiz"); if (q.length) { setExtra(e => [...e, ...q]); setAns({}); } } catch { }
+    setDrilling(false);
+  }
   return (<BlockShell type="quiz" passed={answered && score >= questions.length * 0.7}>
     {questions.map((q, qi) => { const picked = ans[qi]; return (
       <div key={qi} style={{ marginBottom: 16 }}>
@@ -2011,6 +2054,10 @@ function QuizBlock({ data = {}, onOutput, T, disabled }) {
       </div>
     ); })}
     {answered && <div style={{ textAlign: "center", padding: 12, background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 10, fontSize: 14, fontWeight: 700, color: T.hi }}>Score: {score}/{questions.length} <button onClick={() => setAns({})} style={{ marginLeft: 10, background: "none", border: `1px solid ${T.ba}`, borderRadius: 8, color: T.hi, padding: "4px 12px", cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>Retake</button></div>}
+    {lowScore && <HandoffHint labels={weak.length ? weak : null} T={T} />}
+    {weak.length > 0 && !disabled && <div style={{ textAlign: "center", marginTop: 10 }}>
+      <button onClick={drill} disabled={drilling} style={{ background: "none", border: `1px solid ${T.ba}`, borderRadius: 9, color: T.hi, padding: "7px 14px", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>{drilling ? "Building…" : `🎯 Drill my weak spots (${weak.join(", ")})`}</button>
+    </div>}
   </BlockShell>);
 }
 
