@@ -157,6 +157,8 @@ const GLOBAL_CSS = `
   ::-webkit-scrollbar-thumb{background:rgba(124,58,237,0.28);border-radius:4px}
   ::-webkit-scrollbar-track{background:transparent}
   button:active{transform:scale(0.98)}
+  .dashGrid{display:grid;gap:14px}
+  @media(max-width:680px){.dashGrid{grid-template-columns:1fr !important}}
 `;
 function GlobalStyle() { return <style>{GLOBAL_CSS}</style>; }
 
@@ -339,6 +341,12 @@ const BLOCK_META = {
   reading_plain:       { label: "Reading",             icon: "📄", cat: "Info" },
   video_embed:         { label: "Video Embed",         icon: "▶️", cat: "Info" },
   embed:               { label: "Embed / Resource",    icon: "🔗", cat: "Info" },
+  // Design / UI bricks (display-only — for arranging & styling, not grading)
+  divider:             { label: "Divider",             icon: "➖", cat: "Design" },
+  callout:             { label: "Callout",             icon: "💡", cat: "Design" },
+  image:               { label: "Image",               icon: "🖼️", cat: "Design" },
+  cta_button:          { label: "Button",              icon: "🔘", cat: "Design" },
+  stat_grid:           { label: "Stat Grid",           icon: "📊", cat: "Design" },
   quiz:                { label: "Quiz",                icon: "❓", cat: "Info" },
   calculator:          { label: "Calculator",          icon: "🧮", cat: "Info" },
 };
@@ -376,6 +384,12 @@ Every block's data MAY include "concepts": [concept ids from the school's concep
 - video_embed: { url, title }
 - embed: { url, title, height? } — embeds an external resource (Google Drive file/folder, Google Docs/Sheets/Slides, Figma, a PDF, or any https page). Use this for "connect Google Drive", "attach a doc", "embed a figma", external reference material. If you don't have a real URL, OMIT this block (or leave url empty — it shows a "needs setup" prompt) rather than inventing one.
 - quiz: { questions:[{q, options:[4], answer (0-3), explain}] (3-6) }
+DESIGN / UI BRICKS (display-only — for arranging & styling a page; never grade the learner). Use these when the request is about LOOK/LAYOUT (a heading break, a highlighted note, a hero image, a call-to-action, a stats panel):
+- divider: { label?:"Section title" } — a horizontal rule, optionally labelled.
+- callout: { title?, body (markdown), tone?:"info"|"success"|"warn"|"accent", icon? } — a highlighted box.
+- image: { url (https), caption? } — a picture. Omit/empty url shows a "needs setup" prompt; don't invent URLs.
+- cta_button: { label, url (https), align?:"left"|"center"|"right" } — a styled link button.
+- stat_grid: { title? } — a live performance panel; auto-reads the learner's mastery & logged metrics (no content needed). Great on a dashboard.
 - calculator: numeric → { title, fields:[{label,key}], expression (JS using keys, e.g. "weight/(height*height)"), unit }; OR AI/text → { title, mode:"ai", fields:[{label,key,type:"text"}], rubric (what to compute, e.g. "count the verbs in the sentence") } — use AI mode whenever the answer needs language/judgement, not just arithmetic`;
 
 // ─────────────────────────────────────────────────────────────
@@ -444,6 +458,11 @@ function fallbackBlock(type, lesson) {
   if (type === "essay") return { type, data: { prompt: lesson?.mission || c, minWords: 120 } };
   if (type === "journal") return { type, data: { prompts: [lesson?.mission || c || "Reflect on this lesson."], minWords: 80 } };
   if (type === "reading") return { type, data: { passage: c, keyPhrases: [] } };
+  if (type === "divider") return { type, data: {} };
+  if (type === "stat_grid") return { type, data: {} };
+  if (type === "image") return { type, data: { url: "" } };
+  if (type === "cta_button") return { type, data: { label: "Learn more", url: "" } };
+  if (type === "callout") return { type, data: { body: c || lesson?.title || "", tone: "info" } };
   return { type: "reading_plain", data: { content: `## ${lesson?.title || "Lesson"}\n\n${c}` } };
 }
 // Remove duplicate blocks (same type + same content) — e.g. a failed author step
@@ -542,7 +561,7 @@ Output only the markdown. No preamble.`;
 
 const ITERATE_SYS = `You are the Senseito School Editor AI. You receive an existing school PLAN as JSON (lessons describe activities as "blockTypes": [type strings] only — NOT full block data) and an edit instruction.
 Return the FULL updated plan as JSON with the EXACT same structure and field names. Apply ONLY the requested change; preserve everything else exactly, including all lesson "number" values, each lesson's "blockTypes" array, the "sections" array, the "concepts" array, "layout", and learningPath/voicePreset/gamiPreset/theme (change those only if asked). If the change introduces a genuinely new concept, you may add it to "concepts". Also refresh "suggestions" to 3-4 NEW specific ideas that fit after this change.
-SECTIONS: the experience is made of "sections" (kinds: lessons, mentor, tools, dashboard). PRESERVE the existing sections and their order unless the instruction asks to add/remove/reorder them. A "dashboard" section has its own "blockTypes": [type strings] — keep them unless asked; if adding a tool to a dashboard, append a blockType. If the user asks for a new always-available tool/section, you may add a dashboard section.
+SECTIONS: the experience is made of "sections" (kinds: lessons, mentor, tools, dashboard). PRESERVE the existing sections and their order unless the instruction asks to add/remove/reorder them. A "dashboard" section has its own "blockTypes": [type strings] — keep them unless asked; if adding a tool to a dashboard, append a blockType. A dashboard section MAY also include "cols": 1, 2 or 3 (how many columns its bricks lay out in) — set/change it when the user asks about columns/layout. If the user asks for a new always-available tool/section (or "just a chat", a stats panel, etc.), you may add a section. Design/display bricks (divider, callout, image, cta_button, stat_grid) are allowed on dashboards.
 BLOCKS: keep each lesson's existing "blockTypes" unless the instruction changes them. When ADDING or RE-ORIENTING lessons, give each 1-3 blockTypes allowed for the school's learningPath (see list). Do NOT output block data — only type names. Block contents are authored in a separate step.
 Allowed block types per learning path:
 ${PATH_GUIDE}
@@ -851,7 +870,7 @@ function normalizeSections(content) {
     const singleton = s.kind !== "dashboard";
     let id = s.id || (singleton ? s.kind : `${s.kind}_${i}`);
     while (seen[id]) id = `${id}_${i}`; seen[id] = true;
-    return { id, kind: s.kind, title: s.title || SECTION_META[s.kind].title, icon: s.icon || SECTION_META[s.kind].icon, intro: s.intro, ...(s.kind === "dashboard" ? { blocks: s.blocks || [] } : {}) };
+    return { id, kind: s.kind, title: s.title || SECTION_META[s.kind].title, icon: s.icon || SECTION_META[s.kind].icon, intro: s.intro, ...(s.cols ? { cols: s.cols } : {}), ...(s.kind === "dashboard" ? { blocks: s.blocks || [] } : {}) };
   });
 }
 
@@ -1898,6 +1917,65 @@ function EmbedBlock({ data = {}, onOutput, T, disabled }) {
   </BlockShell>);
 }
 
+// ── DESIGN / UI BRICKS (display-only, no completion gate) ──
+function DividerBlock({ data = {} }) {
+  if (data.label) return (<div style={{ display: "flex", alignItems: "center", gap: 12, margin: "2px 0" }}>
+    <div style={{ flex: 1, height: 1, background: B.borderMid }} />
+    <span style={{ fontSize: 11.5, fontWeight: 700, color: B.mutedMid, letterSpacing: 0.5, textTransform: "uppercase" }}>{data.label}</span>
+    <div style={{ flex: 1, height: 1, background: B.borderMid }} />
+  </div>);
+  return <div style={{ height: 1, background: B.borderMid, margin: "4px 0" }} />;
+}
+function CalloutBlock({ data = {}, T }) {
+  const tones = { info: { bg: "rgba(56,189,248,0.08)", bd: "rgba(56,189,248,0.3)", ic: "💡" }, success: { bg: "rgba(74,222,128,0.08)", bd: "rgba(74,222,128,0.3)", ic: "✅" }, warn: { bg: "rgba(251,191,36,0.08)", bd: "rgba(251,191,36,0.3)", ic: "⚠️" }, accent: { bg: T.ps, bd: T.ba, ic: "⭐" } };
+  const t = tones[data.tone] || tones.info;
+  return (<div style={{ background: t.bg, border: `1px solid ${t.bd}`, borderRadius: 12, padding: "14px 16px", display: "flex", gap: 12 }}>
+    <div style={{ fontSize: 20, lineHeight: 1.2 }}>{data.icon || t.ic}</div>
+    <div style={{ flex: 1, minWidth: 0 }}>
+      {data.title && <div style={{ fontSize: 14, fontWeight: 700, color: B.white, marginBottom: 4 }}>{data.title}</div>}
+      <div style={{ fontSize: 13, color: B.white, lineHeight: 1.6 }}><Markdown text={data.body || data.content || ""} /></div>
+    </div>
+  </div>);
+}
+function ImageBlock({ data = {} }) {
+  const url = (data.url || "").trim();
+  if (!/^https:\/\//i.test(url)) return <div style={{ border: `1px dashed ${B.borderMid}`, borderRadius: 12, padding: "22px 16px", textAlign: "center", color: B.mutedMid, fontSize: 13 }}>🖼️ Add an image URL via the chat or this brick’s ✨ Tweak.</div>;
+  return (<figure style={{ margin: 0 }}>
+    <img src={url} alt={data.caption || ""} style={{ width: "100%", borderRadius: 12, display: "block", border: `1px solid ${B.border}` }} />
+    {data.caption && <figcaption style={{ fontSize: 12, color: B.muted, marginTop: 6, textAlign: "center" }}>{data.caption}</figcaption>}
+  </figure>);
+}
+function CtaButtonBlock({ data = {}, T }) {
+  const url = (data.url || "").trim(); const label = data.label || "Learn more";
+  const inner = <span style={{ display: "inline-block", background: T.grad, color: "white", fontWeight: 700, fontSize: 14, padding: "12px 26px", borderRadius: 10, fontFamily: "inherit", boxShadow: `0 6px 20px ${T.pg}` }}>{label}</span>;
+  return (<div style={{ textAlign: data.align || "center", padding: "4px 0" }}>{/^https?:\/\//i.test(url) ? <a href={url} target="_blank" rel="noopener noreferrer" style={{ textDecoration: "none" }}>{inner}</a> : inner}</div>);
+}
+// "Performance" brick — reflects the learner's live progress from the Context Bus.
+function StatGridBlock({ data = {}, T, school, bus }) {
+  const b = bus || { mastery: {}, metrics: {} };
+  const mast = Object.values(b.mastery || {});
+  const avg = mast.length ? Math.round(mast.reduce((a, v) => a + v, 0) / mast.length * 100) : null;
+  const solid = mast.filter(v => v >= 0.8).length;
+  const metrics = Object.entries(b.metrics || {}).slice(-3);
+  const tiles = [];
+  if (avg !== null) tiles.push(["Overall mastery", `${avg}%`]);
+  tiles.push(["Concepts solid", `${solid}/${(school?.concepts || []).length || mast.length || 0}`]);
+  metrics.forEach(([k, v]) => tiles.push([k, String(v)]));
+  const empty = avg === null && !metrics.length && !solid;
+  return (<div>
+    {data.title && <div style={{ fontSize: 13, fontWeight: 700, color: B.white, marginBottom: 10 }}>📊 {data.title}</div>}
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(110px,1fr))", gap: 10 }}>
+      {tiles.map(([k, v], i) => (
+        <div key={i} style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 12, padding: "14px 12px", textAlign: "center" }}>
+          <div style={{ fontSize: 24, fontWeight: 800, color: T.hi, fontFamily: "'Space Grotesk',sans-serif" }}>{v}</div>
+          <div style={{ fontSize: 11.5, color: B.mutedMid, marginTop: 4 }}>{k}</div>
+        </div>
+      ))}
+    </div>
+    {empty && <div style={{ fontSize: 12, color: B.muted, marginTop: 10, textAlign: "center" }}>Complete activities and your live stats appear here.</div>}
+  </div>);
+}
+
 // ── 27. Quiz ──
 function QuizBlock({ data = {}, onOutput, T, disabled }) {
   const questions = data.questions || []; const [ans, setAns] = useState({});
@@ -2023,6 +2101,7 @@ const BLOCK_COMPONENTS = {
   roleplay: RoleplayBlock, objection_handler: ObjectionHandlerBlock, interview_simulator: InterviewSimulatorBlock, audio_pitcher: AudioPitcherBlock,
   image_gate: ImageGateBlock, video_gate: VideoGateBlock,
   reading_plain: ReadingPlainBlock, video_embed: VideoEmbedBlock, embed: EmbedBlock, quiz: QuizBlock, calculator: CalculatorBlock,
+  divider: DividerBlock, callout: CalloutBlock, image: ImageBlock, cta_button: CtaButtonBlock, stat_grid: StatGridBlock,
   review: ReviewBlock, custom: CustomBlock,
 };
 function BlockRenderer({ block, onOutput, T, disabled, state, onState, school, bus }) {
@@ -2345,21 +2424,57 @@ function MentorFab({ school, bus, T }) {
 // DASHBOARD SECTION — always-on grid of bricks (ungated)
 // ─────────────────────────────────────────────────────────────
 function DashboardSection({ section, rec, T, onUpdate, readOnly, school, onIngest }) {
+  const [adding, setAdding] = useState(false);
   const blocks = section.blocks || [];
+  const cols = Math.min(3, Math.max(1, section.cols || 1));
   const stateFor = (i) => rec.toolStates?.[`${section.id}:${i}`];
   const setStateFor = (i, s) => onUpdate({ toolStates: { ...(rec.toolStates || {}), [`${section.id}:${i}`]: s } });
-  const replaceBlock = (i, nb) => onUpdate({ data: { ...school, sections: (school.sections || []).map(s => s.id === section.id ? { ...s, blocks: (s.blocks || []).map((b, j) => j === i ? nb : b) } : s) } });
+  const mutateSection = (fn) => onUpdate({ data: { ...school, sections: (school.sections || []).map(s => s.id === section.id ? fn(s) : s) } });
+  const replaceBlock = (i, nb) => mutateSection(s => ({ ...s, blocks: (s.blocks || []).map((b, j) => j === i ? nb : b) }));
+  const removeBlock = (i) => mutateSection(s => ({ ...s, blocks: (s.blocks || []).filter((_, j) => j !== i) }));
+  const addBlock = (type) => { setAdding(false); mutateSection(s => ({ ...s, blocks: [...(s.blocks || []), fallbackBlock(type, { title: section.title, concept: section.intro })] })); };
+  const setCols = (n) => mutateSection(s => ({ ...s, cols: n }));
+  const ADDABLE = [["callout", "💡 Callout"], ["image", "🖼️ Image"], ["cta_button", "🔘 Button"], ["divider", "➖ Divider"], ["stat_grid", "📊 Stat grid"], ["habit_checker", "✅ Habit checker"], ["metric_tracker", "📈 Metric tracker"], ["review", "🔁 Spaced review"]];
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       {section.intro && <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: "14px 20px", fontSize: 13, color: B.mutedMid, lineHeight: 1.6 }}>{section.intro}</div>}
-      {blocks.length === 0 && <div style={{ textAlign: "center", padding: "30px 20px", fontSize: 13, color: B.muted, border: `1px dashed ${B.borderMid}`, borderRadius: 14 }}>{readOnly ? "Nothing here yet." : "No tools here yet — ask in the chat to add some."}</div>}
-      {blocks.map((b, i) => (
-        <BrickFrame key={i} T={T} school={school} canEdit={!readOnly} blockType={b.type} ctx={{ title: section.title, concept: section.intro }} onReplace={(nb) => replaceBlock(i, nb)}>
-          <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 16, padding: 16, animation: "fadeUp 0.4s ease backwards", animationDelay: `${Math.min(i, 8) * 55}ms` }}>
-            <BlockRenderer block={b} T={T} school={school} bus={rec.toolStates?.__bus} state={stateFor(i)} onState={(s) => setStateFor(i, s)} onOutput={(o) => onIngest?.({ title: section.title, concepts: b.data?.concepts }, o)} />
+      {!readOnly && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 11, color: B.muted, fontWeight: 700 }}>Columns</span>
+          {[1, 2, 3].map(n => <button key={n} onClick={() => setCols(n)} style={{ width: 26, height: 24, borderRadius: 7, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 700, border: cols === n ? `1px solid ${T.ba}` : `1px solid ${B.borderMid}`, background: cols === n ? T.ps : "none", color: cols === n ? T.hi : B.mutedMid }}>{n}</button>)}
+        </div>
+      )}
+      {blocks.length === 0 && <div style={{ textAlign: "center", padding: "30px 20px", fontSize: 13, color: B.muted, border: `1px dashed ${B.borderMid}`, borderRadius: 14 }}>{readOnly ? "Nothing here yet." : "Empty — add a brick below, or ask in the chat."}</div>}
+      <div className="dashGrid" style={{ gridTemplateColumns: `repeat(${cols},minmax(0,1fr))` }}>
+        {blocks.map((b, i) => (
+          <div key={i} style={{ position: "relative" }}>
+            {!readOnly && <button onClick={() => removeBlock(i)} title="Remove brick" style={{ position: "absolute", top: 8, left: 8, zIndex: 4, background: "rgba(248,113,113,0.12)", border: "1px solid rgba(248,113,113,0.35)", borderRadius: 8, color: "#F87171", width: 24, height: 22, cursor: "pointer", fontSize: 12, fontFamily: "inherit", lineHeight: 1 }}>✕</button>}
+            <BrickFrame T={T} school={school} canEdit={!readOnly} blockType={b.type} ctx={{ title: section.title, concept: section.intro }} onReplace={(nb) => replaceBlock(i, nb)}>
+              <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 16, padding: 16, animation: "fadeUp 0.4s ease backwards", animationDelay: `${Math.min(i, 8) * 55}ms` }}>
+                <BlockRenderer block={b} T={T} school={school} bus={rec.toolStates?.__bus} state={stateFor(i)} onState={(s) => setStateFor(i, s)} onOutput={(o) => onIngest?.({ title: section.title, concepts: b.data?.concepts }, o)} />
+              </div>
+            </BrickFrame>
           </div>
-        </BrickFrame>
-      ))}
+        ))}
+      </div>
+      {!readOnly && (
+        <div>
+          {!adding ? (
+            <button onClick={() => setAdding(true)} style={{ width: "100%", background: "none", border: `1px dashed ${B.borderMid}`, borderRadius: 12, color: B.mutedMid, padding: "11px", cursor: "pointer", fontSize: 13, fontFamily: "inherit", fontWeight: 700 }}>＋ Add a brick</button>
+          ) : (
+            <div style={{ background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 12, padding: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 9 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: B.white }}>Add a brick — tweak it with ✨ after</span>
+                <button onClick={() => setAdding(false)} style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 14 }}>✕</button>
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+                {ADDABLE.map(([t, lbl]) => <button key={t} onClick={() => addBlock(t)} style={{ background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, padding: "7px 12px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit" }}>{lbl}</button>)}
+              </div>
+              <div style={{ fontSize: 11.5, color: B.muted, marginTop: 9 }}>Need something specific? Just describe it in the chat.</div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -2428,6 +2543,11 @@ function blockFields(type) {
   return ({
     video_embed: [["url", "Video URL (YouTube / Loom)"], ["title", "Title"]],
     embed: [["url", "Resource URL (Drive, Docs, Figma, PDF…)"], ["title", "Title"]],
+    divider: [["label", "Label (optional)"]],
+    callout: [["title", "Title"], ["body", "Body (markdown)"], ["tone", "Tone (info/success/warn/accent)"]],
+    image: [["url", "Image URL (https)"], ["caption", "Caption"]],
+    cta_button: [["label", "Button label"], ["url", "Link URL (https)"], ["align", "Align (left/center/right)"]],
+    stat_grid: [["title", "Title (optional)"]],
     reading_plain: [["content", "Content (markdown)", "area"]],
     reading: [["passage", "Passage", "area"]],
     image_gate: [["instruction", "Instruction"], ["criteria", "Pass criteria"]],
