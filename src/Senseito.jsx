@@ -3839,7 +3839,10 @@ function Home({ onCreated }) {
       )}
       {phase === "idle" && (
         <div style={{ position: "relative", zIndex: 1, textAlign: "center", paddingTop: 48, paddingBottom: 44 }}>
-          <div style={{ display: "flex", justifyContent: "center", marginBottom: 18 }}><SenseitoMark size={92} /></div>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 20 }}>
+            <SenseitoMark size={132} />
+            <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: "clamp(30px,6vw,40px)", fontWeight: 700, letterSpacing: -0.5, color: B.white, marginTop: 6 }}>Sensei<span style={{ background: "linear-gradient(135deg,#7C3AED,#06B6D4)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>to</span></div>
+          </div>
           <div style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "rgba(124,58,237,0.09)", border: "1px solid rgba(124,58,237,0.35)", borderRadius: 100, padding: "5px 14px", fontSize: 11, fontWeight: 700, color: "#F0ABFC", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 22 }}>
             <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#F0ABFC", display: "inline-block" }} /> Powered by Claude AI
           </div>
@@ -3891,25 +3894,6 @@ function Home({ onCreated }) {
               ))}
             </div>
           )}
-        </div>
-      )}
-      {phase === "idle" && (
-        <div style={{ marginTop: 24 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.5, color: B.muted, marginBottom: 12, textAlign: "center" }}>Or open a ready-made school — instantly, free</div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))", gap: 12 }}>
-            {EXAMPLE_SCHOOLS.map((ex, i) => {
-              const ET = themeFor(ex);
-              return (
-                <button key={i} onClick={() => onCreated(composeSchool(ex))} style={{ textAlign: "left", background: ET.gr, border: `1px solid ${ET.ba}`, borderRadius: 16, padding: "16px 16px", cursor: "pointer", fontFamily: "inherit", animation: "fadeUp 0.5s ease backwards", animationDelay: `${i * 80}ms`, transition: "transform 0.15s" }}
-                  onMouseEnter={e => e.currentTarget.style.transform = "translateY(-3px)"} onMouseLeave={e => e.currentTarget.style.transform = "none"}>
-                  <div style={{ fontSize: 26, marginBottom: 8 }}>{ex.emoji}</div>
-                  <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 15, fontWeight: 700, color: B.white, marginBottom: 3 }}>{ex.name}</div>
-                  <div style={{ fontSize: 12, color: B.mutedMid, lineHeight: 1.5, marginBottom: 10 }}>{ex.tagline}</div>
-                  <span style={{ fontSize: 11, fontWeight: 700, color: ET.hi }}>Open instantly →</span>
-                </button>
-              );
-            })}
-          </div>
         </div>
       )}
       {phase === "thinking" && (
