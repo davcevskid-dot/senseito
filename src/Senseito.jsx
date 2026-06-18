@@ -529,6 +529,19 @@ const PATH_GUIDE = Object.entries(LEARNING_PATH_RULES).map(([k, v]) =>
   `${k} [layout:${v.layout}] allowed: ${v.allowedBlocks === "all" ? "ANY" : v.allowedBlocks.join(",")}${(v.forbiddenBlocks || []).length ? ` | forbidden: ${v.forbiddenBlocks.join(",")}` : ""}`
 ).join("\n");
 
+// Experience templates — bundle the whole look & feel (theme/skin/font/density/
+// gamification + chrome) for a use-case vibe. Set on creation by the architect,
+// switchable + customizable by the creator. Individual fields still override.
+// NOTE: must be defined BEFORE ARCHITECT_SYS (a plain string that interpolates it).
+const TEMPLATES = {
+  academy: { label: "Academy", emoji: "🎓", theme: "violet", skin: "aurora", font: "inter", density: "cozy", gami: "xp", desc: "Balanced course — the Senseito default." },
+  corporate: { label: "Corporate / HR", emoji: "🏢", theme: "cyan", skin: "minimal", font: "grotesk", density: "cozy", gami: "none", chrome: true, desc: "Clean & business-like; company logo + nav links." },
+  kids: { label: "Kids / Language", emoji: "🐣", theme: "amber", skin: "playful", font: "poppins", density: "spacious", gami: "xp", desc: "Bright, bite-size and game-y; streaks & XP." },
+  quickskill: { label: "Quick Skill", emoji: "⚡", theme: "emerald", skin: "bold", font: "grotesk", density: "compact", gami: "none", desc: "A fast step-by-step path to one concrete skill." },
+  coaching: { label: "Coaching / Mindset", emoji: "🌱", theme: "rose", skin: "zen", font: "lora", density: "spacious", gami: "none", desc: "Calm & reflective; mentor-led + Garden." },
+};
+const TEMPLATE_KEYS = Object.keys(TEMPLATES);
+
 // ─────────────────────────────────────────────────────────────
 // PROMPTS
 // ─────────────────────────────────────────────────────────────
@@ -924,18 +937,6 @@ const LAYOUTS = {
   practice: { label: "Practice Dashboard", kinds: ["dashboard", "mentor"], desc: "A live dashboard of tools + a mentor" },
   toolkit: { label: "Pure Toolkit", kinds: ["tools"], desc: "Just interactive tools" },
 };
-
-// Experience templates — bundle the whole look & feel (theme/skin/font/density/
-// gamification + chrome) for a use-case vibe. Set on creation by the architect,
-// switchable + customizable by the creator. Individual fields still override.
-const TEMPLATES = {
-  academy: { label: "Academy", emoji: "🎓", theme: "violet", skin: "aurora", font: "inter", density: "cozy", gami: "xp", desc: "Balanced course — the Senseito default." },
-  corporate: { label: "Corporate / HR", emoji: "🏢", theme: "cyan", skin: "minimal", font: "grotesk", density: "cozy", gami: "none", chrome: true, desc: "Clean & business-like; company logo + nav links." },
-  kids: { label: "Kids / Language", emoji: "🐣", theme: "amber", skin: "playful", font: "poppins", density: "spacious", gami: "xp", desc: "Bright, bite-size and game-y; streaks & XP." },
-  quickskill: { label: "Quick Skill", emoji: "⚡", theme: "emerald", skin: "bold", font: "grotesk", density: "compact", gami: "none", desc: "A fast step-by-step path to one concrete skill." },
-  coaching: { label: "Coaching / Mindset", emoji: "🌱", theme: "rose", skin: "zen", font: "lora", density: "spacious", gami: "none", desc: "Calm & reflective; mentor-led + Garden." },
-};
-const TEMPLATE_KEYS = Object.keys(TEMPLATES);
 function sectionTitle(s) { return `${s.icon || SECTION_META[s.kind]?.icon || "•"} ${s.title || SECTION_META[s.kind]?.title || "Section"}`; }
 
 // Visual SKINS so no two schools look the same. Each varies the banner treatment,
