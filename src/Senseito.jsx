@@ -383,6 +383,7 @@ const BLOCK_META = {
   video_gate:          { label: "Video Gate",          icon: "🎬", cat: "Proof" },
   // Information & context
   review:              { label: "Spaced Review",       icon: "🔁", cat: "Knowledge" },
+  garden:              { label: "Mindset Garden",      icon: "🌱", cat: "Knowledge" },
   reading_plain:       { label: "Reading",             icon: "📄", cat: "Info" },
   video_embed:         { label: "Video Embed",         icon: "▶️", cat: "Info" },
   embed:               { label: "Embed / Resource",    icon: "🔗", cat: "Info" },
@@ -425,6 +426,7 @@ Every block's data MAY include "concepts": [concept ids from the school's concep
 - image_gate: { instruction, criteria }
 - video_gate: { instruction }
 - review: { count?:5 } — spaced repetition: auto-resurfaces the learner's weakest concepts (from their mastery) and quizzes recall. No content needed. Great on a dashboard for courses.
+- garden: { title?:"..." } — Mindset Garden: limiting beliefs the mentor captures appear as weeds the learner reframes (with AI) into flowers. No content needed. Ideal as a dashboard section for coaching, mindset, sales, therapy, confidence schools.
 - reading_plain: { content (markdown), image?:"https… optional top image" }
 - video_embed: { url, title }
 - embed: { url, title, height? } — embeds an external resource (Google Drive file/folder, Google Docs/Sheets/Slides, Figma, a PDF, or any https page). Use this for "connect Google Drive", "attach a doc", "embed a figma", external reference material. If you don't have a real URL, OMIT this block (or leave url empty — it shows a "needs setup" prompt) rather than inventing one.
@@ -711,6 +713,13 @@ PREFERRED — emit a \`\`\`viz block containing ONE JSON object (the app renders
 - {"type":"compare","left":{"title":"Before","items":["..."]},"right":{"title":"After","items":["..."]}}
 FALLBACK — only for something the above cannot express, emit a \`\`\`widget block with fully self-contained SVG/HTML (NO external URLs/scripts/fonts/images — it runs sandboxed offline; inline styles only; transparent background; light text #e7e9f5; use var(--p)/var(--a) for accents; keep it small).`;
 
+function schoolHasGarden(school) {
+  const has = arr => (arr || []).some(b => b?.type === "garden");
+  if ((school?.sections || []).some(s => s.kind === "dashboard" && has(s.blocks))) return true;
+  return (school?.semesters || []).some(s => (s.lessons || []).some(l => has(l.blocks)));
+}
+const MENTOR_GARDEN_NOTE = `MINDSET GARDEN: this school has a Garden where limiting beliefs become growth. If the student reveals a GENUINE self-limiting belief (e.g. "I'm just not a numbers person", "I always choke when I close"), capture it by ending your reply with a line EXACTLY: WEED: <their belief, one short sentence in their own words>. At most once per reply, only for real self-limiting beliefs (not ordinary mistakes). Never mention this mechanic — just keep mentoring naturally.`;
+
 function mentorSys(school, lesson, bus, opts = {}) {
   const dna = school.knowledgeDNA ? `\nKNOWLEDGE DNA (your source material — teach from this, use its vocabulary):\n${String(school.knowledgeDNA).slice(0, 4000)}\n` : "";
   const modeNote = {
@@ -739,7 +748,7 @@ RULES:
 - When the student reports their mission/work: evaluate strictly. If they pass, say exactly what proved it. If not, say exactly what's missing — one thing at a time.
 - You are NOT an assistant. You are a mentor with standards. Stay in character always.
 - Keep replies under 140 words unless doing a formal evaluation.
-${MENTOR_WIDGET_NOTE}`;
+${MENTOR_WIDGET_NOTE}${schoolHasGarden(school) ? `\n${MENTOR_GARDEN_NOTE}` : ""}`;
 }
 
 function mentorOfficeSys(school, bus) {
@@ -749,7 +758,7 @@ ${school.mentor.systemVoice}
 ${dna}${busContext(bus, school)}
 THE SCHOOL: ${school.description} Lessons: ${school.semesters?.flatMap(s => s.lessons?.map(l => l.title)).join("; ")}
 The student can ask you ANYTHING related to this subject. Stay fully in character. Connect answers back to the school's lessons and missions when relevant. Push them toward action, not consumption. Never bullet lists. Replies under 150 words.
-${MENTOR_WIDGET_NOTE}`;
+${MENTOR_WIDGET_NOTE}${schoolHasGarden(school) ? `\n${MENTOR_GARDEN_NOTE}` : ""}`;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1193,7 +1202,10 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, canEdit, onUpda
     setMsgs(m => [...m, { role: "user", content: userMsg }]); setLoading(true);
     try {
       const activityStatus = total ? `${passedBlocks}/${total} activities done —${blocks.map((b, i) => ` ${outputs[i]?.passed ? "✓" : "✗"} ${b.data?.title || BLOCK_META[b.type]?.label || b.type}`).join(",")}` : "this lesson has no activities";
-      const reply = await api(mentorSys(school, lesson, bus, { mode, activityStatus }), toApiMessages(convo), 2000);
+      let reply = await api(mentorSys(school, lesson, bus, { mode, activityStatus }), toApiMessages(convo), 2000);
+      // Capture any limiting belief the mentor flagged (WEED:) into the Garden, strip it from view.
+      const wd = reply.match(/WEED:\s*(.+)/i);
+      if (wd) { onIngest?.({ title: lesson?.title, lessonId: lesson?.number }, { type: "mindset", weed: wd[1].trim() }); reply = reply.replace(/\n?\s*WEED:\s*.+/i, "").trim(); }
       // Mode "activities": capture an assigned MISSION and pin it (stored as a 'mission' message).
       const mm = reply.match(/MISSION:\s*([\s\S]+)/i);
       if (mode === "activities" && mm && !mission) {
@@ -1322,7 +1334,7 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, canEdit, onUpda
 // ─────────────────────────────────────────────────────────────
 // MENTOR OFFICE HOURS
 // ─────────────────────────────────────────────────────────────
-function MentorOffice({ school, T, chat, onChat, bus }) {
+function MentorOffice({ school, T, chat, onChat, bus, onIngest }) {
   const msgs = chat?.length ? chat : [{ role: "assistant", content: `Office hours are open. Bring me something real — a question, a struggle, a situation from your life. We'll work on it together.` }];
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -1335,7 +1347,9 @@ function MentorOffice({ school, T, chat, onChat, bus }) {
     const next = [...msgs, { role: "user", content: userMsg }];
     onChat(next); setLoading(true);
     try {
-      const reply = await api(mentorOfficeSys(school, bus), toApiMessages(next), 2000);
+      let reply = await api(mentorOfficeSys(school, bus), toApiMessages(next), 2000);
+      const wd = reply.match(/WEED:\s*(.+)/i);
+      if (wd) { onIngest?.({ title: "Office hours" }, { type: "mindset", weed: wd[1].trim() }); reply = reply.replace(/\n?\s*WEED:\s*.+/i, "").trim(); }
       onChat([...next, { role: "assistant", content: reply }]);
     } catch (e) { onChat([...next, { role: "assistant", content: `Error: ${e.message}` }]); }
     setLoading(false);
@@ -2287,6 +2301,49 @@ function CustomBlock({ data = {}, onOutput, T, disabled, school }) {
 
 // ── BlockRenderer: routes a block to its component ──
 // ── Spaced Review ── (consumes concept mastery from the bus; resurfaces weak concepts)
+// ── Mindset Garden — limiting beliefs the mentor flagged appear as weeds; the
+// learner reframes each one with AI and it blooms into a flower. Reads bus.weeds. ──
+function GardenBlock({ data = {}, onOutput, T, school, bus, disabled }) {
+  const weeds = (bus?.weeds || []);
+  const [busyId, setBusyId] = useState(null);
+  const [draft, setDraft] = useState({}); // id -> shown reframe before commit
+  async function reframe(w) {
+    if (busyId) return; setBusyId(w.id);
+    try {
+      const sys = `${blockMentor(school)} A learner holds this limiting belief: "${w.text}". Reframe it into ONE empowering, believable, first-person belief they could actually adopt — specific, warm, not toxic-positive. Reply with ONLY the reframed sentence, no preamble.`;
+      const r = await api(sys, [{ role: "user", content: w.text }], 160);
+      const flower = (r || "").trim().replace(/^["']|["']$/g, "");
+      setDraft(d => ({ ...d, [w.id]: flower }));
+      onOutput?.({ type: "mindset", reframeId: w.id, reframe: flower });
+    } catch { }
+    setBusyId(null);
+  }
+  const active = weeds.filter(w => w.status !== "flower");
+  const bloomed = weeds.filter(w => w.status === "flower");
+  return (<BlockShell type="garden" sub={data.title || "Limiting beliefs become growth — transform each one."}>
+    {weeds.length === 0 && <div style={{ textAlign: "center", padding: "26px 16px", color: B.mutedMid, fontSize: 13, lineHeight: 1.6 }}>🌱 Your garden is clear.<div style={{ fontSize: 12, color: B.muted, marginTop: 6 }}>As you talk with your mentor, any limiting beliefs you reveal get planted here so you can transform them.</div></div>}
+    {active.map(w => (
+      <div key={w.id} style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 12, padding: "12px 14px", marginBottom: 10 }}>
+        <div style={{ display: "flex", gap: 9, alignItems: "flex-start" }}><span style={{ fontSize: 16, lineHeight: 1.3 }}>🌿</span><div style={{ fontSize: 13.5, color: B.white, lineHeight: 1.5, fontStyle: "italic" }}>“{w.text}”</div></div>
+        {draft[w.id] ? (
+          <div style={{ marginTop: 10, background: "rgba(74,222,128,0.07)", border: "1px solid rgba(74,222,128,0.3)", borderRadius: 10, padding: "10px 12px", fontSize: 13.5, color: "#86efac", lineHeight: 1.55 }}>🌸 {draft[w.id]}</div>
+        ) : (
+          <button onClick={() => reframe(w)} disabled={disabled || !!busyId} style={{ ...pBtn(T), marginTop: 10, opacity: busyId ? 0.5 : 1 }}>{busyId === w.id ? "Transforming…" : "🌱 Transform this"}</button>
+        )}
+      </div>
+    ))}
+    {bloomed.length > 0 && <div style={{ marginTop: active.length ? 14 : 0 }}>
+      <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, color: T.hi, marginBottom: 8 }}>🌸 In bloom</div>
+      {bloomed.map(w => (
+        <div key={w.id} style={{ background: "rgba(74,222,128,0.06)", border: "1px solid rgba(74,222,128,0.25)", borderRadius: 12, padding: "11px 14px", marginBottom: 8 }}>
+          <div style={{ fontSize: 13.5, color: "#86efac", lineHeight: 1.55 }}>🌸 {w.reframe || draft[w.id]}</div>
+          <div style={{ fontSize: 11.5, color: B.muted, marginTop: 5, textDecoration: "line-through" }}>{w.text}</div>
+        </div>
+      ))}
+    </div>}
+  </BlockShell>);
+}
+
 function ReviewBlock({ data = {}, onOutput, T, disabled, school, bus }) {
   const N = data.count || 5;
   const [queue] = useState(() => {
@@ -2336,7 +2393,7 @@ const BLOCK_COMPONENTS = {
   image_gate: ImageGateBlock, video_gate: VideoGateBlock,
   reading_plain: ReadingPlainBlock, video_embed: VideoEmbedBlock, embed: EmbedBlock, quiz: QuizBlock, calculator: CalculatorBlock,
   divider: DividerBlock, callout: CalloutBlock, image: ImageBlock, cta_button: CtaButtonBlock, stat_grid: StatGridBlock,
-  review: ReviewBlock, custom: CustomBlock,
+  review: ReviewBlock, garden: GardenBlock, custom: CustomBlock,
 };
 // Concepts the learner is currently weak on that THIS brick teaches/tests.
 function weakLabelsFor(bus, school, concepts) {
@@ -2687,7 +2744,7 @@ function DashboardSection({ section, rec, T, onUpdate, readOnly, school, onInges
   const removeBlock = (i) => mutateSection(s => ({ ...s, blocks: (s.blocks || []).filter((_, j) => j !== i) }));
   const addBlock = (type) => { setAdding(false); mutateSection(s => ({ ...s, blocks: [...(s.blocks || []), fallbackBlock(type, { title: section.title, concept: section.intro })] })); };
   const setCols = (n) => mutateSection(s => ({ ...s, cols: n }));
-  const ADDABLE = [["callout", "💡 Callout"], ["image", "🖼️ Image"], ["cta_button", "🔘 Button"], ["divider", "➖ Divider"], ["stat_grid", "📊 Stat grid"], ["habit_checker", "✅ Habit checker"], ["metric_tracker", "📈 Metric tracker"], ["review", "🔁 Spaced review"]];
+  const ADDABLE = [["callout", "💡 Callout"], ["image", "🖼️ Image"], ["cta_button", "🔘 Button"], ["divider", "➖ Divider"], ["stat_grid", "📊 Stat grid"], ["habit_checker", "✅ Habit checker"], ["metric_tracker", "📈 Metric tracker"], ["review", "🔁 Spaced review"], ["garden", "🌱 Mindset garden"]];
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       {section.intro && <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: "14px 20px", fontSize: 13, color: B.mutedMid, lineHeight: 1.6 }}>{section.intro}</div>}
@@ -2816,6 +2873,7 @@ function blockFields(type) {
     image: [["url", "Image URL (https)"], ["caption", "Caption"]],
     cta_button: [["label", "Button label"], ["url", "Link URL (https)"], ["align", "Align (left/center/right)"]],
     stat_grid: [["title", "Title (optional)"]],
+    garden: [["title", "Title (optional)"]],
     reading_plain: [["content", "Content (markdown)", "area"], ["image", "Image URL (https, optional)"]],
     reading: [["passage", "Passage", "area"], ["image", "Image URL (https, optional)"]],
     image_gate: [["instruction", "Instruction"], ["criteria", "Pass criteria"]],
@@ -3284,8 +3342,17 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const bus = rec.toolStates?.__bus || { struggles: [], metrics: {}, mastery: {} };
   function ingestOutput(ctx, output) {
     if (!output || !output.type) return;
-    const cur = rec.toolStates?.__bus || { struggles: [], metrics: {}, mastery: {} };
-    const next = { struggles: [...(cur.struggles || [])], metrics: { ...(cur.metrics || {}) }, mastery: { ...(cur.mastery || {}) } };
+    const cur = rec.toolStates?.__bus || { struggles: [], metrics: {}, mastery: {}, weeds: [] };
+    const next = { struggles: [...(cur.struggles || [])], metrics: { ...(cur.metrics || {}) }, mastery: { ...(cur.mastery || {}) }, weeds: [...(cur.weeds || [])] };
+    // Garden: a mentor flagged a limiting belief (weed), or the student reframed one (flower).
+    if (output.type === "mindset") {
+      if (output.weed && !next.weeds.some(w => w.text.toLowerCase() === String(output.weed).toLowerCase())) {
+        next.weeds = [...next.weeds, { id: uid(), text: String(output.weed).slice(0, 200), status: "weed", at: Date.now() }].slice(-40);
+      }
+      if (output.reframeId) next.weeds = next.weeds.map(w => w.id === output.reframeId ? { ...w, status: "flower", reframe: String(output.reframe || "").slice(0, 300) } : w);
+      onUpdate({ toolStates: { ...(rec.toolStates || {}), __bus: next } });
+      return;
+    }
     const concepts = (output.concept ? [output.concept] : (ctx.concepts || [])).filter(Boolean);
     if (typeof output.passed === "boolean" && concepts.length) {
       concepts.forEach(cid => { const prev = next.mastery[cid] ?? 0.5; next.mastery[cid] = Math.round((prev * 0.6 + (output.passed ? 1 : 0) * 0.4) * 100) / 100; });
@@ -3564,7 +3631,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
               </div>
             )}
           </>)}
-          {activeTab === "mentor" && <MentorOffice school={school} T={T} chat={rec.mentorChat || []} onChat={(msgs) => onUpdate({ mentorChat: msgs })} bus={bus} />}
+          {activeTab === "mentor" && <MentorOffice school={school} T={T} chat={rec.mentorChat || []} onChat={(msgs) => onUpdate({ mentorChat: msgs })} bus={bus} onIngest={ingestOutput} />}
           {activeTab === "tools" && <ToolsSection rec={rec} T={T} onUpdate={onUpdate} buildTool={buildTool} buildingTool={buildingTool} readOnly={readOnly} onReloadIdeas={reloadIdeas} onEditTool={editTool} />}
           {SECTIONS.filter(s => s.kind === "dashboard").map(sec => activeTab === sec.id
             ? <DashboardSection key={sec.id} section={sec} rec={rec} T={T} onUpdate={onUpdate} readOnly={readOnly} school={school} onIngest={ingestOutput} />
