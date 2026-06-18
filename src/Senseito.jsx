@@ -384,6 +384,9 @@ const BLOCK_META = {
   // Information & context
   review:              { label: "Spaced Review",       icon: "🔁", cat: "Knowledge" },
   garden:              { label: "Mindset Garden",      icon: "🌱", cat: "Knowledge" },
+  match_pairs:         { label: "Match Pairs",         icon: "🔀", cat: "Game" },
+  fill_blank:          { label: "Fill the Blank",      icon: "✏️", cat: "Game" },
+  order_words:         { label: "Word Order",          icon: "🔤", cat: "Game" },
   reading_plain:       { label: "Reading",             icon: "📄", cat: "Info" },
   video_embed:         { label: "Video Embed",         icon: "▶️", cat: "Info" },
   embed:               { label: "Embed / Resource",    icon: "🔗", cat: "Info" },
@@ -426,6 +429,9 @@ Every block's data MAY include "concepts": [concept ids from the school's concep
 - image_gate: { instruction, criteria }
 - video_gate: { instruction }
 - review: { count?:5 } — spaced repetition: auto-resurfaces the learner's weakest concepts (from their mastery) and quizzes recall. No content needed. Great on a dashboard for courses.
+- match_pairs: { pairs:[{a,b}] (4-8 pairs, e.g. {a:"gato",b:"cat"}) } — tap-to-match vocabulary game.
+- fill_blank: { sentence (put "___" where the word goes), options:[3-4 choices], answer (0-based index of the correct option), explain? } — cloze game.
+- order_words: { prompt (what to say, e.g. "Say: I am learning"), answer:[words IN CORRECT ORDER] } — sentence-building game (words are shuffled for the learner).
 - garden: { title?:"..." } — Mindset Garden: limiting beliefs the mentor captures appear as weeds the learner reframes (with AI) into flowers. No content needed. Ideal as a dashboard section for coaching, mindset, sales, therapy, confidence schools.
 - reading_plain: { content (markdown), image?:"https… optional top image" }
 - video_embed: { url, title }
@@ -446,7 +452,7 @@ DESIGN / UI BRICKS (display-only — for arranging & styling a page; never grade
 const LEARNING_PATH_RULES = {
   theory:        { keywords: ["philosophy","theory","history","concept","understand","explain","ideas","stoic","ethics","logic"], allowedBlocks: ["reading","flashcard","mindmap","essay","debate","quiz","reading_plain","video_embed"], forbiddenBlocks: ["code_sandbox","terminal","macro_tracker","heatmap"], layout: "chronological" },
   coding:        { keywords: ["code","coding","python","javascript","programming","develop","build app","api","git","software","algorithm","react"], allowedBlocks: ["reading_plain","code_sandbox","terminal","sequencer","quiz","video_embed"], forbiddenBlocks: ["macro_tracker","heatmap","roleplay","essay","mood_quadrant"], layout: "project-based" },
-  language:      { keywords: ["language","spanish","french","mandarin","german","japanese","speak","fluent","grammar","conversation","vocabulary"], allowedBlocks: ["flashcard","audio_pitcher","roleplay","branching_scenario","quiz","video_embed","reading"], forbiddenBlocks: ["code_sandbox","terminal","macro_tracker"], layout: "progressive" },
+  language:      { keywords: ["language","spanish","french","mandarin","german","japanese","speak","fluent","grammar","conversation","vocabulary"], allowedBlocks: ["flashcard","match_pairs","fill_blank","order_words","audio_pitcher","roleplay","branching_scenario","quiz","video_embed","reading"], forbiddenBlocks: ["code_sandbox","terminal","macro_tracker"], layout: "progressive" },
   creative:      { keywords: ["design","art","drawing","painting","writing","creative","photography","music production","craft","illustration"], allowedBlocks: ["video_embed","image_gate","reading","essay","sequencer","journal"], forbiddenBlocks: ["code_sandbox","terminal","macro_tracker"], layout: "project-based" },
   physical:      { keywords: ["sport","movement","athletic","skill drill","dance","martial","yoga pose","technique"], allowedBlocks: ["video_embed","image_gate","video_gate","habit_checker","heatmap","reflection_timer"], forbiddenBlocks: ["code_sandbox","terminal","essay"], layout: "weekly-milestones" },
   fitness:       { keywords: ["fitness","workout","gym","muscle","strength","transformation","body","training","reps","lift"], allowedBlocks: ["heatmap","habit_checker","macro_tracker","image_gate","weekly_planner","metric_tracker","video_embed"], forbiddenBlocks: ["code_sandbox","terminal","essay","debate"], layout: "weekly-milestones" },
@@ -510,6 +516,9 @@ function fallbackBlock(type, lesson) {
   if (type === "image") return { type, data: { url: "" } };
   if (type === "cta_button") return { type, data: { label: "Learn more", url: "" } };
   if (type === "callout") return { type, data: { body: c || lesson?.title || "", tone: "info" } };
+  if (type === "match_pairs") return { type, data: { pairs: [] } };
+  if (type === "fill_blank") return { type, data: { sentence: "___", options: [], answer: 0 } };
+  if (type === "order_words") return { type, data: { prompt: c, answer: (c || "").split(" ").filter(Boolean).slice(0, 8) } };
   return { type: "reading_plain", data: { content: `## ${lesson?.title || "Lesson"}\n\n${c}` } };
 }
 // Remove duplicate blocks (same type + same content) — e.g. a failed author step
@@ -2232,6 +2241,57 @@ function StatGridBlock({ data = {}, T, school, bus }) {
   </div>);
 }
 
+// ── GAME BRICKS (Duolingo-style — vocabulary, grammar, sentence building) ──
+function MatchPairsBlock({ data = {}, onOutput, T, disabled }) {
+  const pairs = (data.pairs || []).slice(0, 8);
+  const right = useMemo(() => [...pairs.map((p, i) => ({ i, t: p.b }))].sort(() => Math.random() - 0.5), []); // eslint-disable-line
+  const [selL, setSelL] = useState(null), [selR, setSelR] = useState(null), [done, setDone] = useState({}), [bad, setBad] = useState(false), [passed, setPassed] = useState(false);
+  useEffect(() => {
+    if (selL == null || selR == null) return;
+    if (selL === selR) { const nd = { ...done, [selL]: true }; setDone(nd); setSelL(null); setSelR(null); if (Object.keys(nd).length >= pairs.length && pairs.length) { setPassed(true); onOutput?.({ type: "match_pairs", passed: true, concept: data.concepts?.[0] }); } }
+    else { setBad(true); setTimeout(() => { setBad(false); setSelL(null); setSelR(null); }, 550); }
+  }, [selL, selR]); // eslint-disable-line
+  if (!pairs.length) return <BlockShell type="match_pairs" sub="No pairs." />;
+  const cell = (active, matched, badSel) => ({ textAlign: "left", padding: "10px 12px", borderRadius: 9, fontSize: 13, fontFamily: "inherit", cursor: matched ? "default" : "pointer", color: B.white, background: matched ? "rgba(74,222,128,0.12)" : active ? T.ps : B.surface, border: `1px solid ${matched ? "rgba(74,222,128,0.4)" : badSel ? "#F87171" : active ? T.ba : B.border}`, opacity: matched ? 0.7 : 1 });
+  return (<BlockShell type="match_pairs" passed={passed} sub={data.title || "Tap a word on the left, then its match on the right."}>
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>{pairs.map((p, i) => <button key={i} disabled={disabled || done[i]} onClick={() => setSelL(i)} style={cell(selL === i, done[i], bad && selL === i)}>{p.a}</button>)}</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>{right.map((r, k) => <button key={k} disabled={disabled || done[r.i]} onClick={() => setSelR(r.i)} style={cell(selR === r.i, done[r.i], bad && selR === r.i)}>{r.t}</button>)}</div>
+    </div>
+  </BlockShell>);
+}
+function FillBlankBlock({ data = {}, onOutput, T, disabled }) {
+  const opts = data.options || []; const [pick, setPick] = useState(null);
+  const correct = pick != null && pick === data.answer;
+  useEffect(() => { if (pick != null) onOutput?.({ type: "fill_blank", passed: pick === data.answer, concept: data.concepts?.[0] }); }, [pick]); // eslint-disable-line
+  const parts = String(data.sentence || "___").split(/_{2,}/);
+  return (<BlockShell type="fill_blank" passed={correct} sub={data.title}>
+    <div style={{ fontSize: 15, color: B.white, lineHeight: 1.8, marginBottom: 13 }}>{parts[0]}<span style={{ display: "inline-block", minWidth: 64, borderBottom: `2px solid ${T.p}`, textAlign: "center", color: pick != null ? (correct ? "#4ADE80" : "#F87171") : T.hi, fontWeight: 700, padding: "0 6px" }}>{pick != null ? opts[pick] : " "}</span>{parts[1] || ""}</div>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>{opts.map((o, i) => { const show = pick != null, isC = i === data.answer; return <button key={i} disabled={disabled || pick != null} onClick={() => setPick(i)} style={{ padding: "8px 14px", borderRadius: 9, fontSize: 13, fontFamily: "inherit", cursor: pick != null ? "default" : "pointer", color: B.white, background: show && isC ? "rgba(74,222,128,0.12)" : show && pick === i ? "rgba(248,113,113,0.1)" : B.surface, border: `1px solid ${show && isC ? "rgba(74,222,128,0.4)" : show && pick === i ? "rgba(248,113,113,0.35)" : B.borderMid}` }}>{o}</button>; })}</div>
+    {pick != null && data.explain && <div style={{ fontSize: 12, color: correct ? "#4ADE80" : B.mutedMid, marginTop: 9, lineHeight: 1.5 }}>{data.explain}</div>}
+    {pick != null && !correct && <button onClick={() => setPick(null)} style={{ ...pBtn(T), marginTop: 10 }}>Try again</button>}
+  </BlockShell>);
+}
+function OrderWordsBlock({ data = {}, onOutput, T, disabled }) {
+  const answer = data.answer || [];
+  const bank = useMemo(() => answer.map((w, i) => ({ w, k: i })).sort(() => Math.random() - 0.5), []); // eslint-disable-line
+  const [built, setBuilt] = useState([]); const [used, setUsed] = useState({});
+  const done = built.length === answer.length && answer.length > 0;
+  const correct = done && built.every((b, i) => b.w === answer[i]);
+  useEffect(() => { if (done) onOutput?.({ type: "order_words", passed: correct, concept: data.concepts?.[0] }); }, [done]); // eslint-disable-line
+  const chip = { background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 8, color: B.white, padding: "7px 12px", fontSize: 13.5, cursor: "pointer", fontFamily: "inherit" };
+  if (!answer.length) return <BlockShell type="order_words" sub="No sentence." />;
+  return (<BlockShell type="order_words" passed={correct} sub={data.prompt || data.title || "Tap the words in the correct order."}>
+    <div style={{ minHeight: 44, display: "flex", flexWrap: "wrap", gap: 6, padding: 10, borderRadius: 10, background: B.surface, border: `1px dashed ${done ? (correct ? "rgba(74,222,128,0.45)" : "#F87171") : B.borderMid}`, marginBottom: 10 }}>
+      {built.map((b, i) => <button key={i} disabled={disabled} onClick={() => { setBuilt(built.filter((_, j) => j !== i)); setUsed(u => ({ ...u, [b.k]: false })); }} style={chip}>{b.w}</button>)}
+      {!built.length && <span style={{ fontSize: 12, color: B.muted, alignSelf: "center" }}>Tap words below…</span>}
+    </div>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>{bank.map(b => !used[b.k] && <button key={b.k} disabled={disabled} onClick={() => { setBuilt([...built, b]); setUsed(u => ({ ...u, [b.k]: true })); }} style={chip}>{b.w}</button>)}</div>
+    {done && !correct && <button onClick={() => { setBuilt([]); setUsed({}); }} style={{ ...pBtn(T), marginTop: 10 }}>Reset</button>}
+    {correct && <div style={{ fontSize: 13, color: "#4ADE80", marginTop: 10, fontWeight: 600 }}>✓ Correct!</div>}
+  </BlockShell>);
+}
+
 // ── 27. Quiz ──
 function QuizBlock({ data = {}, onOutput, T, disabled, school, bus }) {
   const weak = weakLabelsFor(bus, school, data.concepts);
@@ -2413,7 +2473,7 @@ const BLOCK_COMPONENTS = {
   image_gate: ImageGateBlock, video_gate: VideoGateBlock,
   reading_plain: ReadingPlainBlock, video_embed: VideoEmbedBlock, embed: EmbedBlock, quiz: QuizBlock, calculator: CalculatorBlock,
   divider: DividerBlock, callout: CalloutBlock, image: ImageBlock, cta_button: CtaButtonBlock, stat_grid: StatGridBlock,
-  review: ReviewBlock, garden: GardenBlock, custom: CustomBlock,
+  review: ReviewBlock, garden: GardenBlock, match_pairs: MatchPairsBlock, fill_blank: FillBlankBlock, order_words: OrderWordsBlock, custom: CustomBlock,
 };
 // Concepts the learner is currently weak on that THIS brick teaches/tests.
 function weakLabelsFor(bus, school, concepts) {
