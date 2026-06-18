@@ -699,6 +699,14 @@ function busContext(bus, school) {
   return lines.length ? `\nWHAT YOU KNOW ABOUT THIS LEARNER (from their activity):\n${lines.join("\n")}\n` : "";
 }
 
+// Lets a mentor render a visual when it genuinely helps. Rendered in a locked
+// sandbox, so it must be fully self-contained (no network, no external assets).
+const MENTOR_WIDGET_NOTE = `VISUAL AID (optional): when a picture would explain it far better than words — counting/arrays, a diagram, a small chart, a step animation, or a live code preview — you MAY end your reply with ONE self-contained widget in a fenced block:
+\`\`\`widget
+<svg ...>…</svg>   OR   <div>…</div> with inline <style>/<script>
+\`\`\`
+Rules for the widget: fully self-contained (NO external URLs, scripts, fonts or images — it runs sandboxed offline); inline styles only; transparent background; light text (#e7e9f5); use var(--p)/var(--a) or hex for accents; keep it small and clear. Put your teaching sentences BEFORE the block. Use it sparingly — only when it truly aids understanding, never decoratively.`;
+
 function mentorSys(school, lesson, bus, opts = {}) {
   const dna = school.knowledgeDNA ? `\nKNOWLEDGE DNA (your source material — teach from this, use its vocabulary):\n${String(school.knowledgeDNA).slice(0, 4000)}\n` : "";
   const modeNote = {
@@ -726,7 +734,8 @@ RULES:
 - Never bullet lists. Max 3-4 sentences before asking the student something.
 - When the student reports their mission/work: evaluate strictly. If they pass, say exactly what proved it. If not, say exactly what's missing — one thing at a time.
 - You are NOT an assistant. You are a mentor with standards. Stay in character always.
-- Keep replies under 140 words unless doing a formal evaluation.`;
+- Keep replies under 140 words unless doing a formal evaluation.
+${MENTOR_WIDGET_NOTE}`;
 }
 
 function mentorOfficeSys(school, bus) {
@@ -735,7 +744,8 @@ function mentorOfficeSys(school, bus) {
 ${school.mentor.systemVoice}
 ${dna}${busContext(bus, school)}
 THE SCHOOL: ${school.description} Lessons: ${school.semesters?.flatMap(s => s.lessons?.map(l => l.title)).join("; ")}
-The student can ask you ANYTHING related to this subject. Stay fully in character. Connect answers back to the school's lessons and missions when relevant. Push them toward action, not consumption. Never bullet lists. Replies under 150 words.`;
+The student can ask you ANYTHING related to this subject. Stay fully in character. Connect answers back to the school's lessons and missions when relevant. Push them toward action, not consumption. Never bullet lists. Replies under 150 words.
+${MENTOR_WIDGET_NOTE}`;
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -1179,7 +1189,7 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, canEdit, onUpda
     setMsgs(m => [...m, { role: "user", content: userMsg }]); setLoading(true);
     try {
       const activityStatus = total ? `${passedBlocks}/${total} activities done —${blocks.map((b, i) => ` ${outputs[i]?.passed ? "✓" : "✗"} ${b.data?.title || BLOCK_META[b.type]?.label || b.type}`).join(",")}` : "this lesson has no activities";
-      const reply = await api(mentorSys(school, lesson, bus, { mode, activityStatus }), toApiMessages(convo), 600);
+      const reply = await api(mentorSys(school, lesson, bus, { mode, activityStatus }), toApiMessages(convo), 2000);
       // Mode "activities": capture an assigned MISSION and pin it (stored as a 'mission' message).
       const mm = reply.match(/MISSION:\s*([\s\S]+)/i);
       if (mode === "activities" && mm && !mission) {
@@ -1280,7 +1290,7 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, canEdit, onUpda
               return (
                 <div key={i} style={{ display: "flex", justifyContent: isU ? "flex-end" : "flex-start" }}>
                   {!isU && <div style={{ width: 28, height: 28, borderRadius: "50%", background: T.ps, border: `1px solid ${T.ba}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, flexShrink: 0, marginRight: 10, marginTop: 2 }}>🎓</div>}
-                  <div style={{ maxWidth: "76%", background: isU ? T.ps : B.surface2, border: `1px solid ${isU ? T.ba : B.border}`, borderRadius: isU ? "16px 4px 16px 16px" : "4px 16px 16px 16px", padding: "11px 15px", fontSize: 14, lineHeight: 1.65, color: B.white, whiteSpace: isU ? "pre-wrap" : "normal" }}>{isU ? m.content : <Markdown text={m.content} />}</div>
+                  <div style={{ maxWidth: "76%", background: isU ? T.ps : B.surface2, border: `1px solid ${isU ? T.ba : B.border}`, borderRadius: isU ? "16px 4px 16px 16px" : "4px 16px 16px 16px", padding: "11px 15px", fontSize: 14, lineHeight: 1.65, color: B.white, whiteSpace: isU ? "pre-wrap" : "normal" }}>{isU ? m.content : <MentorReply content={m.content} T={T} />}</div>
                 </div>
               );
             })}
@@ -1321,7 +1331,7 @@ function MentorOffice({ school, T, chat, onChat, bus }) {
     const next = [...msgs, { role: "user", content: userMsg }];
     onChat(next); setLoading(true);
     try {
-      const reply = await api(mentorOfficeSys(school, bus), toApiMessages(next), 600);
+      const reply = await api(mentorOfficeSys(school, bus), toApiMessages(next), 2000);
       onChat([...next, { role: "assistant", content: reply }]);
     } catch (e) { onChat([...next, { role: "assistant", content: `Error: ${e.message}` }]); }
     setLoading(false);
@@ -1362,7 +1372,7 @@ function MentorOffice({ school, T, chat, onChat, bus }) {
             return (
               <div key={i} style={{ display: "flex", justifyContent: isU ? "flex-end" : "flex-start" }}>
                 {!isU && <div style={{ width: 28, height: 28, borderRadius: "50%", background: T.ps, border: `1px solid ${T.ba}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, flexShrink: 0, marginRight: 10, marginTop: 2 }}>🎓</div>}
-                <div style={{ maxWidth: "76%", background: isU ? T.ps : B.surface2, border: `1px solid ${isU ? T.ba : B.border}`, borderRadius: isU ? "16px 4px 16px 16px" : "4px 16px 16px 16px", padding: "11px 15px", fontSize: 14, lineHeight: 1.65, color: B.white, whiteSpace: isU ? "pre-wrap" : "normal" }}>{isU ? m.content : <Markdown text={m.content} />}</div>
+                <div style={{ maxWidth: "76%", background: isU ? T.ps : B.surface2, border: `1px solid ${isU ? T.ba : B.border}`, borderRadius: isU ? "16px 4px 16px 16px" : "4px 16px 16px 16px", padding: "11px 15px", fontSize: 14, lineHeight: 1.65, color: B.white, whiteSpace: isU ? "pre-wrap" : "normal" }}>{isU ? m.content : <MentorReply content={m.content} T={T} />}</div>
               </div>
             );
           })}
@@ -1445,10 +1455,40 @@ function BlockShell({ type, sub, passed, children, foot }) {
   );
 }
 
+// Mentor "generative widget": renders AI-authored SVG/HTML in a locked-down
+// sandboxed iframe (allow-scripts ONLY — no same-origin, so it can't touch the
+// app, cookies or storage). Auto-sizes via a postMessage from inside.
+function MentorWidget({ code, T }) {
+  const ref = useRef(null);
+  const [h, setH] = useState(160);
+  useEffect(() => {
+    function onMsg(e) { if (ref.current && e.source === ref.current.contentWindow && e.data && e.data.__mw) setH(Math.min(900, Math.max(60, e.data.h + 10))); }
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+  }, []);
+  const accent = (T?.p || "#7C3AED"), accent2 = (T?.a || "#06B6D4");
+  const srcDoc = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;padding:0;background:transparent;color:#e7e9f5;font-family:system-ui,-apple-system,sans-serif;font-size:14px}*{box-sizing:border-box}:root{--p:${accent};--a:${accent2}}button{font-family:inherit}</style></head><body>${code}<script>function _r(){try{parent.postMessage({__mw:1,h:document.documentElement.scrollHeight},'*')}catch(e){}}window.addEventListener('load',_r);try{new ResizeObserver(_r).observe(document.body)}catch(e){}setTimeout(_r,120);setTimeout(_r,600);setTimeout(_r,1500)<\/script></body></html>`;
+  return <iframe ref={ref} title="mentor visual" sandbox="allow-scripts" srcDoc={srcDoc} style={{ width: "100%", height: h, border: `1px solid ${B.border}`, borderRadius: 10, background: B.surface, display: "block", marginTop: 8 }} />;
+}
+// Split an assistant reply into prose + an optional ```widget/svg/html block.
+const WIDGET_RE = /```widget\s*\n([\s\S]*?)```/i;
+function extractWidget(content = "") {
+  const m = String(content).match(WIDGET_RE);
+  if (!m) return { text: content, code: null };
+  return { text: String(content).replace(m[0], "").trim(), code: m[1].trim() };
+}
+function MentorReply({ content, T }) {
+  const { text, code } = extractWidget(content);
+  return (<>
+    {text && <Markdown text={text} />}
+    {code && <Boundary fallback={() => null}><MentorWidget code={code} T={T} /></Boundary>}
+  </>);
+}
+
 function ChatBubble({ m, T }) {
   if (m.role === "system") return <div style={{ textAlign: "center", padding: "8px 12px", background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.25)", borderRadius: 10, fontSize: 12, color: "#4ADE80", fontWeight: 600 }}>{m.content}</div>;
   const isU = m.role === "user";
-  return <div style={{ display: "flex", justifyContent: isU ? "flex-end" : "flex-start" }}><div style={{ maxWidth: "82%", background: isU ? T.ps : B.surface, border: `1px solid ${isU ? T.ba : B.border}`, borderRadius: isU ? "14px 4px 14px 14px" : "4px 14px 14px 14px", padding: "9px 13px", fontSize: 13.5, lineHeight: 1.6, color: B.white, whiteSpace: isU ? "pre-wrap" : "normal" }}>{isU ? m.content : <Markdown text={m.content} />}</div></div>;
+  return <div style={{ display: "flex", justifyContent: isU ? "flex-end" : "flex-start" }}><div style={{ maxWidth: "82%", background: isU ? T.ps : B.surface, border: `1px solid ${isU ? T.ba : B.border}`, borderRadius: isU ? "14px 4px 14px 14px" : "4px 14px 14px 14px", padding: "9px 13px", fontSize: 13.5, lineHeight: 1.6, color: B.white, whiteSpace: isU ? "pre-wrap" : "normal" }}>{isU ? m.content : <MentorReply content={m.content} T={T} />}</div></div>;
 }
 
 // Reusable evaluated chat for roleplay / debate.
@@ -2564,7 +2604,7 @@ function MentorFab({ school, bus, T }) {
   async function send() {
     const t = input.trim(); if (!t || loading) return; setInput("");
     const next = [...msgs, { role: "user", content: t }]; setMsgs(next); setLoading(true);
-    try { const r = await api(mentorOfficeSys(school, bus), toApiMessages(next), 500); setMsgs([...next, { role: "assistant", content: r }]); }
+    try { const r = await api(mentorOfficeSys(school, bus), toApiMessages(next), 2000); setMsgs([...next, { role: "assistant", content: r }]); }
     catch (e) { setMsgs([...next, { role: "assistant", content: "Error: " + e.message }]); }
     setLoading(false);
   }
