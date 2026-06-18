@@ -563,6 +563,7 @@ Otherwise return an object with these fields:
 - name, tagline (one punchy line), description (2 sentences on the transformation), duration (honor the implied length), category, emoji (one emoji)
 - learningPath: one key from the list above (REQUIRED)
 - concepts: 8-20 of { id (short kebab slug), label (the concept name), prereq:[ids it depends on] } — the KNOWLEDGE MAP of this subject. Lessons & blocks will tag which concepts they cover so the system tracks mastery. Order roughly foundational → advanced.
+- template: the experience vibe — one of ${TEMPLATE_KEYS.join(" | ")} (${Object.entries(TEMPLATES).map(([k, t]) => `${k}=${t.desc}`).join("; ")}). Pick the one that fits the request (e.g. company HR/onboarding→corporate, kids/language→kids, "learn X fast"/single skill→quickskill, coaching/mindset→coaching, else academy). It sets the baseline look; you may still set theme/skin below to fine-tune.
 - theme: one of violet, cyan, amber, rose, emerald (match the mood)
 - skin: one of aurora, minimal, zen, bold, editorial, playful — the visual vibe that fits the subject. VARY this across schools; do NOT default everything to aurora (e.g. meditation→zen, philosophy→editorial, kids/games→playful, startup→bold, productivity→minimal).
 - voicePreset: one of sage, drill, socratic, scientist, storyteller, trickster, custom
@@ -672,6 +673,8 @@ DECIDE which of three modes this message is:
 3) CONTENT / STRUCTURE change — add/remove/rewrite lessons, activities, bricks, dashboards, tools, copy. Put a precise one-line instruction in "action" (design = null).
 
 "design" object — include ONLY the keys you're changing:
+- "template": the whole experience vibe — one of ${TEMPLATE_KEYS.join(", ")} (${Object.entries(TEMPLATES).map(([k, t]) => `${k}=${t.label}`).join("; ")}). Use for "make this corporate/business", "make it kid-friendly/game-like", "turn this into a quick skill". Sets theme/skin/font/density together.
+- "brand": company chrome { "logo":"https… image", "links":[{"label":"Careers","url":"https…"}] }. Use for "add our logo <url>", "add a nav link to <url>". Set "brand": null to clear.
 - "theme": one of ${Object.keys(THEMES).join(", ")}
 - "palette": custom colors, any of { "p":"#hex" (primary), "a":"#hex" (accent), "hi":"#hex" (highlight), "grad":"linear-gradient(...)" (button/FAB), "heroGrad":"linear-gradient(...)" (hero background, keep it dark) }. Set "palette": null to reset to the preset. Use this whenever they name colors or ask for a gradient.
 - "skin": one of ${SKIN_KEYS.join(", ")}
@@ -777,8 +780,9 @@ function flattenText(v) {
   return String(v);
 }
 function composeSchool(content, dna) {
+  const tpl = TEMPLATES[content.template]; // experience template = baseline; explicit fields win
   const voice = content.systemVoice || VOICES[content.voicePreset] || VOICES.sage;
-  const preset = GAMI[content.gamiPreset] || GAMI.xp;
+  const preset = GAMI[content.gamiPreset || tpl?.gami] || GAMI.xp;
   const learningPath = LEARNING_PATH_RULES[content.learningPath] ? content.learningPath : "mixed";
   const sections = normalizeSections(content); // null → getSections() derives at render
   return {
@@ -786,7 +790,10 @@ function composeSchool(content, dna) {
     learningPath,
     ...(sections ? { sections } : {}),
     transformation: flattenText(content.transformation),
-    theme: THEMES[content.theme] ? content.theme : "violet",
+    theme: THEMES[content.theme] ? content.theme : (tpl?.theme || "violet"),
+    skin: content.skin || tpl?.skin,
+    font: content.font || tpl?.font,
+    density: content.density || tpl?.density,
     mentor: {
       name: content.mentorName || "The Mentor",
       personality: content.mentorPersonality || "",
@@ -917,6 +924,18 @@ const LAYOUTS = {
   practice: { label: "Practice Dashboard", kinds: ["dashboard", "mentor"], desc: "A live dashboard of tools + a mentor" },
   toolkit: { label: "Pure Toolkit", kinds: ["tools"], desc: "Just interactive tools" },
 };
+
+// Experience templates — bundle the whole look & feel (theme/skin/font/density/
+// gamification + chrome) for a use-case vibe. Set on creation by the architect,
+// switchable + customizable by the creator. Individual fields still override.
+const TEMPLATES = {
+  academy: { label: "Academy", emoji: "🎓", theme: "violet", skin: "aurora", font: "inter", density: "cozy", gami: "xp", desc: "Balanced course — the Senseito default." },
+  corporate: { label: "Corporate / HR", emoji: "🏢", theme: "cyan", skin: "minimal", font: "grotesk", density: "cozy", gami: "none", chrome: true, desc: "Clean & business-like; company logo + nav links." },
+  kids: { label: "Kids / Language", emoji: "🐣", theme: "amber", skin: "playful", font: "poppins", density: "spacious", gami: "xp", desc: "Bright, bite-size and game-y; streaks & XP." },
+  quickskill: { label: "Quick Skill", emoji: "⚡", theme: "emerald", skin: "bold", font: "grotesk", density: "compact", gami: "none", desc: "A fast step-by-step path to one concrete skill." },
+  coaching: { label: "Coaching / Mindset", emoji: "🌱", theme: "rose", skin: "zen", font: "lora", density: "spacious", gami: "none", desc: "Calm & reflective; mentor-led + Garden." },
+};
+const TEMPLATE_KEYS = Object.keys(TEMPLATES);
 function sectionTitle(s) { return `${s.icon || SECTION_META[s.kind]?.icon || "•"} ${s.title || SECTION_META[s.kind]?.title || "Section"}`; }
 
 // Visual SKINS so no two schools look the same. Each varies the banner treatment,
@@ -3204,6 +3223,26 @@ function IteratePanel({ school, history, loading, onApply, onTheme, onGami, onVo
 // ─────────────────────────────────────────────────────────────
 // SCHOOL PAGE (creator + student)
 // ─────────────────────────────────────────────────────────────
+// Corporate/brand header: company logo + nav links. Shows when set, or (for the
+// creator) when the experience template is "corporate" so it's easy to set up.
+function BrandBar({ school, T, readOnly, onUpdate }) {
+  const brand = school.brand || {}; const links = brand.links || [];
+  if (!(brand.logo || links.length || (!readOnly && school.template === "corporate"))) return null;
+  const setBrand = (b) => onUpdate({ data: { ...school, brand: b } });
+  const addBtn = { background: "none", border: `1px dashed ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "5px 10px", cursor: "pointer", fontSize: 12, fontFamily: "inherit" };
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "10px 16px", background: B.surface, border: `1px solid ${B.border}`, borderRadius: 12, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        {brand.logo ? <img src={brand.logo} alt="logo" style={{ height: 30, maxWidth: 170, objectFit: "contain", display: "block" }} /> : (!readOnly && <button onClick={() => { const u = window.prompt("Company logo image URL (https):", ""); if (u && /^https:\/\//i.test(u.trim())) setBrand({ ...brand, logo: u.trim() }); }} style={addBtn}>＋ logo</button>)}
+        {brand.logo && !readOnly && <button onClick={() => { const u = window.prompt("Logo image URL (https) — empty to remove:", brand.logo); if (u !== null) setBrand({ ...brand, logo: u.trim() || undefined }); }} style={{ background: "none", border: "none", color: B.muted, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>edit</button>}
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+        {links.map((l, i) => <a key={i} href={l.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 13, color: T.hi, textDecoration: "none", fontWeight: 600 }}>{l.label}{!readOnly && <span onClick={e => { e.preventDefault(); setBrand({ ...brand, links: links.filter((_, j) => j !== i) }); }} style={{ marginLeft: 5, color: B.muted, cursor: "pointer" }}>✕</span>}</a>)}
+        {!readOnly && <button onClick={() => { const label = window.prompt("Link label (e.g. Careers, Handbook):"); if (!label) return; const url = window.prompt("Link URL (https):"); if (!url || !/^https?:\/\//i.test(url.trim())) return; setBrand({ ...brand, links: [...links, { label: label.trim(), url: url.trim() }] }); }} style={addBtn}>＋ link</button>}
+      </div>
+    </div>
+  );
+}
 function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, publicBase, token, onSetSlug, onIterate, iterating = false, iterProg = { pct: 0, label: "" } }) {
   const school = rec.data;
   const T = themeFor(school);
@@ -3519,6 +3558,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
               </div>}
             </div>
           )}
+          <BrandBar school={school} T={T} readOnly={readOnly} onUpdate={onUpdate} />
           {/* Banner — varies by the school's visual skin */}
           <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: sk.radius, overflow: "hidden", animation: "fadeUp 0.5s ease" }}>
             {school.cover && <div style={{ position: "relative" }}>
@@ -4040,7 +4080,7 @@ function PublicSchool({ slug }) {
 // PROJECT CHAT — the left bar inside a project (Lovable-style). Every
 // message iterates the school; quick "levers" are zero-token tweaks.
 // ─────────────────────────────────────────────────────────────
-function ProjectChat({ rec, iterating, history, onSend, onIterate, onBack, onTheme, onVoice, onFont, onFontScale, onGami, onUndo, canUndo }) {
+function ProjectChat({ rec, iterating, history, onSend, onIterate, onBack, onTheme, onVoice, onFont, onFontScale, onGami, onTemplate, onUndo, canUndo }) {
   const school = rec.data; const T = themeFor(school);
   const [input, setInput] = useState("");
   const [showLevers, setShowLevers] = useState(false);
@@ -4067,6 +4107,7 @@ function ProjectChat({ rec, iterating, history, onSend, onIterate, onBack, onThe
         <button onClick={() => setShowLevers(s => !s)} style={collBtn}>{showLevers ? "▾" : "▸"} Quick styles · 0 tokens</button>
         {showLevers && (
           <div style={{ display: "grid", gap: 8, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 10, padding: 10 }}>
+            {onTemplate && <div style={{ display: "flex", gap: 6, alignItems: "center" }}><span style={{ fontSize: 10, color: B.muted, width: 46 }}>Vibe</span><select value={school.template || ""} onChange={e => onTemplate(e.target.value)} style={sel}><option value="" disabled>Choose an experience…</option>{Object.entries(TEMPLATES).map(([k, t]) => <option key={k} value={k}>{t.emoji} {t.label}</option>)}</select></div>}
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}><span style={{ fontSize: 10, color: B.muted, width: 46 }}>Theme</span>{Object.keys(THEMES).map(k => <button key={k} onClick={() => onTheme(k)} title={THEMES[k].label} style={{ width: 22, height: 22, borderRadius: "50%", border: school.theme === k ? `2px solid ${B.white}` : `1px solid ${B.borderMid}`, background: THEMES[k].p, cursor: "pointer" }} />)}</div>
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}><span style={{ fontSize: 10, color: B.muted, width: 46 }}>Voice</span><select value={school.voicePreset || "sage"} onChange={e => onVoice(e.target.value)} style={sel}>{["sage", "drill", "socratic", "scientist", "storyteller", "trickster"].map(v => <option key={v} value={v}>{v[0].toUpperCase() + v.slice(1)}</option>)}{school.voicePreset === "custom" && <option value="custom">Custom</option>}</select></div>
             <div style={{ display: "flex", gap: 6, alignItems: "center" }}><span style={{ fontSize: 10, color: B.muted, width: 46 }}>Font</span><select value={school.font || "inter"} onChange={e => onFont(e.target.value)} style={sel}>{Object.entries(FONTS).map(([k, f]) => <option key={k} value={k}>{f.label}</option>)}</select></div>
@@ -4337,8 +4378,10 @@ export default function Senseito() {
     if (!d || typeof d !== "object") return false;
     const cur = rec.data; const patch = {};
     for (const k of ["theme", "skin", "density", "font", "fontScale", "cover", "coverPos"]) if (k in d) patch[k] = d[k];
+    if (d.template && TEMPLATES[d.template]) { const t = TEMPLATES[d.template]; patch.template = d.template; patch.theme = t.theme; patch.skin = t.skin; patch.font = t.font; patch.density = t.density; }
     if ("palette" in d) patch.palette = d.palette === null ? undefined : { ...(cur.palette || {}), ...(d.palette || {}) };
     if ("hero" in d) patch.hero = d.hero === null ? undefined : { ...(cur.hero || {}), ...(d.hero || {}) };
+    if ("brand" in d) patch.brand = d.brand === null ? undefined : { ...(cur.brand || {}), ...(d.brand || {}) };
     if ("overlay" in d) patch.overlay = d.overlay;
     if (!Object.keys(patch).length) return false;
     pushVersion(rec.id, cur); // snapshot for Undo
@@ -4374,6 +4417,7 @@ export default function Senseito() {
   function lvFontScale(n) { if (!active) return; const v = Math.min(1.4, Math.max(0.8, Math.round((n) * 100) / 100)); updateSchool(active.id, { data: { ...active.data, fontScale: v } }); showAToast(`✓ Text size: ${Math.round(v * 100)}%`); }
   function lvVoice(vp) { if (!active) return; updateSchool(active.id, { data: composeSchool({ ...contentOnly(active.data), voicePreset: vp, systemVoice: undefined, theme: active.data.theme }, active.data.knowledgeDNA) }); showAToast(`✓ Voice: ${vp[0].toUpperCase() + vp.slice(1)}`); }
   function lvGami(gid) { if (!active) return; updateSchool(active.id, { data: composeSchool({ ...contentOnly(active.data), gamiPreset: gid, theme: active.data.theme }, active.data.knowledgeDNA) }); showAToast(`✓ ${GAMI[gid]?.name || gid}`); }
+  function lvTemplate(key) { const t = TEMPLATES[key]; if (!t || !active) return; const d = active.data; const content = { ...contentOnly(d), template: key, theme: t.theme, skin: t.skin, font: t.font, density: t.density, gamiPreset: t.gami }; updateSchool(active.id, { data: composeSchool(content, d.knowledgeDNA) }); showAToast(`✓ ${t.emoji} ${t.label}`); }
 
   return (
     <div className={mode === "light" ? "light" : undefined} style={{ background: B.bg, minHeight: "100vh", fontFamily: "'Inter',-apple-system,sans-serif", color: B.white, display: "flex" }}>
@@ -4415,7 +4459,7 @@ export default function Senseito() {
         </div>
         {active ? (
           <Boundary resetKey={view} fallback={() => <div style={{ flex: 1, padding: 16, fontSize: 12, color: B.muted }}>Chat hit an error. <button onClick={() => setView("home")} style={{ background: "none", border: "none", color: "#A78BFA", cursor: "pointer", fontFamily: "inherit", fontSize: 12 }}>← Back to schools</button></div>}>
-            <ProjectChat rec={active} iterating={iterating} history={iterHistory} onSend={chatSend} onIterate={applyIterate} onBack={() => { setView("home"); setSideOpen(false); }} onTheme={lvTheme} onVoice={lvVoice} onFont={lvFont} onFontScale={lvFontScale} onGami={lvGami} onUndo={undoEdit} canUndo={(versions[active.id]?.length || 0) > 0} />
+            <ProjectChat rec={active} iterating={iterating} history={iterHistory} onSend={chatSend} onIterate={applyIterate} onBack={() => { setView("home"); setSideOpen(false); }} onTheme={lvTheme} onVoice={lvVoice} onFont={lvFont} onFontScale={lvFontScale} onGami={lvGami} onTemplate={lvTemplate} onUndo={undoEdit} canUndo={(versions[active.id]?.length || 0) > 0} />
           </Boundary>
         ) : (
         <div style={{ flex: 1, overflowY: "auto", padding: "12px 10px" }}>
