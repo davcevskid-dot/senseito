@@ -701,11 +701,15 @@ function busContext(bus, school) {
 
 // Lets a mentor render a visual when it genuinely helps. Rendered in a locked
 // sandbox, so it must be fully self-contained (no network, no external assets).
-const MENTOR_WIDGET_NOTE = `VISUAL AID (optional): when a picture would explain it far better than words — counting/arrays, a diagram, a small chart, a step animation, or a live code preview — you MAY end your reply with ONE self-contained widget in a fenced block:
-\`\`\`widget
-<svg ...>…</svg>   OR   <div>…</div> with inline <style>/<script>
-\`\`\`
-Rules for the widget: fully self-contained (NO external URLs, scripts, fonts or images — it runs sandboxed offline); inline styles only; transparent background; light text (#e7e9f5); use var(--p)/var(--a) or hex for accents; keep it small and clear. Put your teaching sentences BEFORE the block. Use it sparingly — only when it truly aids understanding, never decoratively.`;
+const MENTOR_WIDGET_NOTE = `VISUAL AIDS (optional, use sparingly — only when a picture explains it far better than words, never decoratively; at most ONE per reply, AFTER your teaching sentences).
+PREFERRED — emit a \`\`\`viz block containing ONE JSON object (the app renders it cleanly, on-brand):
+- {"type":"array","rows":N,"cols":N,"label":"10 × 3 = 30"} — counting / multiplication / grouping
+- {"type":"steps","steps":["do X","then Y","then Z"]} — an ordered how-to
+- {"type":"bars","bars":[{"label":"A","value":40},{"label":"B","value":75}],"unit":"%"} — compare quantities
+- {"type":"number_line","min":0,"max":10,"marks":[{"at":3,"label":"3"},{"at":7}],"highlight":[3,7]}
+- {"type":"fraction","parts":4,"filled":3,"label":"3/4"} — fractions / proportions / percentages
+- {"type":"compare","left":{"title":"Before","items":["..."]},"right":{"title":"After","items":["..."]}}
+FALLBACK — only for something the above cannot express, emit a \`\`\`widget block with fully self-contained SVG/HTML (NO external URLs/scripts/fonts/images — it runs sandboxed offline; inline styles only; transparent background; light text #e7e9f5; use var(--p)/var(--a) for accents; keep it small).`;
 
 function mentorSys(school, lesson, bus, opts = {}) {
   const dna = school.knowledgeDNA ? `\nKNOWLEDGE DNA (your source material — teach from this, use its vocabulary):\n${String(school.knowledgeDNA).slice(0, 4000)}\n` : "";
@@ -1470,17 +1474,59 @@ function MentorWidget({ code, T }) {
   const srcDoc = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;padding:0;background:transparent;color:#e7e9f5;font-family:system-ui,-apple-system,sans-serif;font-size:14px}*{box-sizing:border-box}:root{--p:${accent};--a:${accent2}}button{font-family:inherit}</style></head><body>${code}<script>function _r(){try{parent.postMessage({__mw:1,h:document.documentElement.scrollHeight},'*')}catch(e){}}window.addEventListener('load',_r);try{new ResizeObserver(_r).observe(document.body)}catch(e){}setTimeout(_r,120);setTimeout(_r,600);setTimeout(_r,1500)<\/script></body></html>`;
   return <iframe ref={ref} title="mentor visual" sandbox="allow-scripts" srcDoc={srcDoc} style={{ width: "100%", height: h, border: `1px solid ${B.border}`, borderRadius: 10, background: B.surface, display: "block", marginTop: 8 }} />;
 }
-// Split an assistant reply into prose + an optional ```widget/svg/html block.
-const WIDGET_RE = /```widget\s*\n([\s\S]*?)```/i;
-function extractWidget(content = "") {
-  const m = String(content).match(WIDGET_RE);
-  if (!m) return { text: content, code: null };
-  return { text: String(content).replace(m[0], "").trim(), code: m[1].trim() };
+// Curated visual primitives the mentor fills with simple JSON (```viz). App-
+// rendered → consistent, on-brand, cheap, and safe (no code execution).
+let __mvSeq = 0;
+function MentorViz({ spec, T }) {
+  const gid = useMemo(() => `mvf${++__mvSeq}`, []);
+  if (!spec || typeof spec !== "object") return null;
+  const card = { background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 10, padding: 12, marginTop: 8 };
+  const cap = (txt) => txt ? <div style={{ fontSize: 12, color: B.mutedMid, marginTop: 8, textAlign: "center" }}>{txt}</div> : null;
+  const grad = `linear-gradient(135deg,${T.p},${T.a})`;
+  try {
+    if (spec.type === "array") {
+      const rows = Math.max(1, Math.min(20, spec.rows || 1)), cols = Math.max(1, Math.min(20, spec.cols || 1));
+      return <div style={card}><div style={{ display: "grid", gridTemplateColumns: `repeat(${cols},1fr)`, gap: 5, maxWidth: cols * 32, margin: "0 auto" }}>{Array.from({ length: rows * cols }).map((_, i) => <div key={i} style={{ aspectRatio: "1", borderRadius: 5, background: grad, animation: "fadeUp 0.3s ease backwards", animationDelay: `${Math.min(i, 40) * 30}ms` }} />)}</div>{cap(spec.label || `${rows} × ${cols} = ${rows * cols}`)}</div>;
+    }
+    if (spec.type === "steps") {
+      return <div style={card}>{(spec.steps || []).slice(0, 14).map((s, i) => <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "6px 0", borderTop: i ? `1px solid ${B.border}` : "none" }}><div style={{ flex: "0 0 22px", height: 22, borderRadius: "50%", background: T.ps, border: `1px solid ${T.ba}`, color: T.hi, fontSize: 12, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center" }}>{i + 1}</div><div style={{ fontSize: 13, color: B.white, lineHeight: 1.5 }}>{s}</div></div>)}{cap(spec.label)}</div>;
+    }
+    if (spec.type === "bars") {
+      const bars = (spec.bars || []).slice(0, 10); const max = Math.max(1, ...bars.map(b => Number(b.value) || 0));
+      return <div style={card}>{bars.map((b, i) => <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, margin: "5px 0" }}><div style={{ flex: "0 0 84px", fontSize: 12, color: B.mutedMid, textAlign: "right", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{b.label}</div><div style={{ flex: 1, background: B.surface3, borderRadius: 5, height: 16, overflow: "hidden" }}><div style={{ width: `${(Number(b.value) || 0) / max * 100}%`, height: "100%", background: `linear-gradient(90deg,${T.p},${T.a})` }} /></div><div style={{ flex: "0 0 auto", fontSize: 12, color: B.white, fontWeight: 700 }}>{b.value}{spec.unit || ""}</div></div>)}{cap(spec.label)}</div>;
+    }
+    if (spec.type === "number_line") {
+      const min = Number(spec.min) || 0, max = Number(spec.max) || 10, span = (max - min) || 1;
+      const pos = v => `${Math.max(0, Math.min(100, (v - min) / span * 100))}%`; const hi = spec.highlight;
+      return <div style={card}><div style={{ position: "relative", height: 48, margin: "8px 6px" }}><div style={{ position: "absolute", top: 22, left: 0, right: 0, height: 2, background: B.borderMid }} />{Array.isArray(hi) && hi.length === 2 && <div style={{ position: "absolute", top: 21, left: pos(hi[0]), width: `calc(${pos(hi[1])} - ${pos(hi[0])})`, height: 4, background: `linear-gradient(90deg,${T.p},${T.a})`, borderRadius: 2 }} />}{(spec.marks || []).map((m, i) => <div key={i} style={{ position: "absolute", top: 14, left: pos(m.at), transform: "translateX(-50%)", textAlign: "center" }}><div style={{ width: 9, height: 9, borderRadius: "50%", background: T.p, margin: "0 auto" }} /><div style={{ fontSize: 11, color: B.mutedMid, marginTop: 3 }}>{m.label ?? m.at}</div></div>)}</div>{cap(spec.label)}</div>;
+    }
+    if (spec.type === "fraction" || spec.type === "pie") {
+      const parts = Math.max(1, Math.min(24, spec.parts || 4)), filled = Math.max(0, Math.min(parts, spec.filled || 0)), R = 46, C = 50;
+      let acc = -90; const seg = (frac) => { const a0 = acc * Math.PI / 180; acc += frac * 360; const a1 = acc * Math.PI / 180; const large = frac > 0.5 ? 1 : 0; return `M${C},${C} L${(C + R * Math.cos(a0)).toFixed(2)},${(C + R * Math.sin(a0)).toFixed(2)} A${R},${R} 0 ${large} 1 ${(C + R * Math.cos(a1)).toFixed(2)},${(C + R * Math.sin(a1)).toFixed(2)} Z`; };
+      const segs = Array.from({ length: parts }).map((_, i) => ({ d: seg(1 / parts), on: i < filled }));
+      return <div style={{ ...card, textAlign: "center" }}><svg viewBox="0 0 100 100" width="120" height="120"><defs><linearGradient id={gid} x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor={T.p} /><stop offset="1" stopColor={T.a} /></linearGradient></defs>{segs.map((s, i) => <path key={i} d={s.d} fill={s.on ? `url(#${gid})` : B.surface3} stroke={B.bg} strokeWidth="1" />)}</svg>{cap(spec.label || `${filled}/${parts}`)}</div>;
+    }
+    if (spec.type === "compare") {
+      const col = (c) => <div style={{ flex: 1, minWidth: 0, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 8, padding: "9px 11px" }}><div style={{ fontSize: 12, fontWeight: 700, color: T.hi, marginBottom: 6 }}>{c?.title}</div>{(c?.items || []).map((it, i) => <div key={i} style={{ fontSize: 12.5, color: B.white, lineHeight: 1.5, marginBottom: 3 }}>• {it}</div>)}</div>;
+      return <div style={card}><div style={{ display: "flex", gap: 8 }}>{col(spec.left)}{col(spec.right)}</div>{cap(spec.label)}</div>;
+    }
+  } catch { return null; }
+  return null;
+}
+// Split an assistant reply into prose + an optional ```viz primitive and/or ```widget freeform block.
+function extractVisuals(content = "") {
+  let text = String(content), viz = null, code = null;
+  const vm = text.match(/```viz\s*\n([\s\S]*?)```/i);
+  if (vm) { try { viz = JSON.parse(vm[1].trim()); } catch { viz = null; } text = text.replace(vm[0], "").trim(); }
+  const wm = text.match(/```widget\s*\n([\s\S]*?)```/i);
+  if (wm) { code = wm[1].trim(); text = text.replace(wm[0], "").trim(); }
+  return { text, viz, code };
 }
 function MentorReply({ content, T }) {
-  const { text, code } = extractWidget(content);
+  const { text, viz, code } = extractVisuals(content);
   return (<>
     {text && <Markdown text={text} />}
+    {viz && <Boundary fallback={() => null}><MentorViz spec={viz} T={T} /></Boundary>}
     {code && <Boundary fallback={() => null}><MentorWidget code={code} T={T} /></Boundary>}
   </>);
 }
