@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, Component } from "react";
+import { useState, useRef, useEffect, useMemo, Component } from "react";
 
 // ═════════════════════════════════════════════════════════════
 // SENSEITO — Build any school you can imagine.
@@ -155,6 +155,11 @@ const GLOBAL_CSS = `
   @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
   @keyframes aurora{0%,100%{opacity:0.6;transform:translateY(0) scale(1)}50%{opacity:1;transform:translateY(-12px) scale(1.05)}}
   @keyframes drift{0%{transform:translate(0,0) scale(1)}33%{transform:translate(34px,-26px) scale(1.12)}66%{transform:translate(-22px,22px) scale(0.94)}100%{transform:translate(0,0) scale(1)}}
+  @keyframes sgBreathe{0%,100%{transform:scale(1)}50%{transform:scale(1.02)}}
+  @keyframes sgCore{0%,100%{transform:scale(.85);opacity:.8}50%{transform:scale(1.3);opacity:1}}
+  @keyframes sgGrow{0%{stroke-dashoffset:100;opacity:0}10%{opacity:1}33%{stroke-dashoffset:0;opacity:1}52%{stroke-dashoffset:0;opacity:1}66%{stroke-dashoffset:0;opacity:0}100%{stroke-dashoffset:100;opacity:0}}
+  @keyframes sgNd{0%,100%{opacity:.5}50%{opacity:1}}
+  @keyframes sgSpin{to{transform:rotate(360deg)}}
   *{box-sizing:border-box;margin:0;padding:0}
   textarea,input,select{outline:none}
   textarea::placeholder,input::placeholder{color:#55556E;font-style:italic}
@@ -212,6 +217,38 @@ function EditableText({ value, onSave, readOnly, style, placeholder }) {
     style={{ ...style, outline: "none", cursor: "text", borderBottom: "1px dashed rgba(255,255,255,0.18)" }}
     onBlur={e => { const t = e.currentTarget.textContent.trim(); if (t && t !== value) onSave(t); else e.currentTarget.textContent = value; }}
     onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); } }}>{value}</span>;
+}
+
+// ── Senseito brand mark — animated SVG seed-of-life whose inner arcs glow into
+// an "S" growing from the core. Reusable: avatar, loader, hero. Unique gradient/
+// filter ids per instance so multiple can render without clashing. ──
+let __sgSeq = 0;
+function SenseitoMark({ size = 32, breathe = true, glow = true, style }) {
+  const uid = useMemo(() => `sg${++__sgSeq}`, []);
+  const r = 34;
+  const centers = [[100, 100]];
+  for (let k = 0; k < 6; k++) { const a = (-90 + k * 60) * Math.PI / 180; centers.push([100 + r * Math.cos(a), 100 + r * Math.sin(a)]); }
+  const nodes = centers.slice(1).map(c => c);
+  for (let k = 0; k < 6; k++) { const a = (-60 + k * 60) * Math.PI / 180; nodes.push([100 + 59 * Math.cos(a), 100 + 59 * Math.sin(a)]); }
+  const hex = Array.from({ length: 6 }, (_, k) => { const a = (-90 + k * 60) * Math.PI / 180; return `${(100 + 15 * Math.cos(a)).toFixed(1)},${(100 + 15 * Math.sin(a)).toFixed(1)}`; }).join(" ");
+  const flt = glow ? `url(#${uid}f)` : undefined;
+  return (
+    <svg viewBox="0 0 200 200" width={size} height={size} role="img" aria-label="Senseito"
+      style={{ display: "block", overflow: "visible", animation: breathe ? "sgBreathe 7s ease-in-out infinite" : undefined, transformOrigin: "center", ...style }}>
+      <defs>
+        <linearGradient id={`${uid}g`} x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#a855f7" /><stop offset="1" stopColor="#22d3ee" /></linearGradient>
+        <linearGradient id={`${uid}s`} x1="0" y1="0" x2="1" y2="1"><stop offset="0" stopColor="#eddcff" /><stop offset=".5" stopColor="#ffffff" /><stop offset="1" stopColor="#c2f5ff" /></linearGradient>
+        {glow && <filter id={`${uid}f`} x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="2.2" result="b" /><feMerge><feMergeNode in="b" /><feMergeNode in="SourceGraphic" /></feMerge></filter>}
+      </defs>
+      <g filter={flt} opacity="0.86">{centers.map((c, i) => <circle key={i} cx={c[0].toFixed(1)} cy={c[1].toFixed(1)} r={r} fill="none" stroke={`url(#${uid}g)`} strokeWidth="1.3" />)}</g>
+      <polygon points={hex} fill="none" stroke={`url(#${uid}g)`} strokeWidth="1" opacity="0.5" />
+      <g filter={flt}>{nodes.map((n, i) => <circle key={i} cx={n[0].toFixed(1)} cy={n[1].toFixed(1)} r="2.1" fill="#cfe6ff" style={{ animation: "sgNd 3.6s ease-in-out infinite", animationDelay: `${(i * 0.14).toFixed(2)}s` }} />)}</g>
+      <g filter={flt}>{["M100,100 A34,34 0 1 1 129.4,49", "M100,100 A34,34 0 1 1 70.6,151"].map((d, i) => (
+        <path key={i} d={d} pathLength="100" strokeDasharray="100" fill="none" stroke={`url(#${uid}s)`} strokeWidth="2.8" strokeLinecap="round" style={{ animation: "sgGrow 9s ease-in-out infinite" }} />
+      ))}</g>
+      <circle cx="100" cy="100" r="5" fill="#f4faff" filter={flt} style={{ animation: "sgCore 3.4s ease-in-out infinite", transformOrigin: "50% 50%", transformBox: "fill-box" }} />
+    </svg>
+  );
 }
 
 const TM = {
@@ -1042,9 +1079,8 @@ function BuildProgress({ pct = 0, label = "", facts = [], title = "Building your
       <div style={{ position: "absolute", inset: 0, background: "linear-gradient(110deg,transparent 30%,rgba(124,58,237,0.07) 50%,transparent 70%)", backgroundSize: "200% 100%", animation: "shimmer 1.8s linear infinite" }} />
       <div style={{ position: "relative" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-          <div style={{ width: 38, height: 38, position: "relative", flexShrink: 0 }}>
-            <div style={{ position: "absolute", inset: 0, borderRadius: "50%", border: "3px solid rgba(124,58,237,0.14)", borderTopColor: "#7C3AED", animation: "spin 1s linear infinite" }} />
-            <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>🏫</div>
+          <div style={{ width: 40, height: 40, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <SenseitoMark size={40} />
           </div>
           <div>
             <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 18, fontWeight: 700, color: B.white }}>{title}</div>
@@ -3549,6 +3585,7 @@ function Home({ onCreated }) {
       )}
       {phase === "idle" && (
         <div style={{ position: "relative", zIndex: 1, textAlign: "center", paddingTop: 48, paddingBottom: 44 }}>
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: 18 }}><SenseitoMark size={92} /></div>
           <div style={{ display: "inline-flex", alignItems: "center", gap: 8, background: "rgba(124,58,237,0.09)", border: "1px solid rgba(124,58,237,0.35)", borderRadius: 100, padding: "5px 14px", fontSize: 11, fontWeight: 700, color: "#F0ABFC", letterSpacing: 0.5, textTransform: "uppercase", marginBottom: 22 }}>
             <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#F0ABFC", display: "inline-block" }} /> Powered by Claude AI
           </div>
@@ -3898,8 +3935,9 @@ function ProjectChat({ rec, iterating, history, onSend, onIterate, onBack, onThe
       <div style={{ flex: 1, overflowY: "auto", padding: "10px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
         <div style={{ fontSize: 12, color: B.mutedMid, lineHeight: 1.6, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 10, padding: "10px 12px" }}>👋 Ask me anything about this project, or tell me what to change — “add a quiz to lesson 2”, “how could I make this better?”, “add a daily habit tracker”.</div>
         {history.map((m, i) => (
-          <div key={i} style={{ display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
-            <div style={{ maxWidth: "92%", background: m.role === "user" ? T.ps : B.surface, border: `1px solid ${m.role === "user" ? T.ba : B.border}`, borderRadius: m.role === "user" ? "12px 4px 12px 12px" : "4px 12px 12px 12px", padding: "8px 11px", fontSize: 12.5, lineHeight: 1.5, color: B.white }}>{m.role === "user" ? m.content : <Markdown text={m.content} />}</div>
+          <div key={i} style={{ display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start", gap: 7, alignItems: "flex-start" }}>
+            {m.role !== "user" && <div style={{ flex: "0 0 22px", marginTop: 2 }}><SenseitoMark size={22} /></div>}
+            <div style={{ maxWidth: "88%", background: m.role === "user" ? T.ps : B.surface, border: `1px solid ${m.role === "user" ? T.ba : B.border}`, borderRadius: m.role === "user" ? "12px 4px 12px 12px" : "4px 12px 12px 12px", padding: "8px 11px", fontSize: 12.5, lineHeight: 1.5, color: B.white }}>{m.role === "user" ? m.content : <Markdown text={m.content} />}</div>
           </div>
         ))}
         {iterating && <div style={{ display: "flex", gap: 4, paddingLeft: 4 }}>{[0, 1, 2].map(i => <div key={i} style={{ width: 6, height: 6, borderRadius: "50%", background: T.p, animation: `pulse 1s ${i * 0.2}s infinite` }} />)}</div>}
