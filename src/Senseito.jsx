@@ -384,6 +384,7 @@ const BLOCK_META = {
   // Information & context
   review:              { label: "Spaced Review",       icon: "🔁", cat: "Knowledge" },
   garden:              { label: "Mindset Garden",      icon: "🌱", cat: "Knowledge" },
+  notebook:            { label: "Notebook",            icon: "📓", cat: "Knowledge" },
   match_pairs:         { label: "Match Pairs",         icon: "🔀", cat: "Game" },
   fill_blank:          { label: "Fill the Blank",      icon: "✏️", cat: "Game" },
   order_words:         { label: "Word Order",          icon: "🔤", cat: "Game" },
@@ -433,6 +434,7 @@ Every block's data MAY include "concepts": [concept ids from the school's concep
 - fill_blank: { sentence (put "___" where the word goes), options:[3-4 choices], answer (0-based index of the correct option), explain? } — cloze game.
 - order_words: { prompt (what to say, e.g. "Say: I am learning"), answer:[words IN CORRECT ORDER] } — sentence-building game (words are shuffled for the learner).
 - garden: { title?:"..." } — Mindset Garden: limiting beliefs the mentor captures appear as weeds the learner reframes (with AI) into flowers. No content needed. Ideal as a dashboard section for coaching, mindset, sales, therapy, confidence schools.
+- notebook: { title?, prompt? } — a real free-write space the learner types into and that auto-saves. Use this (NOT a reading block) whenever the section is for the learner to capture notes/thoughts/journal. No body content needed.
 - reading_plain: { content (markdown), image?:"https… optional top image" }
 - video_embed: { url, title }
 - embed: { url, title, height? } — embeds an external resource (Google Drive file/folder, Google Docs/Sheets/Slides, Figma, a PDF, or any https page). Use this for "connect Google Drive", "attach a doc", "embed a figma", external reference material. If you don't have a real URL, OMIT this block (or leave url empty — it shows a "needs setup" prompt) rather than inventing one.
@@ -595,7 +597,7 @@ Decide which SECTIONS this experience needs, based on the subject. Section kinds
 - "mentor": an always-available AI mentor for open questions/coaching.
 - "tools": a place where the learner builds and uses their own interactive tools.
 - "dashboard": an always-on grid of bricks the learner returns to (NOT gated). Perfect for practice-driven subjects — e.g. yoga → pose gallery + breath timer + streak tracker; trading → trade journal + metric tracker; meditation → reflection timer + mood quadrant.
-Pick ONLY the sections that genuinely fit. A yoga/habit/practice experience might be a dashboard + mentor with NO lessons at all; a philosophy course might be lessons + mentor. Honor any structure the creator asked for. Each dashboard section carries its own blockTypes the learner uses directly — these MUST be INTERACTIVE/TRACKING bricks (e.g. habit_checker, heatmap, metric_tracker, macro_tracker, mood_quadrant, reflection_timer, weekly_planner, calculator, flashcard, quiz, video_embed, review). For any course with lessons, a "review" brick on a dashboard is excellent (spaced repetition of weak concepts). NEVER put reading_plain or reading in a dashboard — a dashboard is for doing, not reading.
+Pick ONLY the sections that genuinely fit. A yoga/habit/practice experience might be a dashboard + mentor with NO lessons at all; a philosophy course might be lessons + mentor. Honor any structure the creator asked for. Each dashboard section carries its own blockTypes the learner uses directly — these MUST be INTERACTIVE/TRACKING bricks (e.g. notebook, habit_checker, heatmap, metric_tracker, macro_tracker, mood_quadrant, reflection_timer, weekly_planner, calculator, flashcard, quiz, video_embed, review, garden). For a note-taking / "keep track of your thoughts" / journal hub, use a "notebook" brick (a real free-write space) — NEVER a reading brick (reading has a meaningless "mark as read"). For any course with lessons, a "review" brick on a dashboard is excellent (spaced repetition of weak concepts). NEVER put reading_plain or reading in a dashboard. A dashboard section MUST contain at least 2 useful bricks — never a single placeholder.
 
 STEP 3 — PLAN BLOCKS PER LESSON (TYPES ONLY).
 For each lesson choose 1-3 DISTINCT block TYPES (never repeat the same type within a lesson) from the chosen path's ALLOWED list ONLY (never a forbidden one), ordered pedagogically (e.g. reading → practice → check); the LAST should prove mastery. List ONLY the type strings now — their detailed contents are generated later, so keep this plan compact.
@@ -639,7 +641,9 @@ const BLOCKFILL_SYS = `You are the Senseito Block Author. You receive a school's
 Return ONLY JSON: { "lessons": [ { "number": <lesson number>, "blocks": [ { "type", "data" }, ... ] } ] } — one entry per lesson given, blocks in the SAME order as the planned types.
 Each block's data MUST follow these shapes EXACTLY:
 ${BLOCK_SCHEMA_GUIDE}
-Make every block specific, vivid and grounded in the school's subject and (if given) the KNOWLEDGE DNA — never generic. Rich but concise. Output ONLY the JSON.`;
+Make every block specific, vivid and grounded in the school's subject and (if given) the KNOWLEDGE DNA — never generic. Rich but concise.
+SEQUENCE: within a lesson, blocks are completed strictly IN ORDER. A block must NOT reference, assume, or build on something the learner only does in a LATER block of the same lesson (e.g. don't ask them to reflect on a recording they make in a later activity). Each block stands on what came before it, not after.
+Output ONLY the JSON.`;
 
 const DISTILL_SYS = `You are the Senseito Knowledge Distiller. The text below is source material a creator wants taught. Produce a compact KNOWLEDGE DNA in markdown — the minimum a mentor AI needs to teach this material authentically. Max ~600 words.
 Format exactly:
@@ -797,16 +801,28 @@ LESSON TYPE BEHAVIOR:
 RULES:
 - Never bullet lists. Max 3-4 sentences before asking the student something.
 - When the student reports their mission/work: evaluate strictly. If they pass, say exactly what proved it. If not, say exactly what's missing — one thing at a time.
+- ACTIVITY TRUTH: "LEARNER'S ACTIVITY STATUS" above is the system's real record (✓ done / ✗ not done). TRUST IT over what the student claims. If they say they did an activity that shows ✗, gently note it isn't registered yet and have them actually do it — do NOT take their word. NEVER send them to a later activity while an earlier one still shows ✗; activities are completed IN ORDER.
+- Direct the student to ONE activity at a time, by its name, in order. Only reference what THIS or earlier activities contain — never describe or assume something from a LATER activity.
 - You are NOT an assistant. You are a mentor with standards. Stay in character always.
 - Keep replies under 140 words unless doing a formal evaluation.
 ${MENTOR_WIDGET_NOTE}${schoolHasGarden(school) ? `\n${MENTOR_GARDEN_NOTE}` : ""}`;
 }
 
-function mentorOfficeSys(school, bus) {
+// Where is the learner in their journey? Keeps the office mentor from assuming
+// the student knows concepts from lessons they haven't reached yet.
+function journeyContext(school, progress) {
+  const lessons = (school?.semesters || []).flatMap(s => s.lessons || []);
+  if (!lessons.length || !progress) return "";
+  const passed = lessons.filter(l => progress[l.number] === "passed");
+  const current = lessons.find(l => progress[l.number] === "active") || lessons.find(l => (progress[l.number] || "locked") !== "passed");
+  const recent = passed.slice(-6).map(l => l.title).join("; ");
+  return `\nLEARNER'S JOURNEY: ${passed.length}/${lessons.length} lessons completed${recent ? ` (recently: ${recent})` : ""}. Currently on: "${current?.title || "—"}". You may preview later ideas, but do NOT assume they've learned concepts from lessons they haven't completed yet.\n`;
+}
+function mentorOfficeSys(school, bus, journey = "") {
   const dna = school.knowledgeDNA ? `\nKNOWLEDGE DNA:\n${String(school.knowledgeDNA).slice(0, 4000)}\n` : "";
   return `You are ${school.mentor.name}, mentor of "${school.name}" on Senseito — holding open OFFICE HOURS.
 ${school.mentor.systemVoice}
-${dna}${busContext(bus, school)}
+${dna}${busContext(bus, school)}${journey}
 THE SCHOOL: ${school.description} Lessons: ${school.semesters?.flatMap(s => s.lessons?.map(l => l.title)).join("; ")}
 The student can ask you ANYTHING related to this subject. Stay fully in character. Connect answers back to the school's lessons and missions when relevant. Push them toward action, not consumption. Never bullet lists. Replies under 150 words.
 ${MENTOR_WIDGET_NOTE}${schoolHasGarden(school) ? `\n${MENTOR_GARDEN_NOTE}` : ""}`;
@@ -1318,11 +1334,11 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, canEdit, onUpda
 
         {tab === "activities" && (
           <div style={{ flex: 1, overflowY: "auto", padding: "18px 22px", display: "flex", flexDirection: "column", gap: 14 }}>
-            {mode === "activities" && !briefed && !canEdit ? (
+            {(mode === "activities" || mode === "hybrid") && !briefed && !canEdit ? (
               <div style={{ textAlign: "center", padding: "36px 20px" }}>
                 <div style={{ fontSize: 30, marginBottom: 10 }}>🔒</div>
                 <div style={{ fontSize: 14, fontWeight: 700, color: B.white, marginBottom: 6 }}>Talk to your mentor first</div>
-                <div style={{ fontSize: 12.5, color: B.muted, lineHeight: 1.6, maxWidth: 360, margin: "0 auto 14px" }}>{school.mentor.name} will brief you and open your activities.</div>
+                <div style={{ fontSize: 12.5, color: B.muted, lineHeight: 1.6, maxWidth: 360, margin: "0 auto 14px" }}>{school.mentor.name} will brief you, then open your activities.</div>
                 <button onClick={() => setTab("mentor")} style={pBtn(T)}>💬 Go to the lesson chat</button>
               </div>
             ) : (<>
@@ -1392,7 +1408,7 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, canEdit, onUpda
 // ─────────────────────────────────────────────────────────────
 // MENTOR OFFICE HOURS
 // ─────────────────────────────────────────────────────────────
-function MentorOffice({ school, T, chat, onChat, bus, onIngest }) {
+function MentorOffice({ school, T, chat, onChat, bus, onIngest, progress }) {
   const msgs = chat?.length ? chat : [{ role: "assistant", content: `Office hours are open. Bring me something real — a question, a struggle, a situation from your life. We'll work on it together.` }];
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -1405,7 +1421,7 @@ function MentorOffice({ school, T, chat, onChat, bus, onIngest }) {
     const next = [...msgs, { role: "user", content: userMsg }];
     onChat(next); setLoading(true);
     try {
-      let reply = await api(mentorOfficeSys(school, bus), toApiMessages(next), 2000);
+      let reply = await api(mentorOfficeSys(school, bus, journeyContext(school, progress)), toApiMessages(next), 2000);
       const wd = reply.match(/WEED:\s*(.+)/i);
       if (wd) { onIngest?.({ title: "Office hours" }, { type: "mindset", weed: wd[1].trim() }); reply = reply.replace(/\n?\s*WEED:\s*.+/i, "").trim(); }
       onChat([...next, { role: "assistant", content: reply }]);
@@ -2321,6 +2337,21 @@ function OrderWordsBlock({ data = {}, onOutput, T, disabled }) {
   </BlockShell>);
 }
 
+// ── Notebook — a real free-write space the learner keeps (auto-saves to state) ──
+function NotebookBlock({ data = {}, state, onState, T, disabled }) {
+  const [text, setText] = useState(state?.text || "");
+  const save = (v) => { setText(v); onState?.({ text: v }); };
+  return (
+    <div style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 14, padding: 16 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: B.white, marginBottom: data.prompt ? 4 : 10 }}>📓 {data.title || "Notebook"}</div>
+      {data.prompt && <div style={{ fontSize: 12.5, color: B.mutedMid, marginBottom: 10, lineHeight: 1.5 }}>{data.prompt}</div>}
+      <textarea value={text} onChange={e => save(e.target.value)} disabled={disabled} rows={6} placeholder={data.placeholder || "Write your thoughts, takeaways, questions…"}
+        style={{ width: "100%", background: B.surface, border: `1px solid ${B.border}`, borderRadius: 10, color: B.white, fontFamily: "inherit", fontSize: 14, lineHeight: 1.65, padding: "12px 14px", resize: "vertical", outline: "none" }} />
+      <div style={{ fontSize: 11, color: B.muted, marginTop: 6, textAlign: "right" }}>{text.trim() ? `${text.length} chars · saved` : "Auto-saves as you type"}</div>
+    </div>
+  );
+}
+
 // ── 27. Quiz ──
 function QuizBlock({ data = {}, onOutput, T, disabled, school, bus }) {
   const weak = weakLabelsFor(bus, school, data.concepts);
@@ -2502,7 +2533,7 @@ const BLOCK_COMPONENTS = {
   image_gate: ImageGateBlock, video_gate: VideoGateBlock,
   reading_plain: ReadingPlainBlock, video_embed: VideoEmbedBlock, embed: EmbedBlock, quiz: QuizBlock, calculator: CalculatorBlock,
   divider: DividerBlock, callout: CalloutBlock, image: ImageBlock, cta_button: CtaButtonBlock, stat_grid: StatGridBlock,
-  review: ReviewBlock, garden: GardenBlock, match_pairs: MatchPairsBlock, fill_blank: FillBlankBlock, order_words: OrderWordsBlock, custom: CustomBlock,
+  review: ReviewBlock, garden: GardenBlock, notebook: NotebookBlock, match_pairs: MatchPairsBlock, fill_blank: FillBlankBlock, order_words: OrderWordsBlock, custom: CustomBlock,
 };
 // Concepts the learner is currently weak on that THIS brick teaches/tests.
 function weakLabelsFor(bus, school, concepts) {
@@ -3847,7 +3878,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
               </div>
             )}
           </>)}
-          {activeTab === "mentor" && <MentorOffice school={school} T={T} chat={rec.mentorChat || []} onChat={(msgs) => onUpdate({ mentorChat: msgs })} bus={bus} onIngest={ingestOutput} />}
+          {activeTab === "mentor" && <MentorOffice school={school} T={T} chat={rec.mentorChat || []} onChat={(msgs) => onUpdate({ mentorChat: msgs })} bus={bus} onIngest={ingestOutput} progress={progress} />}
           {activeTab === "tools" && <ToolsSection rec={rec} T={T} onUpdate={onUpdate} buildTool={buildTool} buildingTool={buildingTool} readOnly={readOnly} onReloadIdeas={reloadIdeas} onEditTool={editTool} />}
           {SECTIONS.filter(s => s.kind === "dashboard").map(sec => activeTab === sec.id
             ? <DashboardSection key={sec.id} section={sec} rec={rec} T={T} onUpdate={onUpdate} readOnly={readOnly} school={school} onIngest={ingestOutput} />
