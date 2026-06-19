@@ -543,13 +543,35 @@ const PATH_GUIDE = Object.entries(LEARNING_PATH_RULES).map(([k, v]) =>
 // switchable + customizable by the creator. Individual fields still override.
 // NOTE: must be defined BEFORE ARCHITECT_SYS (a plain string that interpolates it).
 const TEMPLATES = {
-  academy: { label: "Academy", emoji: "🎓", theme: "violet", skin: "aurora", font: "inter", density: "cozy", gami: "xp", desc: "Balanced course — the Senseito default." },
-  corporate: { label: "Corporate / HR", emoji: "🏢", theme: "cyan", skin: "minimal", font: "grotesk", density: "cozy", gami: "none", chrome: true, desc: "Clean & business-like; company logo + nav links." },
-  kids: { label: "Kids / Language", emoji: "🐣", theme: "amber", skin: "playful", font: "poppins", density: "spacious", gami: "xp", desc: "Bright, bite-size and game-y; streaks & XP." },
-  quickskill: { label: "Quick Skill", emoji: "⚡", theme: "emerald", skin: "bold", font: "grotesk", density: "compact", gami: "none", desc: "A fast step-by-step path to one concrete skill." },
-  coaching: { label: "Coaching / Mindset", emoji: "🌱", theme: "rose", skin: "zen", font: "lora", density: "spacious", gami: "none", desc: "Calm & reflective; mentor-led + Garden." },
+  academy: { label: "Default", emoji: "🎓", theme: "violet", skin: "aurora", font: "inter", density: "cozy", gami: "xp", desc: "Balanced course — the Senseito default." },
+  corporate: { label: "Corporate", emoji: "🏢", theme: "cyan", skin: "minimal", font: "grotesk", density: "cozy", gami: "none", chrome: true, desc: "Clean & business-like; company logo + nav links." },
+  quickskill: { label: "Fast Learn", emoji: "⚡", theme: "emerald", skin: "bold", font: "grotesk", density: "compact", gami: "none", desc: "A fast step-by-step path to one concrete skill." },
+  kids: { label: "Kids", emoji: "🐣", theme: "amber", skin: "playful", font: "poppins", density: "spacious", gami: "xp", desc: "Bright, bite-size and game-y; streaks & XP." },
+  coaching: { label: "Coaching", emoji: "🌱", theme: "rose", skin: "editorial", font: "lora", density: "spacious", gami: "none", desc: "Warm, article-like, mentor-led + Garden." },
+  spiritual: { label: "Spiritual", emoji: "🕉️", theme: "violet", skin: "zen", font: "lora", density: "spacious", gami: "none", desc: "Serene, centered, contemplative." },
 };
 const TEMPLATE_KEYS = Object.keys(TEMPLATES);
+// Structural look per template — distinct page background, nav style and width
+// so switching template re-skins the whole experience (not just tokens).
+const TEMPLATE_STYLE = {
+  academy: { nav: "pills", maxW: 880, pageBg: null },
+  corporate: { nav: "topbar", maxW: 1060, pageBg: "linear-gradient(180deg,rgba(8,145,178,0.07),transparent 260px)" },
+  quickskill: { nav: "minimal", maxW: 700, pageBg: null },
+  kids: { nav: "chunky", maxW: 820, pageBg: "radial-gradient(circle at 12% 0%,rgba(245,158,11,0.14),transparent 42%),radial-gradient(circle at 92% 8%,rgba(244,114,182,0.13),transparent 42%)" },
+  coaching: { nav: "soft", maxW: 720, pageBg: "radial-gradient(circle at 50% -8%,rgba(190,24,93,0.10),transparent 46%)" },
+  spiritual: { nav: "minimal", maxW: 720, pageBg: "radial-gradient(circle at 50% 0%,rgba(124,58,237,0.12),transparent 52%)", centered: true },
+};
+function tplStyle(school) { return TEMPLATE_STYLE[school?.template] || TEMPLATE_STYLE.academy; }
+// Distinct tab/nav treatments per template — { bar (container style), tab(active) }.
+function navStyles(nav, T) {
+  switch (nav) {
+    case "topbar": return { bar: { display: "flex", gap: 2, borderBottom: `1px solid ${B.border}`, overflowX: "auto" }, tab: a => ({ flex: "0 0 auto", padding: "11px 18px", border: "none", borderBottom: `2px solid ${a ? T.p : "transparent"}`, background: "transparent", color: a ? B.white : B.mutedMid, fontFamily: "inherit", fontSize: 13, fontWeight: 600, cursor: "pointer", borderRadius: 0, transition: "all 0.2s" }) };
+    case "chunky": return { bar: { display: "flex", gap: 8, flexWrap: "wrap" }, tab: a => ({ flex: "1 1 auto", minWidth: 96, padding: "13px 12px", border: `2px solid ${a ? "transparent" : B.borderMid}`, borderRadius: 16, background: a ? `linear-gradient(135deg,${T.p},${T.a})` : B.surface, color: a ? "white" : B.mutedMid, fontFamily: "inherit", fontSize: 14, fontWeight: 700, cursor: "pointer", boxShadow: a ? `0 6px 18px ${T.pg}` : "none", transition: "all 0.2s" }) };
+    case "minimal": return { bar: { display: "flex", gap: 22, justifyContent: "center", borderBottom: `1px solid ${B.border}` }, tab: a => ({ flex: "0 0 auto", padding: "9px 4px", border: "none", borderBottom: `2px solid ${a ? T.p : "transparent"}`, background: "transparent", color: a ? B.white : B.muted, fontFamily: "inherit", fontSize: 13.5, fontWeight: a ? 700 : 500, letterSpacing: 0.3, cursor: "pointer", borderRadius: 0, transition: "all 0.2s" }) };
+    case "soft": return { bar: { display: "flex", gap: 6, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 100, padding: 5 }, tab: a => ({ flex: "1 1 auto", minWidth: 88, padding: "9px 10px", border: "none", borderRadius: 100, background: a ? T.ps : "transparent", color: a ? T.hi : B.mutedMid, fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", transition: "all 0.2s" }) };
+    default: return { bar: { display: "flex", gap: 4, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: 5, backdropFilter: "blur(8px)" }, tab: a => ({ flex: "1 1 auto", minWidth: 90, padding: "10px 8px", border: "none", borderRadius: 10, background: a ? `linear-gradient(135deg,${T.p},${T.p}CC)` : "transparent", color: a ? "white" : B.mutedMid, fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", boxShadow: a ? `0 0 16px ${T.pg}` : "none", transition: "all 0.2s" }) };
+  }
+}
 
 // ─────────────────────────────────────────────────────────────
 // PROMPTS
@@ -3354,6 +3376,8 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const sk = skinCfg(school.skin, T);
   const hero = school.hero || {}; // { emoji?, tagline?, description?, off? } — false hides; cover via school.cover
   const dens = ({ compact: 11, cozy: 18, spacious: 28 })[school.density] || 18; // vertical rhythm between sections
+  const ts = tplStyle(school); // structural look (nav style / width / page background) from the template
+  const nv = navStyles(ts.nav, T);
   const [leads, setLeads] = useState(null);
   const [students, setStudents] = useState(null);
   const [showLeads, setShowLeads] = useState(false);
@@ -3590,7 +3614,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
         onApplyAI={(inst) => applyIteration(inst)} onAuthorBlock={authorBlock}
         onClose={() => setEditingLesson(null)} />}
 
-      <div style={{ maxWidth: 860, margin: "0 auto", padding: "0 20px 80px" }}>
+      <div style={{ maxWidth: ts.maxW, margin: "0 auto", padding: "0 20px 80px", background: ts.pageBg || undefined, borderRadius: ts.pageBg ? 20 : undefined, minHeight: ts.pageBg ? "100vh" : undefined }}>
         {!readOnly && (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 0 14px", flexWrap: "wrap", gap: 8 }}>
             <div style={{ fontSize: 12, color: B.muted }}>💬 Type in the left chat to change anything</div>
@@ -3695,9 +3719,9 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
             </div>
           </div>
 
-          {/* Tabs */}
+          {/* Tabs — style varies by the experience template */}
           <div style={{ position: "sticky", top: 10, zIndex: 80 }}>
-            <div style={{ display: "flex", gap: 4, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: 5, backdropFilter: "blur(8px)" }}>
+            <div style={nv.bar}>
               {TABS.map(([k, l], ti) => (
                 <button key={k} draggable={!readOnly}
                   onDragStart={() => { dragIdx.current = ti; }}
@@ -3706,7 +3730,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
                   onClick={() => setTab(k)}
                   onDoubleClick={() => { if (readOnly) return; const cur = SECTIONS.find(s => s.id === k); const t = window.prompt("Rename this tab:", cur?.title || ""); if (t && t.trim()) renameSection(k, t.trim()); }}
                   title={readOnly ? "" : "Drag to reorder · double-click to rename"}
-                  style={{ flex: "1 1 auto", minWidth: 90, padding: "10px 8px", borderRadius: 10, border: "none", background: activeTab === k ? `linear-gradient(135deg,${T.p},${T.p}CC)` : "transparent", color: activeTab === k ? "white" : B.mutedMid, fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: readOnly ? "pointer" : "grab", boxShadow: activeTab === k ? `0 0 16px ${T.pg}` : "none", transition: "all 0.2s" }}>{l}</button>
+                  style={{ ...nv.tab(activeTab === k), cursor: readOnly ? "pointer" : "grab" }}>{l}</button>
               ))}
               {!readOnly && <button onClick={() => setAddSecOpen(o => !o)} title="Add or manage sections" style={{ flexShrink: 0, width: 40, padding: "10px 0", borderRadius: 10, border: `1px dashed ${B.borderMid}`, background: addSecOpen ? T.ps : "transparent", color: addSecOpen ? T.hi : B.mutedMid, fontFamily: "inherit", fontSize: 17, fontWeight: 700, cursor: "pointer" }}>＋</button>}
             </div>
