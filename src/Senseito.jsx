@@ -546,7 +546,7 @@ const TEMPLATES = {
   academy: { label: "Default", emoji: "🎓", theme: "violet", skin: "aurora", font: "inter", density: "cozy", gami: "xp", desc: "Balanced course — the Senseito default." },
   corporate: { label: "Corporate", emoji: "🏢", theme: "cyan", skin: "minimal", font: "grotesk", density: "cozy", gami: "none", chrome: true, desc: "Clean & business-like; company logo + nav links." },
   quickskill: { label: "Fast Learn", emoji: "⚡", theme: "emerald", skin: "bold", font: "grotesk", density: "compact", gami: "none", desc: "A fast step-by-step path to one concrete skill." },
-  kids: { label: "Kids", emoji: "🐣", theme: "amber", skin: "playful", font: "poppins", density: "spacious", gami: "xp", desc: "Bright, bite-size and game-y; streaks & XP." },
+  kids: { label: "Kids", emoji: "🐣", theme: "amber", skin: "playful", font: "poppins", density: "spacious", gami: "xp", progression: "map", desc: "Bright, bite-size and game-y; streaks & XP; map progression." },
   coaching: { label: "Coaching", emoji: "🌱", theme: "rose", skin: "editorial", font: "lora", density: "spacious", gami: "none", desc: "Warm, article-like, mentor-led + Garden." },
   spiritual: { label: "Spiritual", emoji: "🕉️", theme: "violet", skin: "zen", font: "lora", density: "spacious", gami: "none", desc: "Serene, centered, contemplative." },
 };
@@ -727,6 +727,8 @@ DECIDE which of three modes this message is:
 - "cover": an https image URL for a hero banner, or "" to remove. "coverPos": CSS object-position for the cover focal point (e.g. "50% 25%", "left top").
 - "fontScale": a number 0.8–1.4 for overall text size (1 = default).
 - "minimal": true/false — minimalist mode. When true, deliberately terse/short activities are shown as-is and never hidden or flagged as empty. Use for "keep it minimal", "distilled one-liner lessons", "don't pad the content".
+- "progression": "list" | "map" — how the lessons section is laid out. "map" = a Duolingo-style winding path of lesson nodes. Use for "make the lessons a map/journey/path". (Add-anywhere — works on any theme.)
+- "navStyle": "pills" | "topbar" | "chunky" | "minimal" | "soft" — override the section navigation style independently of the theme.
 - "hero": { "emoji":false, "tagline":false, "description":false, "off":true } — set a key false to hide that piece; "off":true = minimal title-only header. (For "just a chat, no title/description" set hero.off true.)
 - "overlay": { "type":"mentorFab", "greeting":"<short>" } to add a floating chat bubble, or null to remove.
 - "layout": one of ${Object.keys(LAYOUTS).join(", ")} (only for a wholesale re-arrange into a known shape).
@@ -839,6 +841,7 @@ function composeSchool(content, dna) {
     skin: content.skin || tpl?.skin,
     font: content.font || tpl?.font,
     density: content.density || tpl?.density,
+    progression: content.progression || tpl?.progression,
     mentor: {
       name: content.mentorName || "The Mentor",
       personality: content.mentorPersonality || "",
@@ -3377,6 +3380,34 @@ function BrandBar({ school, T, readOnly, onUpdate }) {
     </div>
   );
 }
+// Composable "map progression" — a Duolingo-style winding path of lesson nodes.
+// Add-anywhere: any school can switch its lessons to this via school.progression="map".
+function LessonMap({ school, T, progress, onEnter, onEdit, readOnly }) {
+  const lessons = (school.semesters || []).flatMap(s => s.lessons || []);
+  const offsets = [0, 64, 92, 64, 0, -64, -92, -64];
+  if (!lessons.length) return <div style={{ textAlign: "center", padding: "30px 20px", fontSize: 13, color: B.muted }}>No lessons yet.</div>;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "8px 0 24px" }}>
+      {lessons.map((l, i) => {
+        const state = progress[l.number] || (i === 0 ? "active" : "locked");
+        const locked = state === "locked" && (i > 0 || readOnly);
+        const dx = offsets[i % offsets.length];
+        const accent = state === "passed" ? "#4ADE80" : locked ? B.muted : T.p;
+        return (
+          <div key={i} style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+            {i > 0 && <div style={{ width: 3, height: 32, background: state === "locked" ? B.borderMid : T.ba, opacity: 0.7 }} />}
+            <button onClick={() => !locked && onEnter(l)} disabled={locked} title={l.title}
+              style={{ transform: `translateX(${dx}px)`, width: 62, height: 62, borderRadius: "50%", border: `3px solid ${accent}`, background: state === "passed" ? "rgba(74,222,128,0.15)" : locked ? B.surface2 : T.ps, color: B.white, cursor: locked ? "not-allowed" : "pointer", fontSize: 23, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: state === "active" ? `0 0 22px ${T.pg}` : "none", transition: "transform 0.15s" }}>
+              {state === "passed" ? "✓" : locked ? "🔒" : (TM[l.type]?.icon || "▶")}
+            </button>
+            <div style={{ transform: `translateX(${dx}px)`, fontSize: 11.5, color: locked ? B.muted : B.white, marginTop: 6, maxWidth: 150, textAlign: "center", lineHeight: 1.3, fontWeight: 600 }}>{l.title}</div>
+            {!readOnly && <button onClick={() => onEdit(l)} style={{ transform: `translateX(${dx}px)`, marginTop: 2, background: "none", border: "none", color: B.muted, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>✎ edit</button>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, publicBase, token, onSetSlug, onIterate, iterating = false, iterProg = { pct: 0, label: "" } }) {
   const school = rec.data;
   const T = themeFor(school);
@@ -3384,7 +3415,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const hero = school.hero || {}; // { emoji?, tagline?, description?, off? } — false hides; cover via school.cover
   const dens = ({ compact: 11, cozy: 18, spacious: 28 })[school.density] || 18; // vertical rhythm between sections
   const ts = tplStyle(school); // structural look (nav style / width / page background) from the template
-  const nv = navStyles(ts.nav, T);
+  const nv = navStyles(school.navStyle || ts.nav, T); // navStyle = add-anywhere override of the template's nav
   const [leads, setLeads] = useState(null);
   const [students, setStudents] = useState(null);
   const [showLeads, setShowLeads] = useState(false);
@@ -3768,7 +3799,13 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
                 <div style={{ fontSize: 13, color: B.white, lineHeight: 1.65 }}><EditableText value={flattenText(school.transformation)} readOnly={readOnly} placeholder="Describe the before→after transformation…" onSave={v => onUpdate({ data: { ...school, transformation: v } })} /></div>
               </div>
             )}
-            {school.semesters?.map((sem, si) => (
+            {!readOnly && <div style={{ display: "flex", gap: 6, alignItems: "center", justifyContent: "flex-end" }}>
+              <span style={{ fontSize: 11, color: B.muted }}>Layout</span>
+              {[["list", "☰ List"], ["map", "🗺️ Map"]].map(([k, l]) => <button key={k} onClick={() => onUpdate({ data: { ...school, progression: k } })} style={{ background: (school.progression || "list") === k ? T.ps : "none", border: `1px solid ${(school.progression || "list") === k ? T.ba : B.borderMid}`, borderRadius: 8, color: (school.progression || "list") === k ? T.hi : B.mutedMid, padding: "5px 11px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 700 }}>{l}</button>)}
+            </div>}
+            {school.progression === "map" ? (
+              <LessonMap school={school} T={T} progress={progress} onEnter={setActiveLesson} onEdit={setEditingLesson} readOnly={readOnly} />
+            ) : school.semesters?.map((sem, si) => (
               <div key={si} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, padding: "2px 4px" }}>
                   <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
@@ -4497,7 +4534,7 @@ export default function Senseito() {
   function applyDesign(rec, d) {
     if (!d || typeof d !== "object") return false;
     const cur = rec.data; const patch = {};
-    for (const k of ["theme", "skin", "density", "font", "fontScale", "cover", "coverPos", "minimal"]) if (k in d) patch[k] = d[k];
+    for (const k of ["theme", "skin", "density", "font", "fontScale", "cover", "coverPos", "minimal", "progression", "navStyle"]) if (k in d) patch[k] = d[k];
     if (d.template && TEMPLATES[d.template]) { const t = TEMPLATES[d.template]; patch.template = d.template; patch.theme = t.theme; patch.skin = t.skin; patch.font = t.font; patch.density = t.density; }
     if ("palette" in d) patch.palette = d.palette === null ? undefined : { ...(cur.palette || {}), ...(d.palette || {}) };
     if ("hero" in d) patch.hero = d.hero === null ? undefined : { ...(cur.hero || {}), ...(d.hero || {}) };
@@ -4537,7 +4574,7 @@ export default function Senseito() {
   function lvFontScale(n) { if (!active) return; const v = Math.min(1.4, Math.max(0.8, Math.round((n) * 100) / 100)); updateSchool(active.id, { data: { ...active.data, fontScale: v } }); showAToast(`✓ Text size: ${Math.round(v * 100)}%`); }
   function lvVoice(vp) { if (!active) return; updateSchool(active.id, { data: composeSchool({ ...contentOnly(active.data), voicePreset: vp, systemVoice: undefined, theme: active.data.theme }, active.data.knowledgeDNA) }); showAToast(`✓ Voice: ${vp[0].toUpperCase() + vp.slice(1)}`); }
   function lvGami(gid) { if (!active) return; updateSchool(active.id, { data: composeSchool({ ...contentOnly(active.data), gamiPreset: gid, theme: active.data.theme }, active.data.knowledgeDNA) }); showAToast(`✓ ${GAMI[gid]?.name || gid}`); }
-  function lvTemplate(key) { const t = TEMPLATES[key]; if (!t || !active) return; const d = active.data; const content = { ...contentOnly(d), template: key, theme: t.theme, skin: t.skin, font: t.font, density: t.density, gamiPreset: t.gami }; updateSchool(active.id, { data: composeSchool(content, d.knowledgeDNA) }); showAToast(`✓ ${t.emoji} ${t.label}`); }
+  function lvTemplate(key) { const t = TEMPLATES[key]; if (!t || !active) return; const d = active.data; const content = { ...contentOnly(d), template: key, theme: t.theme, skin: t.skin, font: t.font, density: t.density, gamiPreset: t.gami, progression: t.progression || "list" }; updateSchool(active.id, { data: composeSchool(content, d.knowledgeDNA) }); showAToast(`✓ ${t.emoji} ${t.label}`); }
 
   return (
     <div className={mode === "light" ? "light" : undefined} style={{ background: B.bg, minHeight: "100vh", fontFamily: "'Inter',-apple-system,sans-serif", color: B.white, display: "flex" }}>
