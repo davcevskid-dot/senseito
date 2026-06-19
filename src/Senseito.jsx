@@ -726,6 +726,7 @@ DECIDE which of three modes this message is:
 - "font": one of ${Object.keys(FONTS).join(", ")}
 - "cover": an https image URL for a hero banner, or "" to remove. "coverPos": CSS object-position for the cover focal point (e.g. "50% 25%", "left top").
 - "fontScale": a number 0.8–1.4 for overall text size (1 = default).
+- "minimal": true/false — minimalist mode. When true, deliberately terse/short activities are shown as-is and never hidden or flagged as empty. Use for "keep it minimal", "distilled one-liner lessons", "don't pad the content".
 - "hero": { "emoji":false, "tagline":false, "description":false, "off":true } — set a key false to hide that piece; "off":true = minimal title-only header. (For "just a chat, no title/description" set hero.off true.)
 - "overlay": { "type":"mentorFab", "greeting":"<short>" } to add a floating chat bubble, or null to remove.
 - "layout": one of ${Object.keys(LAYOUTS).join(", ")} (only for a wholesale re-arrange into a known shape).
@@ -1229,7 +1230,7 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, canEdit, onUpda
   const baseMode = ["mentoronly", "mentor", "activities", "hybrid", "manual", "proof"].includes(pl.mode) ? pl.mode : "activities";
   // No activities at all → behave as mentor-only (unless explicitly manual).
   // Students never see or get gated on empty/unfilled bricks; creators see them as "generate" cards.
-  const acts = canEdit ? blocks : blocks.filter(b => !isThinBlock(b));
+  const acts = (canEdit || school?.minimal) ? blocks : blocks.filter(b => !isThinBlock(b));
   const mode = (acts.length === 0 && baseMode !== "manual") ? "mentoronly" : baseMode;
   const total = mode === "mentoronly" ? 0 : acts.length;
   const passedBlocks = acts.filter((_, i) => outputs[i]?.passed).length;
@@ -2530,14 +2531,16 @@ function BlockRenderer({ block, onOutput, T, disabled, state, onState, school, b
 
 // Creator wrapper: adds a "✨ Tweak" control on any brick to talk to the AI about
 // THAT brick and rewrite it in place. Renders children plainly when not editable.
-// Is this brick effectively empty (AI returned no real content)? Used to turn
-// empty bricks into "generate" suggestion cards instead of broken one-liners.
+// Is this brick GENUINELY EMPTY (AI returned no real content)? Not "short" —
+// deliberately terse/distilled content is fine and must NOT be hidden. Only
+// near-blank placeholders qualify. A creator can mark data.keep to opt out.
 function isThinBlock(b) {
   if (!b || !b.type) return true;
+  if (b.data?.keep) return false; // creator said "this is intentional"
   const d = b.data || {}; const txt = s => String(s || "").replace(/[#*_\s]/g, "");
   switch (b.type) {
-    case "reading": return txt(d.passage).length < 60;
-    case "reading_plain": return txt(d.content).length < 60;
+    case "reading": return txt(d.passage).length < 12;
+    case "reading_plain": return txt(d.content).length < 12;
     case "flashcard": return !(d.cards || []).length;
     case "quiz": return !(d.questions || []).length;
     case "match_pairs": return !(d.pairs || []).length;
@@ -2558,21 +2561,25 @@ function isThinBlock(b) {
 }
 function BrickFrame({ children, T, school, ctx, blockType, block, onReplace, canEdit }) {
   const [busy, setBusy] = useState(false);
-  const thin = isThinBlock(block || { type: blockType });
+  // Minimalist schools opt out of empty-detection entirely (deliberate terse content).
+  const empty = !school?.minimal && isThinBlock(block || { type: blockType });
   async function generate(instruction) {
     setBusy(true);
     try { const nb = await authorOneBlock(school, ctx, blockType, instruction || ""); onReplace(nb); } catch { }
     setBusy(false);
   }
-  // Empty brick: never show a broken one-liner to a student; offer the creator a one-tap fill.
-  if (thin) {
+  // Empty brick: never show a broken one-liner to a student; offer the creator a one-tap fill OR a "keep as-is".
+  if (empty) {
     if (!canEdit) return null;
     const m = BLOCK_META[blockType] || { icon: "🧩", label: "Activity" };
     return (
       <div style={{ border: `1px dashed ${T.ba}`, borderRadius: 14, padding: "18px 16px", textAlign: "center", background: T.ps }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: B.white, marginBottom: 4 }}>{m.icon} {m.label}</div>
-        <div style={{ fontSize: 12, color: B.mutedMid, marginBottom: 12 }}>This activity has no content yet.</div>
-        <button onClick={() => generate("")} disabled={busy} style={{ ...pBtn(T), opacity: busy ? 0.6 : 1 }}>{busy ? "Generating…" : "✨ Generate this activity"}</button>
+        <div style={{ fontSize: 12, color: B.mutedMid, marginBottom: 12 }}>This activity looks empty.</div>
+        <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
+          <button onClick={() => generate("")} disabled={busy} style={{ ...pBtn(T), opacity: busy ? 0.6 : 1 }}>{busy ? "Generating…" : "✨ Generate this activity"}</button>
+          <button onClick={() => onReplace({ ...(block || { type: blockType }), data: { ...(block?.data || {}), keep: true } })} disabled={busy} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.mutedMid, padding: "9px 14px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit" }}>Keep as-is</button>
+        </div>
       </div>
     );
   }
@@ -4490,7 +4497,7 @@ export default function Senseito() {
   function applyDesign(rec, d) {
     if (!d || typeof d !== "object") return false;
     const cur = rec.data; const patch = {};
-    for (const k of ["theme", "skin", "density", "font", "fontScale", "cover", "coverPos"]) if (k in d) patch[k] = d[k];
+    for (const k of ["theme", "skin", "density", "font", "fontScale", "cover", "coverPos", "minimal"]) if (k in d) patch[k] = d[k];
     if (d.template && TEMPLATES[d.template]) { const t = TEMPLATES[d.template]; patch.template = d.template; patch.theme = t.theme; patch.skin = t.skin; patch.font = t.font; patch.density = t.density; }
     if ("palette" in d) patch.palette = d.palette === null ? undefined : { ...(cur.palette || {}), ...(d.palette || {}) };
     if ("hero" in d) patch.hero = d.hero === null ? undefined : { ...(cur.hero || {}), ...(d.hero || {}) };
