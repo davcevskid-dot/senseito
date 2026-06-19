@@ -569,6 +569,7 @@ function navStyles(nav, T) {
     case "chunky": return { bar: { display: "flex", gap: 8, flexWrap: "wrap" }, tab: a => ({ flex: "1 1 auto", minWidth: 96, padding: "13px 12px", border: `2px solid ${a ? "transparent" : B.borderMid}`, borderRadius: 16, background: a ? `linear-gradient(135deg,${T.p},${T.a})` : B.surface, color: a ? "white" : B.mutedMid, fontFamily: "inherit", fontSize: 14, fontWeight: 700, cursor: "pointer", boxShadow: a ? `0 6px 18px ${T.pg}` : "none", transition: "all 0.2s" }) };
     case "minimal": return { bar: { display: "flex", gap: 22, justifyContent: "center", borderBottom: `1px solid ${B.border}` }, tab: a => ({ flex: "0 0 auto", padding: "9px 4px", border: "none", borderBottom: `2px solid ${a ? T.p : "transparent"}`, background: "transparent", color: a ? B.white : B.muted, fontFamily: "inherit", fontSize: 13.5, fontWeight: a ? 700 : 500, letterSpacing: 0.3, cursor: "pointer", borderRadius: 0, transition: "all 0.2s" }) };
     case "soft": return { bar: { display: "flex", gap: 6, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 100, padding: 5 }, tab: a => ({ flex: "1 1 auto", minWidth: 88, padding: "9px 10px", border: "none", borderRadius: 100, background: a ? T.ps : "transparent", color: a ? T.hi : B.mutedMid, fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", transition: "all 0.2s" }) };
+    case "sidebar": return { bar: { display: "flex", flexDirection: "column", gap: 4, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: 6 }, tab: a => ({ width: "100%", textAlign: "left", padding: "10px 12px", border: "none", borderRadius: 10, background: a ? `linear-gradient(135deg,${T.p},${T.p}CC)` : "transparent", color: a ? "white" : B.mutedMid, fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", boxShadow: a ? `0 0 16px ${T.pg}` : "none", transition: "all 0.2s" }) };
     default: return { bar: { display: "flex", gap: 4, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: 5, backdropFilter: "blur(8px)" }, tab: a => ({ flex: "1 1 auto", minWidth: 90, padding: "10px 8px", border: "none", borderRadius: 10, background: a ? `linear-gradient(135deg,${T.p},${T.p}CC)` : "transparent", color: a ? "white" : B.mutedMid, fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", boxShadow: a ? `0 0 16px ${T.pg}` : "none", transition: "all 0.2s" }) };
   }
 }
@@ -728,7 +729,7 @@ DECIDE which of three modes this message is:
 - "fontScale": a number 0.8–1.4 for overall text size (1 = default).
 - "minimal": true/false — minimalist mode. When true, deliberately terse/short activities are shown as-is and never hidden or flagged as empty. Use for "keep it minimal", "distilled one-liner lessons", "don't pad the content".
 - "progression": "list" | "map" — how the lessons section is laid out. "map" = a Duolingo-style winding path of lesson nodes. Use for "make the lessons a map/journey/path". (Add-anywhere — works on any theme.)
-- "navStyle": "pills" | "topbar" | "chunky" | "minimal" | "soft" — override the section navigation style independently of the theme.
+- "navStyle": "pills" | "topbar" | "chunky" | "minimal" | "soft" | "sidebar" — override the section navigation style independently of the theme. "sidebar" = a left vertical nav with content beside it (two-column).
 - "hero": { "emoji":false, "tagline":false, "description":false, "off":true } — set a key false to hide that piece; "off":true = minimal title-only header. (For "just a chat, no title/description" set hero.off true.)
 - "overlay": { "type":"mentorFab", "greeting":"<short>" } to add a floating chat bubble, or null to remove.
 - "layout": one of ${Object.keys(LAYOUTS).join(", ")} (only for a wholesale re-arrange into a known shape).
@@ -3416,6 +3417,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const dens = ({ compact: 11, cozy: 18, spacious: 28 })[school.density] || 18; // vertical rhythm between sections
   const ts = tplStyle(school); // structural look (nav style / width / page background) from the template
   const nv = navStyles(school.navStyle || ts.nav, T); // navStyle = add-anywhere override of the template's nav
+  const sidebar = (school.navStyle || ts.nav) === "sidebar"; // two-column shell
   const [leads, setLeads] = useState(null);
   const [students, setStudents] = useState(null);
   const [showLeads, setShowLeads] = useState(false);
@@ -3757,8 +3759,9 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
             </div>
           </div>
 
-          {/* Tabs — style varies by the experience template */}
-          <div style={{ position: "sticky", top: 10, zIndex: 80 }}>
+          {/* Tabs + section content — two-column when navStyle is "sidebar" */}
+          <div style={{ display: "flex", flexDirection: sidebar ? "row" : "column", gap: sidebar ? 16 : dens, alignItems: "flex-start" }}>
+          <div style={{ position: "sticky", top: 10, zIndex: 80, ...(sidebar ? { width: 200, flexShrink: 0 } : { width: "100%" }) }}>
             <div style={nv.bar}>
               {TABS.map(([k, l], ti) => (
                 <button key={k} draggable={!readOnly}
@@ -3791,7 +3794,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
               );
             })()}
           </div>
-
+          <div style={{ flex: 1, minWidth: 0, width: "100%", display: "flex", flexDirection: "column", gap: dens }}>
           {activeTab === "lessons" && (<>
             {(school.transformation || !readOnly) && (
               <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: "16px 22px" }}>
@@ -3849,6 +3852,8 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
           {SECTIONS.filter(s => s.kind === "dashboard").map(sec => activeTab === sec.id
             ? <DashboardSection key={sec.id} section={sec} rec={rec} T={T} onUpdate={onUpdate} readOnly={readOnly} school={school} onIngest={ingestOutput} />
             : null)}
+          </div>
+          </div>
         </div>
       </div>
     </div>
