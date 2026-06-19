@@ -1206,9 +1206,11 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, canEdit, onUpda
   const pl = lesson.passLogic || {};
   const baseMode = ["mentoronly", "mentor", "activities", "hybrid", "manual", "proof"].includes(pl.mode) ? pl.mode : "activities";
   // No activities at all → behave as mentor-only (unless explicitly manual).
-  const mode = (blocks.length === 0 && baseMode !== "manual") ? "mentoronly" : baseMode;
-  const total = mode === "mentoronly" ? 0 : blocks.length;
-  const passedBlocks = blocks.filter((_, i) => outputs[i]?.passed).length;
+  // Students never see or get gated on empty/unfilled bricks; creators see them as "generate" cards.
+  const acts = canEdit ? blocks : blocks.filter(b => !isThinBlock(b));
+  const mode = (acts.length === 0 && baseMode !== "manual") ? "mentoronly" : baseMode;
+  const total = mode === "mentoronly" ? 0 : acts.length;
+  const passedBlocks = acts.filter((_, i) => outputs[i]?.passed).length;
   const allActivitiesDone = total > 0 && passedBlocks === total;
   const briefed = msgs.some(m => m.role === "user"); // mode "activities": activities open after the mentor briefs
   const mission = [...msgs].reverse().find(m => m.role === "mission")?.content || null;
@@ -1300,7 +1302,7 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, canEdit, onUpda
               <div style={{ fontSize: 13, color: B.mutedMid, lineHeight: 1.6 }}>{lesson.concept}</div>
               {mission && <div style={{ background: T.as_, border: `1px solid ${T.ba}`, borderRadius: 10, padding: "11px 14px", fontSize: 13, color: T.hi, lineHeight: 1.55 }}>🎯 <strong>Mission:</strong> {mission}<div style={{ fontSize: 11.5, color: B.mutedMid, marginTop: 5 }}>Do it, then report back in the lesson chat — your mentor approves it to pass.</div></div>}
               {total > 0 && <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <div style={{ flex: 1, display: "flex", gap: 5 }}>{blocks.map((_, i) => <div key={i} style={{ flex: 1, height: 5, borderRadius: 3, background: outputs[i]?.passed ? "#4ADE80" : (outputs[i] ? T.p : B.surface3), transition: "background 0.3s" }} />)}</div>
+                <div style={{ flex: 1, display: "flex", gap: 5 }}>{acts.map((_, i) => <div key={i} style={{ flex: 1, height: 5, borderRadius: 3, background: outputs[i]?.passed ? "#4ADE80" : (outputs[i] ? T.p : B.surface3), transition: "background 0.3s" }} />)}</div>
                 <span style={{ fontSize: 11, color: B.muted, whiteSpace: "nowrap" }}>{passedBlocks}/{total} done</span>
               </div>}
               <div style={{ fontSize: 11.5, color: T.a, background: T.as_, border: `1px solid ${T.ba}`, borderRadius: 8, padding: "7px 11px" }}>
@@ -1309,11 +1311,11 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, canEdit, onUpda
                     : mode === "manual" ? "To pass: work through these, then mark complete."
                       : "To pass: complete every activity in order (and your mentor's mission)."}
               </div>
-              {blocks.map((blk, i) => {
+              {acts.map((blk, i) => {
                 const locked = !canEdit && i > 0 && !outputs[i - 1]?.passed; // sequential unlock (creators see all)
                 if (locked) return <div key={i} style={{ background: B.surface2, border: `1px dashed ${B.borderMid}`, borderRadius: 12, padding: "14px 16px", fontSize: 12.5, color: B.muted, display: "flex", alignItems: "center", gap: 8 }}>🔒 {BLOCK_META[blk.type]?.icon} {BLOCK_META[blk.type]?.label || blk.type} — finish the activity above to unlock</div>;
                 return (
-                  <BrickFrame key={i} T={T} school={school} canEdit={canEdit} blockType={blk.type} ctx={{ title: lesson.title, concept: lesson.concept }} onReplace={(nb) => replaceLessonBlock(i, nb)}>
+                  <BrickFrame key={i} T={T} school={school} canEdit={canEdit} blockType={blk.type} block={blk} ctx={{ title: lesson.title, concept: lesson.concept }} onReplace={(nb) => replaceLessonBlock(i, nb)}>
                     <BlockRenderer block={blk} T={T} school={school} bus={bus} onOutput={(o) => { setOutputs(s => ({ ...s, [i]: o })); onIngest?.({ title: blk.data?.title || lesson.title, lessonId: lesson.number, concepts: blk.data?.concepts }, o); }} />
                   </BrickFrame>
                 );
@@ -2506,15 +2508,57 @@ function BlockRenderer({ block, onOutput, T, disabled, state, onState, school, b
 
 // Creator wrapper: adds a "✨ Tweak" control on any brick to talk to the AI about
 // THAT brick and rewrite it in place. Renders children plainly when not editable.
-function BrickFrame({ children, T, school, ctx, blockType, onReplace, canEdit }) {
+// Is this brick effectively empty (AI returned no real content)? Used to turn
+// empty bricks into "generate" suggestion cards instead of broken one-liners.
+function isThinBlock(b) {
+  if (!b || !b.type) return true;
+  const d = b.data || {}; const txt = s => String(s || "").replace(/[#*_\s]/g, "");
+  switch (b.type) {
+    case "reading": return txt(d.passage).length < 60;
+    case "reading_plain": return txt(d.content).length < 60;
+    case "flashcard": return !(d.cards || []).length;
+    case "quiz": return !(d.questions || []).length;
+    case "match_pairs": return !(d.pairs || []).length;
+    case "fill_blank": return !(d.options || []).length || txt(d.sentence).length < 3;
+    case "order_words": return !(d.answer || []).length;
+    case "mindmap": return !(d.nodes || []).length;
+    case "sequencer": return !(d.items || []).length;
+    case "journal": return !(d.prompts || []).length;
+    case "essay": return !txt(d.prompt);
+    case "debate": return !txt(d.topic);
+    case "branching_scenario": return !d.nodes || !Object.keys(d.nodes).length;
+    case "video_embed": return !d.url;
+    case "roleplay": return !txt(d.scenario) && !txt(d.character);
+    case "objection_handler": return !(d.objections || []).length;
+    case "interview_simulator": return !(d.questions || []).length;
+    default: return false; // trackers, design bricks, garden, review, embed, calculator, image, etc. need no authored body
+  }
+}
+function BrickFrame({ children, T, school, ctx, blockType, block, onReplace, canEdit }) {
   const [busy, setBusy] = useState(false);
+  const thin = isThinBlock(block || { type: blockType });
+  async function generate(instruction) {
+    setBusy(true);
+    try { const nb = await authorOneBlock(school, ctx, blockType, instruction || ""); onReplace(nb); } catch { }
+    setBusy(false);
+  }
+  // Empty brick: never show a broken one-liner to a student; offer the creator a one-tap fill.
+  if (thin) {
+    if (!canEdit) return null;
+    const m = BLOCK_META[blockType] || { icon: "🧩", label: "Activity" };
+    return (
+      <div style={{ border: `1px dashed ${T.ba}`, borderRadius: 14, padding: "18px 16px", textAlign: "center", background: T.ps }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: B.white, marginBottom: 4 }}>{m.icon} {m.label}</div>
+        <div style={{ fontSize: 12, color: B.mutedMid, marginBottom: 12 }}>This activity has no content yet.</div>
+        <button onClick={() => generate("")} disabled={busy} style={{ ...pBtn(T), opacity: busy ? 0.6 : 1 }}>{busy ? "Generating…" : "✨ Generate this activity"}</button>
+      </div>
+    );
+  }
   if (!canEdit) return children;
   async function tweak() {
     const inst = window.prompt("How should this activity change?\n(e.g. \"write a real 200-word passage\", \"make it harder\", \"add 5 more cards\", \"use travel vocabulary\")");
     if (inst == null) return; // cancelled
-    setBusy(true);
-    try { const nb = await authorOneBlock(school, ctx, blockType, inst.trim()); onReplace(nb); } catch { }
-    setBusy(false);
+    generate(inst.trim());
   }
   return (
     <div style={{ position: "relative" }}>
@@ -2839,7 +2883,7 @@ function DashboardSection({ section, rec, T, onUpdate, readOnly, school, onInges
         {blocks.map((b, i) => (
           <div key={i} style={{ position: "relative" }}>
             {!readOnly && <button onClick={() => removeBlock(i)} title="Remove brick" style={{ position: "absolute", top: 8, left: 8, zIndex: 4, background: "rgba(248,113,113,0.12)", border: "1px solid rgba(248,113,113,0.35)", borderRadius: 8, color: "#F87171", width: 24, height: 22, cursor: "pointer", fontSize: 12, fontFamily: "inherit", lineHeight: 1 }}>✕</button>}
-            <BrickFrame T={T} school={school} canEdit={!readOnly} blockType={b.type} ctx={{ title: section.title, concept: section.intro }} onReplace={(nb) => replaceBlock(i, nb)}>
+            <BrickFrame T={T} school={school} canEdit={!readOnly} blockType={b.type} block={b} ctx={{ title: section.title, concept: section.intro }} onReplace={(nb) => replaceBlock(i, nb)}>
               <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 16, padding: 16, animation: "fadeUp 0.4s ease backwards", animationDelay: `${Math.min(i, 8) * 55}ms` }}>
                 <BlockRenderer block={b} T={T} school={school} bus={rec.toolStates?.__bus} state={stateFor(i)} onState={(s) => setStateFor(i, s)} onOutput={(o) => onIngest?.({ title: section.title, concepts: b.data?.concepts }, o)} />
               </div>
