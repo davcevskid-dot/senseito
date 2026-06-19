@@ -962,7 +962,7 @@ async function authorOneBlock(school, ctx, type, instruction) {
   const sys = `You author ONE Senseito interactive learning block of type "${type}". Return ONLY JSON { "type", "data" } whose data follows this shape EXACTLY:\n${BLOCK_SCHEMA_GUIDE}\nMake the content rich, specific and genuinely useful — for a reading, write the ACTUAL passage (150-300 words), not a placeholder. Never return empty or generic content.`;
   const conceptList = (school.concepts || []).map(cc => `${cc.id}:${cc.label}`).join(", ");
   const c = `SCHOOL: ${school.name} — ${school.description}\nLEARNING PATH: ${school.learningPath || "mixed"}${conceptList ? `\nCONCEPTS (tag data.concepts with relevant ids): ${conceptList}` : ""}${school.knowledgeDNA ? `\nKNOWLEDGE DNA:\n${String(school.knowledgeDNA).slice(0, 2000)}` : ""}\nWHERE THIS APPEARS: ${ctx?.title || ""}${ctx?.concept ? ` — ${ctx.concept}` : ""}\nBLOCK TYPE: ${type}\n${instruction ? `WHAT TO DO: ${instruction}` : "Author it richly for this context."}`;
-  const out = await apiJSON(sys, [{ role: "user", content: c }], 2500, "sonnet");
+  const out = await apiJSON(sys, [{ role: "user", content: c }], 2500); // haiku default — single-block authoring is cheap & fine
   let blk = (out && out.type && out.data) ? out : (out?.blocks?.[0]) || (out?.lessons?.[0]?.blocks?.[0]);
   if (!blk || !blk.type) blk = { type, data: (out && out.data) || out || {} };
   blk.type = type;
