@@ -1240,7 +1240,7 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, canEdit, onUpda
   if (mode === "mentoronly" || mode === "mentor") passed = chatPassed;
   else if (mode === "manual") passed = manualDone;
   else if (mode === "hybrid") passed = total > 0 && (passedBlocks / total) >= 0.7 && chatPassed;
-  else if (mode === "proof") passed = blocks.some((b, i) => (b.type === "image_gate" || b.type === "video_gate") && outputs[i]?.passed);
+  else if (mode === "proof") passed = acts.some((b, i) => (b.type === "image_gate" || b.type === "video_gate") && outputs[i]?.passed);
   else passed = allActivitiesDone && (mission ? chatPassed : true); // "activities"
 
   // Record the pass the moment it happens (unlocks the next lesson + saves progress),
