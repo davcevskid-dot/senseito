@@ -849,6 +849,22 @@ function flattenText(v) {
   }
   return String(v);
 }
+// Deterministic post-generation/edit self-review. Safe, no AI — only fixes that
+// can never make a school worse, so a one-shot generation feels finished.
+function autoFixSchool(content) {
+  if (!content || typeof content !== "object") return content;
+  if (Array.isArray(content.sections)) {
+    content.sections = content.sections.map(s => {
+      if (s.kind !== "dashboard") return s;
+      const blocks = dedupeBlocks((s.blocks || []).map(b => (b?.type === "reading" || b?.type === "reading_plain") ? { type: "notebook", data: { title: b.data?.title || "Notes" } } : b));
+      return { ...s, blocks };
+    }).filter(s => s.kind !== "dashboard" || (s.blocks && s.blocks.length)); // drop empty dashboard sections
+  }
+  if (Array.isArray(content.semesters)) {
+    content.semesters.forEach(sem => (sem.lessons || []).forEach(l => { if (Array.isArray(l.blocks)) l.blocks = dedupeBlocks(l.blocks); }));
+  }
+  return content;
+}
 function composeSchool(content, dna) {
   const tpl = TEMPLATES[content.template]; // experience template = baseline; explicit fields win
   const voice = content.systemVoice || VOICES[content.voicePreset] || VOICES.sage;
@@ -3983,8 +3999,8 @@ function Home({ onCreated }) {
       const facts = schoolFacts(content);
       setProg({ pct: 30, label: `Writing the lessons for “${content.name}”…`, facts });
       await fillSchoolBlocks(content, { dna, onProgress: (d, t) => setProg(p => ({ ...p, pct: 30 + Math.round((d / t) * 64), label: `Authoring activities… (${d}/${t} done)` })) });
-      setProg(p => ({ ...p, pct: 100, label: "Finishing up…" }));
-
+      setProg(p => ({ ...p, pct: 100, label: "Reviewing & finishing up…" }));
+      autoFixSchool(content); // deterministic self-review so the one-shot feels finished
       onCreated(composeSchool(content, dna));
     } catch (e) { setError(e.message || "Build failed — try again."); setPhase("error"); }
   }
@@ -4592,9 +4608,13 @@ export default function Senseito() {
     setIterProg({ pct: 45, label: "Rewriting the affected lessons…" });
     await fillSchoolBlocks(content, { oldSchool: school, dna: school.knowledgeDNA, onProgress: (d, t) => setIterProg({ pct: 45 + Math.round((d / t) * 50), label: `Authoring activities… (${d}/${t})` }) });
     setIterProg({ pct: 100, label: "Applying changes…" });
+    autoFixSchool(content);
+    const composed = composeSchool(content, school.knowledgeDNA);
+    // Regression guard: warn (don't block) if the edit introduced new structural issues — Undo is one click.
+    const before = lintSchool(school).length, after = lintSchool(composed).length;
     pushVersion(rec.id, school); // snapshot for Undo (before applying)
-    updateSchool(rec.id, { data: composeSchool(content, school.knowledgeDNA), revision: (rec.revision || 0) + 1 });
-    return { ok: true, msg: "Change applied" };
+    updateSchool(rec.id, { data: composed, revision: (rec.revision || 0) + 1 });
+    return { ok: true, msg: after > before ? `Change applied — heads up, it may have introduced ${after - before} new issue${after - before > 1 ? "s" : ""}; tap ↩ Undo if it looks off.` : "Change applied" };
   }
   // Direct edit (suggestion chips, lesson 'add activity', unlock button).
   async function applyIterate(inst) {
