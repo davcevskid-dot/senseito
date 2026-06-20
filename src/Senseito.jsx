@@ -512,7 +512,7 @@ function fallbackBlock(type, lesson) {
   const c = lesson?.concept || lesson?.title || "";
   if (type === "essay") return { type, data: { prompt: lesson?.mission || c, minWords: 120 } };
   if (type === "journal") return { type, data: { prompts: [lesson?.mission || c || "Reflect on this lesson."], minWords: 80 } };
-  if (type === "reading") return { type, data: { passage: c, keyPhrases: [] } };
+  if (type === "reading") return { type, data: { passage: "", keyPhrases: [] } };
   if (type === "divider") return { type, data: {} };
   if (type === "stat_grid") return { type, data: {} };
   if (type === "image") return { type, data: { url: "" } };
@@ -521,7 +521,9 @@ function fallbackBlock(type, lesson) {
   if (type === "match_pairs") return { type, data: { pairs: [] } };
   if (type === "fill_blank") return { type, data: { sentence: "___", options: [], answer: 0 } };
   if (type === "order_words") return { type, data: { prompt: c, answer: (c || "").split(" ").filter(Boolean).slice(0, 8) } };
-  return { type: "reading_plain", data: { content: `## ${lesson?.title || "Lesson"}\n\n${c}` } };
+  // Unknown/failed: keep the REQUESTED type but empty, so it shows as a "✨ Generate"
+  // card for the creator (or is hidden from students) — never a junk reading dump.
+  return { type, data: {} };
 }
 // Remove duplicate blocks (same type + same content) — e.g. a failed author step
 // falling back to several identical reading blocks in one lesson.
@@ -1223,14 +1225,16 @@ function Toast({ toast }) {
 // ─────────────────────────────────────────────────────────────
 // MENTOR LESSON CHAT
 // ─────────────────────────────────────────────────────────────
-function LessonView({ school, lesson, T: Tprop, onClose, onPass, canEdit, onUpdateBlock, chat, onChat, bus, onIngest }) {
+function LessonView({ school, lesson, T: Tprop, onClose, onPass, canEdit, onUpdateBlock, chat, onChat, bus, onIngest, outputs: outputsProp, onOutputs }) {
   // Per-lesson accent override (lesson.accent) recolors the whole lesson modal.
   const T = (lesson.accent && HEX_RE.test(lesson.accent))
     ? { ...Tprop, p: lesson.accent, pg: hexA(lesson.accent, 0.18), ps: hexA(lesson.accent, 0.09), as_: hexA(lesson.accent, 0.12), ba: hexA(lesson.accent, 0.4), hi: lesson.accent, gr: `linear-gradient(135deg,${hexA(lesson.accent, 0.22)},${hexA(lesson.accent, 0.08)})`, grad: `linear-gradient(135deg,${lesson.accent},${lesson.accent}CC)` }
     : Tprop;
   const [blocks, setBlocks] = useState(lesson.blocks || []);
   const [tab, setTab] = useState("mentor"); // the guided conversation leads; activities are secondary
-  const [outputs, setOutputs] = useState({});
+  const [outputs, setOutputs] = useState(outputsProp || {}); // restored so completion survives close/reopen
+  useEffect(() => { onOutputs?.(outputs); }, [outputs]); // persist activity completion (mentor + gating read this)
+  const [redo, setRedo] = useState({}); // per-index: temporarily reopen a completed activity
   const [msgs, setMsgs] = useState(chat?.length ? chat : [{ role: "assistant", content: lesson.openingLine || `Let's begin. ${lesson.concept}` }]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -1357,6 +1361,13 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, canEdit, onUpda
               {acts.map((blk, i) => {
                 const locked = !canEdit && i > 0 && !outputs[i - 1]?.passed; // sequential unlock (creators see all)
                 if (locked) return <div key={i} style={{ background: B.surface2, border: `1px dashed ${B.borderMid}`, borderRadius: 12, padding: "14px 16px", fontSize: 12.5, color: B.muted, display: "flex", alignItems: "center", gap: 8 }}>🔒 {BLOCK_META[blk.type]?.icon} {BLOCK_META[blk.type]?.label || blk.type} — finish the activity above to unlock</div>;
+                // Already completed (restored from a prior session) → show as done, not a fresh activity.
+                if (outputs[i]?.passed && !redo[i] && !canEdit) return (
+                  <div key={i} style={{ background: "rgba(74,222,128,0.07)", border: "1px solid rgba(74,222,128,0.3)", borderRadius: 12, padding: "13px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                    <span style={{ fontSize: 13, color: "#4ADE80", fontWeight: 600 }}>✓ {BLOCK_META[blk.type]?.icon} {blk.data?.title || BLOCK_META[blk.type]?.label || blk.type} — completed</span>
+                    <button onClick={() => setRedo(r => ({ ...r, [i]: true }))} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "4px 11px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit" }}>Redo</button>
+                  </div>
+                );
                 return (
                   <BrickFrame key={i} T={T} school={school} canEdit={canEdit} blockType={blk.type} block={blk} ctx={{ title: lesson.title, concept: lesson.concept }} onReplace={(nb) => replaceLessonBlock(i, nb)}>
                     <BlockRenderer block={blk} T={T} school={school} bus={bus} onOutput={(o) => { setOutputs(s => ({ ...s, [i]: o })); onIngest?.({ title: blk.data?.title || lesson.title, lessonId: lesson.number, concepts: blk.data?.concepts }, o); }} />
@@ -2923,7 +2934,9 @@ function MentorFab({ school, bus, T }) {
 // ─────────────────────────────────────────────────────────────
 function DashboardSection({ section, rec, T, onUpdate, readOnly, school, onIngest }) {
   const [adding, setAdding] = useState(false);
-  const blocks = section.blocks || [];
+  // A dashboard/hub is for DOING — a reading with "mark as read" is nonsense here.
+  // Convert any stray reading block into a real Notebook (fixes existing schools).
+  const blocks = (section.blocks || []).map(b => (b?.type === "reading" || b?.type === "reading_plain") ? { type: "notebook", data: { title: b.data?.title || "Notes", prompt: "" } } : b);
   const cols = Math.min(3, Math.max(1, section.cols || 1));
   const stateFor = (i) => rec.toolStates?.[`${section.id}:${i}`];
   const setStateFor = (i, s) => onUpdate({ toolStates: { ...(rec.toolStates || {}), [`${section.id}:${i}`]: s } });
@@ -3678,7 +3691,8 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
       <Toast toast={toast} />
       {activeLesson && <LessonView school={school} lesson={activeLesson} T={T} onClose={() => setActiveLesson(null)} onPass={() => handlePass(activeLesson.number)}
         canEdit={!readOnly} onUpdateBlock={(i, nb) => updateLessonBlock(activeLesson.number, i, nb)} bus={bus} onIngest={ingestOutput}
-        chat={rec.lessonChats?.[activeLesson.number]} onChat={(msgs) => onUpdate({ lessonChats: { ...(rec.lessonChats || {}), [activeLesson.number]: msgs } })} />}
+        chat={rec.lessonChats?.[activeLesson.number]} onChat={(msgs) => onUpdate({ lessonChats: { ...(rec.lessonChats || {}), [activeLesson.number]: msgs } })}
+        outputs={rec.lessonOutputs?.[activeLesson.number]} onOutputs={(o) => onUpdate({ lessonOutputs: { ...(rec.lessonOutputs || {}), [activeLesson.number]: o } })} />}
       {editingLesson && !readOnly && <LessonEditor lesson={editingLesson} T={T} allowed={allowedBlocksFor(school.learningPath)}
         onSave={(draft) => { saveLesson(editingLesson.number, draft); setEditingLesson(null); showToast("✓ Lesson updated"); }}
         onDelete={() => { if (window.confirm("Delete this lesson? This can't be undone.")) { deleteLessonByNumber(editingLesson.number); setEditingLesson(null); showToast("✓ Lesson deleted"); } }}
