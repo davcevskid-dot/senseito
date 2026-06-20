@@ -3072,7 +3072,9 @@ function DashboardSection({ section, rec, T, onUpdate, readOnly, school, onInges
 function LessonRow({ lesson, idx, T, progress, onEnter, onEdit, onToggleLock, readOnly, mentorName }) {
   const tm = TM[lesson.type] || TM.Dialogue;
   const state = progress[lesson.number] || "locked";
-  const locked = state === "locked" && (idx > 0 || readOnly);
+  // lesson.open is a SCHOOL-level override (set by the creator) that ships to the
+  // published version — an open lesson is never gated, for creator and students alike.
+  const locked = !lesson.open && state === "locked" && (idx > 0 || readOnly);
   const accent = state === "passed" ? "#4ADE80" : locked ? B.muted : T.p;
   const iconBtn = { background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 8, padding: "6px 9px", cursor: "pointer", fontSize: 12, fontFamily: "inherit" };
   return (
@@ -3094,7 +3096,7 @@ function LessonRow({ lesson, idx, T, progress, onEnter, onEdit, onToggleLock, re
       <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "flex-end", gap: 7, padding: "12px 14px 12px 0", flexShrink: 0 }}>
         {!readOnly && (
           <div style={{ display: "flex", gap: 6 }}>
-            <button onClick={() => onToggleLock(lesson.number, state)} title={state === "locked" ? "Locked — click to unlock" : "Unlocked — click to lock"} style={{ ...iconBtn, color: state === "locked" ? B.muted : "#4ADE80" }}>{state === "locked" ? "🔒" : "🔓"}</button>
+            <button onClick={() => onToggleLock(lesson.number, lesson.open)} title={lesson.open ? "Open to everyone — click to gate it" : "Gated — click to open it for all students"} style={{ ...iconBtn, color: lesson.open ? "#4ADE80" : B.muted }}>{lesson.open ? "🔓" : "🔒"}</button>
             <button onClick={() => onEdit(lesson)} title="Edit lesson" style={{ ...iconBtn, color: B.mutedMid }}>✎</button>
           </div>
         )}
@@ -3511,7 +3513,7 @@ function LessonMap({ school, T, progress, onEnter, onEdit, readOnly }) {
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "8px 0 24px" }}>
       {lessons.map((l, i) => {
         const state = progress[l.number] || (i === 0 ? "active" : "locked");
-        const locked = state === "locked" && (i > 0 || readOnly);
+        const locked = !l.open && state === "locked" && (i > 0 || readOnly);
         const dx = offsets[i % offsets.length];
         const accent = state === "passed" ? "#4ADE80" : locked ? B.muted : T.p;
         return (
@@ -3648,12 +3650,12 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
     onUpdate({ progress: next, xp: nextXp });
   }
   function unlockAll() {
-    const p = {};
-    school.semesters?.forEach(s => s.lessons?.forEach(l => { p[l.number] = progress[l.number] === "passed" ? "passed" : "active"; }));
-    onUpdate({ progress: p });
+    // Open every lesson at the SCHOOL level so it persists to the published version.
+    onUpdate({ data: { ...school, semesters: (school.semesters || []).map(s => ({ ...s, lessons: (s.lessons || []).map(l => ({ ...l, open: true })) })) } });
   }
-  function toggleLock(lessonNumber, state) {
-    onUpdate({ progress: { ...progress, [lessonNumber]: state === "locked" ? "active" : "locked" } });
+  function toggleLock(lessonNumber, isOpen) {
+    // Toggle the school-level open flag (ships to published) — not the creator's own progress.
+    onUpdate({ data: { ...school, semesters: (school.semesters || []).map(s => ({ ...s, lessons: (s.lessons || []).map(l => l.number === lessonNumber ? { ...l, open: !isOpen } : l) })) } });
   }
   function saveLesson(lessonNumber, draft) {
     const data = { ...school, semesters: (school.semesters || []).map(sem => ({ ...sem, lessons: (sem.lessons || []).map(l => l.number === lessonNumber ? { ...l, ...draft } : l) })) };
@@ -4602,8 +4604,10 @@ export default function Senseito() {
 
   // ── Iteration (driven by the project chat in the left bar) ──
   function unlockAllFor(rec) {
+    // Open all lessons at the SCHOOL level (ships to published) + reflect in the creator's progress.
     const p = {}; rec.data.semesters?.forEach(s => s.lessons?.forEach(l => { p[l.number] = (rec.progress || {})[l.number] === "passed" ? "passed" : "active"; }));
-    updateSchool(rec.id, { progress: p });
+    const data = { ...rec.data, semesters: (rec.data.semesters || []).map(s => ({ ...s, lessons: (s.lessons || []).map(l => ({ ...l, open: true })) })) };
+    updateSchool(rec.id, { progress: p, data });
   }
   const pushMsg = (m) => setIterHistory(h => [...h, m]);
   function pushVersion(id, data) { setVersions(v => ({ ...v, [id]: [...(v[id] || []).slice(-7), data] })); }
