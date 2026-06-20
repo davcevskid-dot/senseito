@@ -2985,6 +2985,9 @@ function DashboardSection({ section, rec, T, onUpdate, readOnly, school, onInges
   const removeBlock = (i) => mutateSection(s => ({ ...s, blocks: (s.blocks || []).filter((_, j) => j !== i) }));
   const addBlock = (type) => { setAdding(false); mutateSection(s => ({ ...s, blocks: [...(s.blocks || []), fallbackBlock(type, { title: section.title, concept: section.intro })] })); };
   const reorderBlocks = (from, to) => { if (from == null || to == null || from === to) return; mutateSection(s => { const arr = [...(s.blocks || [])]; const [m] = arr.splice(from, 1); arr.splice(to, 0, m); return { ...s, blocks: arr }; }); };
+  const cycleSpan = (i) => mutateSection(s => ({ ...s, blocks: (s.blocks || []).map((b, j) => j === i ? { ...b, span: b.span === 2 ? "full" : b.span === "full" ? 1 : 2 } : b) }));
+  const spanCss = (b) => b?.span === "full" ? "1 / -1" : b?.span === 2 ? "span 2" : "auto";
+  const spanLabel = (b) => b?.span === "full" ? "▭" : b?.span === 2 ? "2" : "1";
   const setCols = (n) => mutateSection(s => ({ ...s, cols: n }));
   const ADDABLE = [["callout", "💡 Callout"], ["image", "🖼️ Image"], ["cta_button", "🔘 Button"], ["divider", "➖ Divider"], ["stat_grid", "📊 Stat grid"], ["habit_checker", "✅ Habit checker"], ["metric_tracker", "📈 Metric tracker"], ["review", "🔁 Spaced review"], ["garden", "🌱 Mindset garden"]];
   return (
@@ -2999,11 +3002,12 @@ function DashboardSection({ section, rec, T, onUpdate, readOnly, school, onInges
       {blocks.length === 0 && <div style={{ textAlign: "center", padding: "30px 20px", fontSize: 13, color: B.muted, border: `1px dashed ${B.borderMid}`, borderRadius: 14 }}>{readOnly ? "Nothing here yet." : "Empty — add a brick below, or ask in the chat."}</div>}
       <div className="dashGrid" style={{ gridTemplateColumns: `repeat(${cols},minmax(0,1fr))` }}>
         {blocks.map((b, i) => (
-          <div key={i} style={{ position: "relative" }}
+          <div key={i} style={{ position: "relative", gridColumn: spanCss(b) }}
             onDragOver={e => { if (!readOnly && dragIdx.current != null) e.preventDefault(); }}
             onDrop={e => { if (readOnly) return; e.preventDefault(); reorderBlocks(dragIdx.current, i); dragIdx.current = null; }}>
             {!readOnly && <div style={{ position: "absolute", top: 8, left: 8, zIndex: 4, display: "flex", gap: 4 }}>
               <button draggable onDragStart={() => { dragIdx.current = i; }} onDragEnd={() => { dragIdx.current = null; }} title="Drag to reorder" style={{ background: "rgba(124,58,237,0.12)", border: `1px solid ${T.ba}`, borderRadius: 8, color: T.hi, width: 24, height: 22, cursor: "grab", fontSize: 12, fontFamily: "inherit", lineHeight: 1 }}>⠿</button>
+              {cols >= 2 && <button onClick={() => cycleSpan(i)} title="Width (1 → 2 → full)" style={{ background: "rgba(124,58,237,0.12)", border: `1px solid ${T.ba}`, borderRadius: 8, color: T.hi, minWidth: 24, height: 22, padding: "0 5px", cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit", lineHeight: 1 }}>⬌{spanLabel(b)}</button>}
               <button onClick={() => removeBlock(i)} title="Remove brick" style={{ background: "rgba(248,113,113,0.12)", border: "1px solid rgba(248,113,113,0.35)", borderRadius: 8, color: "#F87171", width: 24, height: 22, cursor: "pointer", fontSize: 12, fontFamily: "inherit", lineHeight: 1 }}>✕</button>
             </div>}
             <BrickFrame T={T} school={school} canEdit={!readOnly} blockType={b.type} block={b} ctx={{ title: section.title, concept: section.intro }} onReplace={(nb) => replaceBlock(i, nb)}>
