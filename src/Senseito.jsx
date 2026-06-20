@@ -808,6 +808,7 @@ RULES:
 - When the student reports their mission/work: evaluate strictly. If they pass, say exactly what proved it. If not, say exactly what's missing — one thing at a time.
 - ACTIVITY TRUTH: "LEARNER'S ACTIVITY STATUS" above is the system's real record (✓ done / ✗ not done). TRUST IT over what the student claims. If they say they did an activity that shows ✗, gently note it isn't registered yet and have them actually do it — do NOT take their word. NEVER send them to a later activity while an earlier one still shows ✗; activities are completed IN ORDER.
 - Direct the student to ONE activity at a time, by its name, in order. Only reference what THIS or earlier activities contain — never describe or assume something from a LATER activity.
+- PERSONALIZE (optional): when an activity would land much harder using something the student just shared (their own words, their real situation), you MAY tailor it to them — end your reply with a line EXACTLY: TWEAK <activity number>: <what to change>. Only adapt wording/prompts/examples (and for a quiz, keep one correct answer); keep the activity's type and purpose the same. Use rarely, only when it clearly deepens the experience.
 - You are NOT an assistant. You are a mentor with standards. Stay in character always.
 - Keep replies under 140 words unless doing a formal evaluation.
 ${MENTOR_WIDGET_NOTE}${schoolHasGarden(school) ? `\n${MENTOR_GARDEN_NOTE}` : ""}`;
@@ -1228,12 +1229,15 @@ function Toast({ toast }) {
 // ─────────────────────────────────────────────────────────────
 // MENTOR LESSON CHAT
 // ─────────────────────────────────────────────────────────────
-function LessonView({ school, lesson, T: Tprop, onClose, onPass, canEdit, onUpdateBlock, chat, onChat, bus, onIngest, outputs: outputsProp, onOutputs }) {
+function LessonView({ school, lesson, T: Tprop, onClose, onPass, canEdit, onUpdateBlock, chat, onChat, bus, onIngest, outputs: outputsProp, onOutputs, blockOverrides, onOverrideBlock }) {
   // Per-lesson accent override (lesson.accent) recolors the whole lesson modal.
   const T = (lesson.accent && HEX_RE.test(lesson.accent))
     ? { ...Tprop, p: lesson.accent, pg: hexA(lesson.accent, 0.18), ps: hexA(lesson.accent, 0.09), as_: hexA(lesson.accent, 0.12), ba: hexA(lesson.accent, 0.4), hi: lesson.accent, gr: `linear-gradient(135deg,${hexA(lesson.accent, 0.22)},${hexA(lesson.accent, 0.08)})`, grad: `linear-gradient(135deg,${lesson.accent},${lesson.accent}CC)` }
     : Tprop;
-  const [blocks, setBlocks] = useState(lesson.blocks || []);
+  // Start from the lesson's blocks, applying any per-learner personalizations the mentor saved.
+  const [blocks, setBlocks] = useState(() => (lesson.blocks || []).map((b, i) => (blockOverrides && blockOverrides[i]) || b));
+  // Mentor-personalized activity (student-safe: persists to THIS learner's copy, not the shared school).
+  function personalizeBlock(i, nb) { setBlocks(bs => bs.map((b, j) => j === i ? nb : b)); onOverrideBlock?.(i, nb); }
   const [tab, setTab] = useState("mentor"); // the guided conversation leads; activities are secondary
   const [outputs, setOutputs] = useState(outputsProp || {}); // restored so completion survives close/reopen
   useEffect(() => { onOutputs?.(outputs); }, [outputs]); // persist activity completion (mentor + gating read this)
@@ -1282,11 +1286,27 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, canEdit, onUpda
     const convo = [...msgs.filter(m => m.role !== "system"), { role: "user", content: userMsg }];
     setMsgs(m => [...m, { role: "user", content: userMsg }]); setLoading(true);
     try {
-      const activityStatus = total ? `${passedBlocks}/${total} activities done —${blocks.map((b, i) => ` ${outputs[i]?.passed ? "✓" : "✗"} ${b.data?.title || BLOCK_META[b.type]?.label || b.type}`).join(",")}` : "this lesson has no activities";
+      const activityStatus = total ? `${passedBlocks}/${total} activities done —${acts.map((b, i) => ` (${i + 1}) ${outputs[i]?.passed ? "✓" : "✗"} ${b.data?.title || BLOCK_META[b.type]?.label || b.type}`).join(",")}` : "this lesson has no activities";
       let reply = await api(mentorSys(school, lesson, bus, { mode, activityStatus }), toApiMessages(convo), 2000);
       // Capture any limiting belief the mentor flagged (WEED:) into the Garden, strip it from view.
       const wd = reply.match(/WEED:\s*(.+)/i);
       if (wd) { onIngest?.({ title: lesson?.title, lessonId: lesson?.number }, { type: "mindset", weed: wd[1].trim() }); reply = reply.replace(/\n?\s*WEED:\s*.+/i, "").trim(); }
+      // Mentor personalizes an activity to THIS learner (TWEAK n: …) using the conversation.
+      const tw = reply.match(/TWEAK\s+(\d+)\s*:\s*(.+)/i);
+      if (tw) {
+        const target = acts[parseInt(tw[1], 10) - 1]; const inst = tw[2].trim();
+        reply = reply.replace(/\n?\s*TWEAK\s+\d+\s*:\s*.+/i, "").trim();
+        const realIdx = target ? blocks.indexOf(target) : -1;
+        if (target && realIdx >= 0) {
+          const convoText = convo.slice(-6).map(m => `${m.role === "user" ? "Student" : "Mentor"}: ${m.content}`).join("\n");
+          (async () => {
+            try {
+              const nb = await authorOneBlock(school, { title: lesson.title, concept: lesson.concept }, target.type, `Personalize this ${target.type} for THIS learner using their own words/experience from the conversation. Keep the activity's type and purpose IDENTICAL — only adapt wording, prompts and examples to fit them${target.type === "quiz" ? " (keep exactly one correct answer)" : ""}.\nCONVERSATION:\n${convoText}\n\nWHAT TO CHANGE: ${inst}`);
+              if (nb && nb.type === target.type) { personalizeBlock(realIdx, nb); setMsgs(m => [...m, { role: "system", content: `✨ ${school.mentor.name} tailored "${target.data?.title || BLOCK_META[target.type]?.label || target.type}" to you.` }]); }
+            } catch { /* ignore */ }
+          })();
+        }
+      }
       // Mode "activities": capture an assigned MISSION and pin it (stored as a 'mission' message).
       const mm = reply.match(/MISSION:\s*([\s\S]+)/i);
       if (mode === "activities" && mm && !mission) {
@@ -3696,7 +3716,8 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
       {activeLesson && <LessonView school={school} lesson={activeLesson} T={T} onClose={() => setActiveLesson(null)} onPass={() => handlePass(activeLesson.number)}
         canEdit={!readOnly} onUpdateBlock={(i, nb) => updateLessonBlock(activeLesson.number, i, nb)} bus={bus} onIngest={ingestOutput}
         chat={rec.lessonChats?.[activeLesson.number]} onChat={(msgs) => onUpdate({ lessonChats: { ...(rec.lessonChats || {}), [activeLesson.number]: msgs } })}
-        outputs={rec.lessonOutputs?.[activeLesson.number]} onOutputs={(o) => onUpdate({ lessonOutputs: { ...(rec.lessonOutputs || {}), [activeLesson.number]: o } })} />}
+        outputs={rec.lessonOutputs?.[activeLesson.number]} onOutputs={(o) => onUpdate({ lessonOutputs: { ...(rec.lessonOutputs || {}), [activeLesson.number]: o } })}
+        blockOverrides={rec.lessonBlocks?.[activeLesson.number]} onOverrideBlock={(i, nb) => onUpdate({ lessonBlocks: { ...(rec.lessonBlocks || {}), [activeLesson.number]: { ...(rec.lessonBlocks?.[activeLesson.number] || {}), [i]: nb } } })} />}
       {editingLesson && !readOnly && <LessonEditor lesson={editingLesson} T={T} allowed={allowedBlocksFor(school.learningPath)}
         onSave={(draft) => { saveLesson(editingLesson.number, draft); setEditingLesson(null); showToast("✓ Lesson updated"); }}
         onDelete={() => { if (window.confirm("Delete this lesson? This can't be undone.")) { deleteLessonByNumber(editingLesson.number); setEditingLesson(null); showToast("✓ Lesson deleted"); } }}
