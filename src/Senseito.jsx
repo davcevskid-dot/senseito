@@ -736,11 +736,14 @@ DECIDE which of three modes this message is:
 - "minimal": true/false — minimalist mode. When true, deliberately terse/short activities are shown as-is and never hidden or flagged as empty. Use for "keep it minimal", "distilled one-liner lessons", "don't pad the content".
 - "progression": "list" | "map" — how the lessons section is laid out. "map" = a Duolingo-style winding path of lesson nodes. Use for "make the lessons a map/journey/path". (Add-anywhere — works on any theme.)
 - "navStyle": "pills" | "topbar" | "chunky" | "minimal" | "soft" | "sidebar" — override the section navigation style independently of the theme. "sidebar" = a left vertical nav with content beside it (two-column).
+- "navGrad": a CSS gradient string for the navigation/sidebar background, e.g. "linear-gradient(180deg,#ef4444,#3b82f6)". Use for "make the sidebar a red→blue gradient". "" to clear.
+IMPORTANT: "brand" is ONLY a company logo + nav links bar. A picture/illustration the user wants INSIDE the page body is NOT brand and NOT a cover — it's a content image: handle that as an "action" ("add an image brick of … to the dashboard/lesson"), not a design field.
 - "hero": { "emoji":false, "tagline":false, "description":false, "off":true } — set a key false to hide that piece; "off":true = minimal title-only header. (For "just a chat, no title/description" set hero.off true.)
 - "overlay": { "type":"mentorFab", "greeting":"<short>" } to add a floating chat bubble, or null to remove.
 - "layout": one of ${Object.keys(LAYOUTS).join(", ")} (only for a wholesale re-arrange into a known shape).
 Don't invent image URLs — if they want a cover but gave no link, ASK for one (mode 1) instead of guessing.
-Be concrete about THIS project's sections, lessons, dashboards and tools.`;
+Be concrete about THIS project's sections, lessons, dashboards and tools.
+REPLY HONESTY (critical): the "action" is the ONLY thing that actually changes the school — your "reply" must NOT claim anything beyond that single action. Do NOT say you added other bricks, do NOT invent placement details ("after the habit_checker"), and do NOT promise multiple changes in one go. Refer to lessons by their TITLE, never by a number (numbers shift when lessons are added/removed). When you set an action, keep the reply to a short, plain acknowledgement of just that one change (e.g. "On it — adding a fear & progress journal."). If you cannot actually do what's asked, say so plainly instead of claiming success.`;
 
 function conceptLabelOf(school, id) { return (school?.concepts || []).find(c => c.id === id)?.label || id; }
 // Turn the per-learner bus into a short context line the mentor/bricks can use.
@@ -3460,7 +3463,8 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const hero = school.hero || {}; // { emoji?, tagline?, description?, off? } — false hides; cover via school.cover
   const dens = ({ compact: 11, cozy: 18, spacious: 28 })[school.density] || 18; // vertical rhythm between sections
   const ts = tplStyle(school); // structural look (nav style / width / page background) from the template
-  const nv = navStyles(school.navStyle || ts.nav, T); // navStyle = add-anywhere override of the template's nav
+  let nv = navStyles(school.navStyle || ts.nav, T); // navStyle = add-anywhere override of the template's nav
+  if (school.navGrad) nv = { ...nv, bar: { ...nv.bar, background: school.navGrad } }; // custom nav/sidebar gradient
   const sidebar = (school.navStyle || ts.nav) === "sidebar"; // two-column shell
   const [leads, setLeads] = useState(null);
   const [students, setStudents] = useState(null);
@@ -4584,7 +4588,7 @@ export default function Senseito() {
   function applyDesign(rec, d) {
     if (!d || typeof d !== "object") return false;
     const cur = rec.data; const patch = {};
-    for (const k of ["theme", "skin", "density", "font", "fontScale", "cover", "coverPos", "minimal", "progression", "navStyle"]) if (k in d) patch[k] = d[k];
+    for (const k of ["theme", "skin", "density", "font", "fontScale", "cover", "coverPos", "minimal", "progression", "navStyle", "navGrad"]) if (k in d) patch[k] = d[k];
     if (d.template && TEMPLATES[d.template]) { const t = TEMPLATES[d.template]; patch.template = d.template; patch.theme = t.theme; patch.skin = t.skin; patch.font = t.font; patch.density = t.density; }
     if ("palette" in d) patch.palette = d.palette === null ? undefined : { ...(cur.palette || {}), ...(d.palette || {}) };
     if ("hero" in d) patch.hero = d.hero === null ? undefined : { ...(cur.hero || {}), ...(d.hero || {}) };
