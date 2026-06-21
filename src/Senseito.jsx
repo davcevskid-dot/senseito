@@ -1197,8 +1197,18 @@ function BuildProgress({ pct = 0, label = "", facts = [], title = "Building your
     return () => clearInterval(id);
   }, [pct]);
   useEffect(() => { if (!facts.length) return; setFi(0); const id = setInterval(() => setFi(i => (i + 1) % facts.length), 2900); return () => clearInterval(id); }, [facts.length]);
+  const [pi, setPi] = useState(0);
+  useEffect(() => { const id = setInterval(() => setPi(p => p + 1), 3000); return () => clearInterval(id); }, []); // rotating phase phrases
   const shown = Math.min(100, Math.round(disp));
   const eta = pct >= 100 ? "Done!" : shown < 35 ? "about a minute or two" : shown < 75 ? "under a minute" : "almost there";
+  const PHASES = [
+    { upTo: 14, lines: ["Reading your vision…", "Finding the soul of your school…", "Imagining the perfect mentor…"] },
+    { upTo: 30, lines: ["Designing the curriculum…", "Mapping the key concepts…", "Shaping the learning journey…", "Choosing the right activities…"] },
+    { upTo: 96, lines: ["Writing your lessons…", "Crafting interactive activities…", "Tuning missions & pass criteria…", "Giving your mentor its voice…", "Adding the finishing touches…"] },
+    { upTo: 101, lines: ["Reviewing everything…", "Polishing the details…", "Almost ready…"] },
+  ];
+  const pool = (PHASES.find(p => shown < p.upTo) || PHASES[PHASES.length - 1]).lines;
+  const flavor = pct >= 100 ? "Your school is ready! ✨" : (label && /\d+\/\d+|\d+ of \d+/.test(label) ? label : pool[pi % pool.length]);
   const PT = preview ? themeFor(preview) : null; // tint the loader with the school's own theme → smooth hand-off
   const ac1 = PT?.p || "#7C3AED", ac2 = PT?.a || "#06B6D4";
   return (
@@ -1211,7 +1221,7 @@ function BuildProgress({ pct = 0, label = "", facts = [], title = "Building your
           </div>
           <div>
             <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 18, fontWeight: 700, color: B.white }}>{title}</div>
-            <div style={{ fontSize: 12.5, color: B.mutedMid, marginTop: 2 }}>{label || "Getting started…"}</div>
+            <div key={flavor} style={{ fontSize: 12.5, color: B.mutedMid, marginTop: 2, animation: "fadeUp 0.4s ease" }}>{flavor}</div>
           </div>
         </div>
         <div style={{ height: 9, borderRadius: 6, background: B.surface2, overflow: "hidden", border: `1px solid ${B.border}` }}>
@@ -4464,7 +4474,7 @@ function ProjectChat({ rec, iterating, history, onSend, onIterate, onBack, onThe
           <div style={{ fontSize: 14, fontWeight: 700, color: B.white, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{school.name}</div>
         </div>
       </div>
-      <div style={{ padding: "10px 14px 0", display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ padding: "10px 14px 0", display: "flex", flexDirection: "column", gap: 8, maxHeight: "42vh", overflowY: "auto", flexShrink: 0 }}>
         <button onClick={() => setShowLevers(s => !s)} style={collBtn}>{showLevers ? "▾" : "▸"} Quick styles · 0 tokens</button>
         {showLevers && (
           <div style={{ display: "grid", gap: 8, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 10, padding: 10 }}>
@@ -4870,7 +4880,7 @@ export default function Senseito() {
         </div>
       </div>
 
-      <button onClick={() => setSideOpen(s => !s)} className="ol-burger" style={{ position: "fixed", top: 14, left: 14, zIndex: 310, background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.mutedMid, padding: "7px 11px", cursor: "pointer", fontSize: 14 }}>☰</button>
+      <button onClick={() => setSideOpen(s => !s)} className="ol-burger" style={{ position: "fixed", top: 14, ...(sideOpen ? { right: 14 } : { left: 14 }), zIndex: 320, background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.mutedMid, padding: "7px 11px", cursor: "pointer", fontSize: 14 }}>{sideOpen ? "✕" : "☰"}</button>
 
       <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
         <div style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 0, background: "radial-gradient(ellipse 65% 35% at 50% -5%,rgba(124,58,237,0.1) 0%,transparent 60%)", animation: "aurora 9s ease-in-out infinite" }} />
