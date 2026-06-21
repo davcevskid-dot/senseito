@@ -2618,10 +2618,11 @@ function SignaturePanel({ school, T, canEdit, onUpdate }) {
     try { const code = await genSignature(school, p || undefined, kind === "iter" ? soul?.code : null); onUpdate({ data: { ...school, soul: { ...(soul || {}), code } } }); if (kind === "iter") setDraft(""); } catch { } setBusy(false);
   }
   const resize = (ev) => {
-    ev.preventDefault(); const sy = ev.clientY, oh = h || 240;
+    ev.preventDefault(); const node = ev.currentTarget; try { node.setPointerCapture(ev.pointerId); } catch { }
+    const sy = ev.clientY, oh = h || 240;
     const move = (m) => onUpdate({ data: { ...school, soul: { ...(soul || {}), h: Math.max(140, Math.min(1200, oh + (m.clientY - sy))) } } });
-    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
-    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+    const up = () => { node.removeEventListener("pointermove", move); node.removeEventListener("pointerup", up); node.removeEventListener("pointercancel", up); };
+    node.addEventListener("pointermove", move); node.addEventListener("pointerup", up); node.addEventListener("pointercancel", up);
   };
   if (!soul?.code) {
     if (!canEdit) return null;
@@ -2632,7 +2633,7 @@ function SignaturePanel({ school, T, canEdit, onUpdate }) {
       {soul.essence && <div style={{ fontSize: 12.5, color: T.hi, fontStyle: "italic", textAlign: "center", marginBottom: 6 }}>{soul.essence}</div>}
       <MentorWidget code={soul.code} T={T} height={h} />
       {canEdit && <>
-        <div onPointerDown={resize} title="Drag to resize" style={{ height: 14, marginTop: 2, display: "flex", alignItems: "center", justifyContent: "center", cursor: "ns-resize", color: B.muted, fontSize: 11 }}>⇕ drag to resize</div>
+        <div onPointerDown={resize} title="Drag to resize" style={{ height: 16, marginTop: 2, display: "flex", alignItems: "center", justifyContent: "center", cursor: "ns-resize", color: B.muted, fontSize: 11, touchAction: "none" }}>⇕ drag to resize</div>
         <input value={draft} onChange={e => setDraft(e.target.value)} placeholder='Tweak it… e.g. "make it more alive" or "add slow drifting particles"' style={{ width: "100%", background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, fontFamily: "inherit", fontSize: 12.5, padding: "8px 11px", marginTop: 6, boxSizing: "border-box" }} />
         <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 8, flexWrap: "wrap" }}>
           <button onClick={() => run("iter")} disabled={!!busy || !draft.trim()} title="Keep it; change only what you describe" style={{ background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 8, color: T.hi, padding: "6px 13px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 700, opacity: (busy || !draft.trim()) ? 0.6 : 1 }}>{busy === "iter" ? <><Spinner color={T.hi} />Tweaking…</> : "✎ Iterate"}</button>
@@ -2644,9 +2645,19 @@ function SignaturePanel({ school, T, canEdit, onUpdate }) {
   );
 }
 
-function ShowroomEl({ e, T, selected, editMode, onSelect, onChange, onEditText, editingText }) {
+// Magnetic alignment: snap an element's edges/centre to the canvas lines (0/25/50/75/100),
+// otherwise fall to a fine grid. Gives the "things line up by themselves" feel; toggle-able.
+const SNAP_LINES = [0, 25, 50, 75, 100];
+function snapAxis(pos, size) {
+  const cands = [[pos, 0], [pos + size / 2, size / 2], [pos + size, size]];
+  let best = null;
+  for (const [val, off] of cands) for (const line of SNAP_LINES) { const d = Math.abs(val - line); if (d < 2.4 && (!best || d < best.d)) best = { d, pos: line - off }; }
+  return best ? best.pos : Math.round(pos / 2.5) * 2.5;
+}
+function snapSize(start, size) { const edge = start + size; for (const line of SNAP_LINES) if (Math.abs(edge - line) < 2.4) return line - start; return Math.round(size / 2.5) * 2.5; }
+function ShowroomEl({ e, T, selected, editMode, snap, onSelect, onChange, onEditText, editingText }) {
   const lineH = e.type === "line";
-  const base = { position: "absolute", left: e.x + "%", top: e.y + "%", width: e.w + "%", height: lineH ? (e.thickness || 3) : e.h + "%", transform: e.rot ? `rotate(${e.rot}deg)` : undefined, boxSizing: "border-box", userSelect: editingText ? "text" : "none" };
+  const base = { position: "absolute", left: e.x + "%", top: e.y + "%", width: e.w + "%", height: lineH ? (e.thickness || 3) : e.h + "%", transform: e.rot ? `rotate(${e.rot}deg)` : undefined, boxSizing: "border-box", userSelect: editingText ? "text" : "none", touchAction: editMode && !editingText ? "none" : "auto" };
   const ring = selected && editMode ? { outline: `2px solid ${T.hi}`, outlineOffset: 2 } : {};
   let inner;
   if (e.type === "text") {
@@ -2668,24 +2679,34 @@ function ShowroomEl({ e, T, selected, editMode, onSelect, onChange, onEditText, 
     if (!editMode || editingText) return;
     onSelect(); ev.stopPropagation();
     if (ev.target.dataset.handle) return; // resize handled separately
-    const canvas = ev.currentTarget.parentElement.getBoundingClientRect();
+    const node = ev.currentTarget; try { node.setPointerCapture(ev.pointerId); } catch { }
+    const canvas = node.parentElement.getBoundingClientRect();
     const sx = ev.clientX, sy = ev.clientY, ox = e.x, oy = e.y;
-    const move = (m) => onChange({ x: _clamp(ox + (m.clientX - sx) / canvas.width * 100, -5, 98), y: _clamp(oy + (m.clientY - sy) / canvas.height * 100, -5, 98) });
-    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
-    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+    const move = (m) => {
+      let nx = ox + (m.clientX - sx) / canvas.width * 100, ny = oy + (m.clientY - sy) / canvas.height * 100;
+      if (snap) { nx = snapAxis(nx, e.w); ny = snapAxis(ny, e.h); }
+      onChange({ x: _clamp(nx, -5, 98), y: _clamp(ny, -5, 98) });
+    };
+    const up = () => { node.removeEventListener("pointermove", move); node.removeEventListener("pointerup", up); node.removeEventListener("pointercancel", up); };
+    node.addEventListener("pointermove", move); node.addEventListener("pointerup", up); node.addEventListener("pointercancel", up);
   };
   const onResize = (ev) => {
     ev.stopPropagation(); ev.preventDefault();
-    const canvas = ev.currentTarget.parentElement.parentElement.getBoundingClientRect();
+    const node = ev.currentTarget; try { node.setPointerCapture(ev.pointerId); } catch { }
+    const canvas = node.parentElement.parentElement.getBoundingClientRect();
     const sx = ev.clientX, sy = ev.clientY, ow = e.w, oh = e.h;
-    const move = (m) => onChange({ w: _clamp(ow + (m.clientX - sx) / canvas.width * 100, 2, 100), h: lineH ? e.h : _clamp(oh + (m.clientY - sy) / canvas.height * 100, 1, 100) });
-    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
-    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+    const move = (m) => {
+      let nw = ow + (m.clientX - sx) / canvas.width * 100, nh = oh + (m.clientY - sy) / canvas.height * 100;
+      if (snap) { nw = snapSize(e.x, nw); nh = snapSize(e.y, nh); }
+      onChange({ w: _clamp(nw, 2, 100), h: lineH ? e.h : _clamp(nh, 1, 100) });
+    };
+    const up = () => { node.removeEventListener("pointermove", move); node.removeEventListener("pointerup", up); node.removeEventListener("pointercancel", up); };
+    node.addEventListener("pointermove", move); node.addEventListener("pointerup", up); node.addEventListener("pointercancel", up);
   };
   return (
     <div onPointerDown={onDown} onDoubleClick={() => editMode && e.type === "text" && onEditText()} style={{ ...base, ...ring, cursor: editMode ? (editingText ? "text" : "move") : "default" }}>
       {inner}
-      {selected && editMode && !editingText && <div data-handle="1" onPointerDown={onResize} style={{ position: "absolute", right: -7, bottom: -7, width: 14, height: 14, borderRadius: "50%", background: T.hi, border: "2px solid #fff", cursor: "nwse-resize" }} />}
+      {selected && editMode && !editingText && <div data-handle="1" onPointerDown={onResize} style={{ position: "absolute", right: -9, bottom: -9, width: 18, height: 18, borderRadius: "50%", background: T.hi, border: "2px solid #fff", cursor: "nwse-resize", touchAction: "none" }} />}
     </div>
   );
 }
@@ -2698,6 +2719,7 @@ function ShowroomBlock({ data = {}, T, school, canEdit, onEditData, disabled }) 
   const [edit, setEdit] = useState(false);
   const [sel, setSel] = useState(null);
   const [editingText, setEditingText] = useState(false);
+  const [snap, setSnap] = useState(true); // magnetic aligner (toggle off for free-form)
   const idx = Math.min(i, Math.max(0, slides.length - 1));
   const cur = slides[idx];
   const save = (next, goTo) => { onEditData?.({ ...data, slides: next }); if (goTo != null) setI(goTo); };
@@ -2730,10 +2752,11 @@ function ShowroomBlock({ data = {}, T, school, canEdit, onEditData, disabled }) 
   const addSlide = () => { const next = [...slides, { prompt: "", bg: defaultSlideBg(T), h: 360, els: [] }]; save(next, next.length - 1); setDraft(""); setEdit(true); setSel(null); };
   const delSlide = () => { const next = slides.filter((_, j) => j !== idx); save(next, Math.max(0, idx - 1)); };
   const resizeCanvas = (ev) => {
-    ev.preventDefault(); const sy = ev.clientY, oh = cur?.h || 360;
-    const move = (m) => setSlide({ h: Math.max(180, Math.min(900, oh + (m.clientY - sy))) });
-    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
-    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+    ev.preventDefault(); const node = ev.currentTarget; try { node.setPointerCapture(ev.pointerId); } catch { }
+    const sy = ev.clientY, oh = cur?.h || 360;
+    const move = (m) => setSlide({ h: Math.max(180, Math.min(1200, oh + (m.clientY - sy))) });
+    const up = () => { node.removeEventListener("pointermove", move); node.removeEventListener("pointerup", up); node.removeEventListener("pointercancel", up); };
+    node.addEventListener("pointermove", move); node.addEventListener("pointerup", up); node.addEventListener("pointercancel", up);
   };
   const isLegacy = cur && cur.code && !cur.els;
   const pill = (active) => ({ background: active ? T.ps : B.surface3, border: `1px solid ${active ? T.ba : B.borderMid}`, borderRadius: 8, color: active ? T.hi : B.mutedMid, padding: "6px 11px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 700 });
@@ -2741,7 +2764,10 @@ function ShowroomBlock({ data = {}, T, school, canEdit, onEditData, disabled }) 
     <div style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 14, padding: 14 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: B.white }}>🎬 {data.title || "Showroom"}</div>
-        {canEdit && cur && !isLegacy && <button onClick={() => { setEdit(!edit); setEditingText(false); setSel(null); }} style={pill(edit)}>{edit ? "✓ Done editing" : "✎ Edit slide"}</button>}
+        <div style={{ display: "flex", gap: 6 }}>
+          {canEdit && edit && !isLegacy && <button onClick={() => setSnap(s => !s)} title={snap ? "Magnetic aligner ON — snaps to guides; click for free-form" : "Free-form — click to turn the magnetic aligner on"} style={pill(snap)}>{snap ? "🧲 Aligner on" : "🧲 Aligner off"}</button>}
+          {canEdit && cur && !isLegacy && <button onClick={() => { setEdit(!edit); setEditingText(false); setSel(null); }} style={pill(edit)}>{edit ? "✓ Done editing" : "✎ Edit slide"}</button>}
+        </div>
       </div>
       {slides.length === 0 && <div style={{ fontSize: 13, color: B.muted, textAlign: "center", padding: "20px 0" }}>{canEdit ? "Add your first slide below." : "No slides yet."}</div>}
 
@@ -2754,15 +2780,18 @@ function ShowroomBlock({ data = {}, T, school, canEdit, onEditData, disabled }) 
       ) : cur && (
         <div style={{ position: "relative" }}>
           <div onPointerDown={() => { setSel(null); setEditingText(false); }} style={{ position: "relative", width: "100%", height: cur.h || 360, background: cur.bg || defaultSlideBg(T), borderRadius: 12, overflow: "hidden", border: `1px solid ${B.border}` }}>
+            {/* Alignment guides (centre + thirds) shown while the magnetic aligner is on */}
+            {edit && snap && [25, 50, 75].map(v => <div key={"v" + v} style={{ position: "absolute", left: `${v}%`, top: 0, bottom: 0, width: 1, background: v === 50 ? hexA(T.hi, 0.5) : hexA(T.hi, 0.18), pointerEvents: "none" }} />)}
+            {edit && snap && [25, 50, 75].map(v => <div key={"h" + v} style={{ position: "absolute", top: `${v}%`, left: 0, right: 0, height: 1, background: v === 50 ? hexA(T.hi, 0.5) : hexA(T.hi, 0.18), pointerEvents: "none" }} />)}
             {(cur.els || []).map(e => (
-              <ShowroomEl key={e.id} e={e} T={T} editMode={edit} selected={sel === e.id} editingText={editingText && sel === e.id}
+              <ShowroomEl key={e.id} e={e} T={T} editMode={edit} snap={snap} selected={sel === e.id} editingText={editingText && sel === e.id}
                 onSelect={() => { setSel(e.id); setEditingText(false); }}
                 onChange={(patch) => updEl(e.id, patch)}
                 onEditText={(html) => { if (html === undefined) { setSel(e.id); setEditingText(true); } else { updEl(e.id, { html }); setEditingText(false); } }} />
             ))}
             {(cur.els || []).length === 0 && <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: hexA("#ffffff", 0.5), fontSize: 13 }}>{canEdit ? "Empty slide — add elements or generate with AI." : ""}</div>}
           </div>
-          {edit && <div data-handle="1" onPointerDown={resizeCanvas} title="Drag to resize the slide" style={{ height: 12, marginTop: 2, display: "flex", alignItems: "center", justifyContent: "center", cursor: "ns-resize", color: B.muted, fontSize: 11 }}>⇕ drag to resize</div>}
+          {edit && <div data-handle="1" onPointerDown={resizeCanvas} title="Drag to resize the slide" style={{ height: 16, marginTop: 2, display: "flex", alignItems: "center", justifyContent: "center", cursor: "ns-resize", color: B.muted, fontSize: 11, touchAction: "none" }}>⇕ drag to resize</div>}
         </div>
       )}
 
@@ -2866,17 +2895,18 @@ function GameBlock({ data = {}, T, school, canEdit, onEditData }) {
     catch { } setBusy(false);
   }
   const resize = (ev) => {
-    ev.preventDefault(); const sy = ev.clientY, oh = h;
+    ev.preventDefault(); const node = ev.currentTarget; try { node.setPointerCapture(ev.pointerId); } catch { }
+    const sy = ev.clientY, oh = h;
     const move = (m) => onEditData?.({ ...data, h: Math.max(240, Math.min(1400, oh + (m.clientY - sy))) });
-    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
-    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+    const up = () => { node.removeEventListener("pointermove", move); node.removeEventListener("pointerup", up); node.removeEventListener("pointercancel", up); };
+    node.addEventListener("pointermove", move); node.addEventListener("pointerup", up); node.addEventListener("pointercancel", up);
   };
   return (
     <div style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 14, padding: 14 }}>
       <div style={{ fontSize: 13, fontWeight: 700, color: B.white, marginBottom: 10 }}>🎮 {data.title || "Game"}</div>
       {data.code
         ? <><MentorWidget code={data.code} T={T} height={h} />
-            {canEdit && <div onPointerDown={resize} title="Drag to resize the game" style={{ height: 14, marginTop: 2, display: "flex", alignItems: "center", justifyContent: "center", cursor: "ns-resize", color: B.muted, fontSize: 11 }}>⇕ drag to resize</div>}</>
+            {canEdit && <div onPointerDown={resize} title="Drag to resize the game" style={{ height: 16, marginTop: 2, display: "flex", alignItems: "center", justifyContent: "center", cursor: "ns-resize", color: B.muted, fontSize: 11, touchAction: "none" }}>⇕ drag to resize</div>}</>
         : <div style={{ border: `1px dashed ${B.borderMid}`, borderRadius: 10, padding: "30px 16px", textAlign: "center", color: B.mutedMid, fontSize: 13 }}>{canEdit ? "Describe a game below and generate it." : "Game coming soon."}</div>}
       {canEdit && (
         <div style={{ marginTop: 12, borderTop: `1px solid ${B.border}`, paddingTop: 12 }}>
@@ -4434,6 +4464,9 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
     if (!title) return;
     onUpdate({ data: { ...school, sections: SECTIONS.map(s => ({ ...s })).map(s => s.id === id ? { ...s, title } : s) } });
   }
+  function toggleSticky(id) {
+    onUpdate({ data: { ...school, sections: SECTIONS.map(s => ({ ...s })).map(s => s.id === id ? { ...s, sticky: !s.sticky } : s) } });
+  }
   function deleteSemester(si) {
     const sem = school.semesters?.[si]; if (!sem) return;
     if (!window.confirm(`Delete "${sem.title}" and its ${sem.lessons?.length || 0} lesson(s)? This can be undone with ↩ Undo.`)) return;
@@ -4867,6 +4900,19 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
                     <button onClick={() => addFeatureSection("showroom", "showroom", "Showroom", "🎬")} style={mi}>🎬 Showroom — slide deck</button>
                     <button onClick={() => addFeatureSection("game", "game", "Game", "🎮")} style={mi}>🎮 Game — AI mini-game</button>
                   </div>
+                  {SECTIONS.length > 1 && (() => {
+                    const ai = SECTIONS.findIndex(s => s.id === activeTab);
+                    const sticky = SECTIONS.find(s => s.id === activeTab)?.sticky;
+                    return <>
+                      <div style={{ height: 1, background: B.border, margin: "10px 0" }} />
+                      <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: B.muted, marginBottom: 8 }}>Reposition “{(SECTIONS.find(s => s.id === activeTab)?.title) || "this"}”</div>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button onClick={() => reorderSections(ai, ai - 1)} disabled={ai <= 0} style={{ ...mi, flex: 1, textAlign: "center", opacity: ai <= 0 ? 0.4 : 1 }}>← Move left</button>
+                        <button onClick={() => reorderSections(ai, ai + 1)} disabled={ai >= SECTIONS.length - 1} style={{ ...mi, flex: 1, textAlign: "center", opacity: ai >= SECTIONS.length - 1 ? 0.4 : 1 }}>Move right →</button>
+                      </div>
+                      <button onClick={() => toggleSticky(activeTab)} style={{ ...mi, width: "100%", marginTop: 6 }}>{sticky ? "📌 Unstick this section" : "📌 Make this section sticky"}</button>
+                    </>;
+                  })()}
                   <div style={{ height: 1, background: B.border, margin: "10px 0" }} />
                   <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: B.muted, marginBottom: 8 }}>Presets</div>
                   <button onClick={singleChatPreset} style={{ ...mi, width: "100%" }}>💬 Single centered chat (no tabs)</button>
@@ -4875,7 +4921,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
               );
             })()}
           </div>
-          <div style={{ flex: 1, minWidth: 0, width: "100%", display: "flex", flexDirection: "column", gap: dens }}>
+          <div style={{ flex: 1, minWidth: 0, width: "100%", display: "flex", flexDirection: "column", gap: dens, ...(SECTIONS.find(s => s.id === activeTab)?.sticky ? { position: "sticky", top: 64, alignSelf: "flex-start", maxHeight: "calc(100vh - 80px)", overflowY: "auto" } : {}) }}>
           {activeTab === "lessons" && (<>
             {(school.transformation || !readOnly) && (
               <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: "16px 22px" }}>
@@ -5680,6 +5726,22 @@ export default function Senseito() {
   // Conversational chat: converse / advise, OR apply a design patch, OR execute a content edit.
   async function chatSend(text) {
     const rec = active; if (!text || iterating || !rec) return;
+    // Deterministic shortcut: "make [section] sticky / unsticky" — match a section by name and toggle it.
+    const mSticky = text.match(/\bmake\s+(?:the\s+)?(.+?)\s+(?:section\s+|tab\s+)?(un)?stick(?:y|ied)?\b/i) || text.match(/\b(un)?stick(?:y)?\s+(?:the\s+)?(.+?)\s*(?:section|tab)?$/i);
+    if (mSticky) {
+      const un = !!(mSticky[2] && /un/i.test(mSticky[2])) || /\bun/i.test(text.slice(0, mSticky.index + 8));
+      const name = (mSticky[1] && !/^un$/i.test(mSticky[1]) ? mSticky[1] : mSticky[2] || "").trim().toLowerCase();
+      const secs = getSections(rec.data);
+      const target = secs.find(s => (s.title || "").toLowerCase().includes(name) || s.kind === name || name.includes((s.title || "").toLowerCase())) || secs.find(s => name.includes(s.kind));
+      if (target) {
+        pushMsg({ role: "user", content: text });
+        const next = secs.map(s => ({ ...s, sticky: s.id === target.id ? !un : s.sticky }));
+        updateSchool(rec.id, { data: { ...rec.data, sections: next } });
+        pushMsg({ role: "assistant", content: `✓ ${target.title} is ${un ? "no longer" : "now"} sticky.` });
+        showAToast(`✓ ${target.title} ${un ? "unstuck" : "sticky"}`, "ok");
+        return;
+      }
+    }
     pushMsg({ role: "user", content: text }); setIterating(true); setIterProg({ pct: 8, label: "Thinking…" });
     try {
       const thread = iterHistory.filter(m => m.role === "user" || m.role === "assistant").slice(-8).map(m => ({ role: m.role, content: m.content }));
