@@ -2881,18 +2881,76 @@ OUTPUT: ONLY the HTML fragment — no markdown fences, no <html>/<head>/<body> w
     ? `Here is the CURRENT game HTML:\n${current}\n\nKeep it fully working end-to-end and apply ONLY this change: ${prompt}. Return the COMPLETE updated fragment.`
     : `Make a complete, fully playable game for: ${prompt || "practising this school's key ideas"}\nSubject context: ${subject}`;
   // Games need real logic → use the stronger model + a generous budget so the code is never truncated.
-  const code = await api(sys, [{ role: "user", content: user }], 8000, "sonnet");
-  return String(code).replace(/^```[a-z]*\n?/i, "").replace(/```\s*$/, "").trim();
+  let code = await api(sys, [{ role: "user", content: user }], 8000, "sonnet");
+  code = String(code).replace(/^```[a-z]*\n?/i, "").replace(/```\s*$/, "").trim();
+  // Completeness guard: a real game must have a <script> AND wired interactivity. If it came back
+  // static (markup only), ask once more, firmly, for the full working version.
+  const interactive = /<script[\s\S]*?(addEventListener|onclick|window\.)/i.test(code);
+  if (!interactive) {
+    try {
+      const retry = await api(sys + `\n\nYour previous attempt was NOT interactive (no working <script>/handlers). Return the COMPLETE, fully working game with all JS wired so every button responds.`, [{ role: "user", content: user }], 8000, "sonnet");
+      const rc = String(retry).replace(/^```[a-z]*\n?/i, "").replace(/```\s*$/, "").trim();
+      if (/<script[\s\S]*?(addEventListener|onclick|window\.)/i.test(rc)) code = rc;
+    } catch { /* keep first attempt */ }
+  }
+  return code;
+}
+// The Enhance Wizard: the AI proposes targeted follow-up questions, then a surgical upgrade.
+async function genGameWizardQuestions(school, code) {
+  const sys = `You are helping a creator surgically ENHANCE an existing browser mini-game without breaking it. Study the game, then propose 3 SHORT, high-impact follow-up questions whose answers would let you upgrade it meaningfully. Return JSON ONLY: { "questions": [ { "q": "<short question>", "options": ["<2-4 concrete, game-specific quick answers>"] } ] }.`;
+  const j = await apiJSON(sys, [{ role: "user", content: `GAME HTML:\n${String(code).slice(0, 6000)}` }], 900, "sonnet");
+  return Array.isArray(j?.questions) ? j.questions.slice(0, 4).filter(q => q && q.q) : [];
+}
+function GameWizard({ school, code, T, onApply, onClose }) {
+  const [qs, setQs] = useState(null); // null = loading, [] = no questions
+  const [ans, setAns] = useState({});
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { let live = true; (async () => { try { const q = await genGameWizardQuestions(school, code); if (live) setQs(q); } catch { if (live) setQs([]); } })(); return () => { live = false; }; }, []); // eslint-disable-line
+  const setA = (i, v) => setAns(a => ({ ...a, [i]: a[i] === v ? undefined : v }));
+  const compiled = (qs || []).map((q, i) => ans[i] ? `${q.q} → ${ans[i]}` : null).filter(Boolean);
+  async function apply() {
+    if (!compiled.length) return; setBusy(true);
+    await onApply(`Enhance the game with these choices, applied surgically (keep everything else working): ${compiled.join("; ")}`);
+    setBusy(false); onClose();
+  }
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 240, background: "rgba(0,0,0,0.82)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 18, width: "100%", maxWidth: 480, maxHeight: "86vh", overflowY: "auto", padding: "20px 22px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+          <div style={{ fontSize: 15, fontWeight: 800, color: B.white }}>🪄 Enhance this game</div>
+          <button onClick={onClose} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "5px 10px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>✕</button>
+        </div>
+        <div style={{ fontSize: 12.5, color: B.mutedMid, marginBottom: 14 }}>Answer a few questions and the AI will upgrade your game surgically — keeping what works.</div>
+        {qs === null && <div style={{ textAlign: "center", padding: "26px 0", color: B.mutedMid, fontSize: 13 }}><Spinner color={T.hi} />Looking at your game…</div>}
+        {qs && qs.length === 0 && <div style={{ fontSize: 12.5, color: B.muted, marginBottom: 12 }}>Couldn't read the game — describe your change instead and use ✎ Iterate.</div>}
+        {qs && qs.map((q, i) => (
+          <div key={i} style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 13, fontWeight: 700, color: B.white, marginBottom: 7 }}>{q.q}</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {(q.options || []).map((o, j) => <button key={j} onClick={() => setA(i, o)} style={{ background: ans[i] === o ? T.ps : B.surface2, border: `1px solid ${ans[i] === o ? T.ba : B.borderMid}`, borderRadius: 100, color: ans[i] === o ? T.hi : B.mutedMid, padding: "5px 12px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 600 }}>{o}</button>)}
+            </div>
+            <input value={typeof ans[i] === "string" && !(q.options || []).includes(ans[i]) ? ans[i] : ""} onChange={e => setAns(a => ({ ...a, [i]: e.target.value || undefined }))} placeholder="…or type your own" style={{ width: "100%", background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.white, fontFamily: "inherit", fontSize: 12, padding: "6px 10px", marginTop: 7, boxSizing: "border-box" }} />
+          </div>
+        ))}
+        <button onClick={apply} disabled={busy || !compiled.length} style={{ ...pBtn(T), width: "100%", marginTop: 6, opacity: (busy || !compiled.length) ? 0.5 : 1 }}>{busy ? <><Spinner color="#fff" />Enhancing…</> : "🪄 Enhance my game"}</button>
+      </div>
+    </div>
+  );
 }
 function GameBlock({ data = {}, T, school, canEdit, onEditData }) {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false); // "regen" | "iter" | false
+  const [wizard, setWizard] = useState(false);
   const h = data.h || 460;
   async function gen(kind) {
     const p = draft.trim(); if ((!p && kind !== "regen") || busy) return;
     setBusy(kind);
     try { const code = await genGame(school, p || data.prompt || "a fun quiz that tests this school's key ideas", kind === "iter" ? data.code : null); onEditData?.({ ...data, prompt: p || data.prompt || "", code }); }
     catch { } setBusy(false);
+  }
+  async function applyInstruction(instruction) {
+    setBusy("iter");
+    try { const code = await genGame(school, instruction, data.code); onEditData?.({ ...data, code }); } catch { } setBusy(false);
   }
   const resize = (ev) => {
     ev.preventDefault(); const node = ev.currentTarget; try { node.setPointerCapture(ev.pointerId); } catch { }
@@ -2914,10 +2972,12 @@ function GameBlock({ data = {}, T, school, canEdit, onEditData }) {
           <div style={{ display: "flex", gap: 7, marginTop: 8, flexWrap: "wrap" }}>
             <button onClick={() => gen("regen")} disabled={!!busy} title="Build/redesign the whole game" style={{ ...pBtn(T), opacity: busy ? 0.6 : 1 }}>{busy === "regen" ? <><Spinner color="#fff" />Building…</> : (data.code ? "↻ Regenerate" : "✨ Generate game")}</button>
             {data.code && <button onClick={() => gen("iter")} disabled={!!busy || !draft.trim()} title="Keep the game; change only what you describe" style={{ background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 9, color: T.hi, padding: "9px 14px", cursor: "pointer", fontSize: 13, fontFamily: "inherit", fontWeight: 700, opacity: (busy || !draft.trim()) ? 0.6 : 1 }}>{busy === "iter" ? <><Spinner color={T.hi} />Iterating…</> : "✎ Iterate"}</button>}
+            {data.code && <button onClick={() => setWizard(true)} disabled={!!busy} title="AI asks a few questions, then upgrades the game for you" style={{ background: "none", border: `1px solid ${T.ba}`, borderRadius: 9, color: T.hi, padding: "9px 14px", cursor: "pointer", fontSize: 13, fontFamily: "inherit", fontWeight: 700, opacity: busy ? 0.6 : 1 }}>🪄 Enhance (wizard)</button>}
           </div>
-          <div style={{ fontSize: 11, color: B.muted, marginTop: 7 }}>Saved once generated · students just play. Regenerate rebuilds it; Iterate changes only what you ask.</div>
+          <div style={{ fontSize: 11, color: B.muted, marginTop: 7 }}>Saved once generated · students just play. Regenerate rebuilds it; Iterate changes only what you ask; the wizard guides a bigger upgrade.</div>
         </div>
       )}
+      {wizard && data.code && <GameWizard school={school} code={data.code} T={T} onApply={applyInstruction} onClose={() => setWizard(false)} />}
     </div>
   );
 }
@@ -4506,6 +4566,19 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const classes = getClasses(school);
   const curClassId = classes ? (activeClass || classes[0].id) : null;
   const viewSemesters = classes ? (school.semesters || []).filter(s => (s.classId || classes[0].id) === curClassId) : (school.semesters || []);
+  // Even a fresh single-class school SHOWS as a (renameable) class. The published view only
+  // reveals the class bar once there are 2+ classes; the creator always sees it to manage.
+  const displayClasses = classes || [{ id: "c_main", title: school.classTitle || school.category || "Class 1", icon: school.emoji || "📚", mentorName: school.mentor?.name, _implicit: true }];
+  const showClassBar = (classes ? classes.length >= 2 : false) || !readOnly;
+  function renameClass(id, title) {
+    if (!title || !title.trim()) return;
+    if (!school.classes) {
+      const base = { id: "c_main", title: title.trim(), icon: school.emoji || "📚", mentorName: school.mentor?.name, voicePreset: school.voicePreset };
+      onUpdate({ data: { ...school, classes: [base], semesters: (school.semesters || []).map(s => s.classId ? s : { ...s, classId: "c_main" }) } });
+    } else {
+      onUpdate({ data: { ...school, classes: school.classes.map(c => c.id === id ? { ...c, title: title.trim() } : c) } });
+    }
+  }
   const viewSchool = classes ? { ...school, semesters: viewSemesters } : school;
 
   // Create a whole new class (own teacher + curriculum) grounded in the same school subject.
@@ -4797,18 +4870,21 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
             </div>
           )}
           <BrandBar school={school} T={T} readOnly={readOnly} onUpdate={onUpdate} />
-          {/* Classes — a top-level header menu (parallel tracks, each with its own teacher) */}
-          {(classes || !readOnly) && (
+          {/* Classes — a top-level header menu (parallel tracks, each with its own teacher).
+              Even a fresh school shows one renameable class; the bar only appears to viewers with 2+ classes. */}
+          {showClassBar && (
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: "9px 13px" }}>
-              <span style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.5, color: B.muted, marginRight: 2 }}>{classes ? "Classes" : "Class"}</span>
-              {classes && classes.map(c => {
-                const on = c.id === curClassId;
-                const ls = (school.semesters || []).filter(s => (s.classId || classes[0].id) === c.id).flatMap(s => s.lessons || []);
+              <span style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.5, color: B.muted, marginRight: 2 }}>{displayClasses.length > 1 ? "Classes" : "Class"}</span>
+              {displayClasses.map(c => {
+                const on = c._implicit || c.id === curClassId;
+                const ls = c._implicit ? (school.semesters || []).flatMap(s => s.lessons || []) : (school.semesters || []).filter(s => (s.classId || displayClasses[0].id) === c.id).flatMap(s => s.lessons || []);
                 const done = ls.filter(l => progress[l.number] === "passed").length;
-                const goLessons = () => { setActiveClass(c.id); const lt = SECTIONS.find(s => s.kind === "lessons")?.id; if (lt) setTab(lt); };
-                return <button key={c.id} onClick={goLessons} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: on ? T.grad : B.surface2, border: `1px solid ${on ? "transparent" : B.borderMid}`, borderRadius: 100, color: on ? "#fff" : B.mutedMid, padding: "6px 14px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 700, boxShadow: on ? `0 4px 14px ${T.pg}` : "none" }}>{c.icon} {c.title}<span style={{ fontSize: 10.5, opacity: 0.85, fontWeight: 600 }}>{done}/{ls.length}</span></button>;
+                const goLessons = () => { if (!c._implicit) setActiveClass(c.id); const lt = SECTIONS.find(s => s.kind === "lessons")?.id; if (lt) setTab(lt); };
+                const rename = () => { if (readOnly) return; const t = window.prompt("Class name:", c.title); if (t) renameClass(c.id, t); };
+                return <button key={c.id} onClick={goLessons} onDoubleClick={rename} title={readOnly ? c.title : "Click to open · double-click to rename"} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: on ? T.grad : B.surface2, border: `1px solid ${on ? "transparent" : B.borderMid}`, borderRadius: 100, color: on ? "#fff" : B.mutedMid, padding: "6px 14px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 700, boxShadow: on ? `0 4px 14px ${T.pg}` : "none" }}>{c.icon} {c.title}<span style={{ fontSize: 10.5, opacity: 0.85, fontWeight: 600 }}>{done}/{ls.length}</span></button>;
               })}
               {!readOnly && <button onClick={addClass} disabled={addingClass} title="Create a new class (its own teacher + curriculum) in this school" style={{ background: "none", border: `1px dashed ${T.ba}`, borderRadius: 100, color: T.hi, padding: "6px 13px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 700, opacity: addingClass ? 0.6 : 1 }}>{addingClass ? <><Spinner color={T.hi} />Building class…</> : "＋ Add a class"}</button>}
+              {!readOnly && <span style={{ fontSize: 10.5, color: B.muted }}>{displayClasses.length < 2 ? "· hidden from students until you add a 2nd class · double-click to rename" : "double-click a class to rename"}</span>}
             </div>
           )}
           {/* Banner — varies by the school's visual skin */}
