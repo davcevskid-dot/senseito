@@ -859,7 +859,17 @@ function journeyContext(school, progress) {
   const locked = lessons.filter(l => !reached(l));
   const recent = passed.slice(-5).map(l => l.title).join("; ");
   const lockedNames = locked.slice(0, 6).map(l => l.title).join("; ");
-  return `\nLEARNER'S JOURNEY: ${passed.length}/${lessons.length} lessons completed${recent ? ` (recently: ${recent})` : ""}. Currently on: "${current?.title || "—"}".${lockedNames ? ` STILL LOCKED (they have NOT seen these — don't assume the concepts; you may tease them): ${lockedNames}.` : " Everything is unlocked for them."} Meet them exactly where they are.\n`;
+  // Multi-class: give the general mentor a per-class progress read so it can see across all classes.
+  let classLine = "";
+  const classes = getClasses(school);
+  if (classes) {
+    classLine = "\nCLASSES (you oversee ALL of them): " + classes.map(c => {
+      const ls = (school.semesters || []).filter(s => (s.classId || classes[0].id) === c.id).flatMap(s => s.lessons || []);
+      const d = ls.filter(l => p[l.number] === "passed").length;
+      return `${c.title} ${d}/${ls.length}${c.mentorName && c.mentorName !== school.mentor?.name ? ` (taught by ${c.mentorName})` : ""}`;
+    }).join("; ") + ". Connect insight across classes when useful.\n";
+  }
+  return `\nLEARNER'S JOURNEY: ${passed.length}/${lessons.length} lessons completed${recent ? ` (recently: ${recent})` : ""}. Currently on: "${current?.title || "—"}".${lockedNames ? ` STILL LOCKED (they have NOT seen these — don't assume the concepts; you may tease them): ${lockedNames}.` : " Everything is unlocked for them."}${classLine} Meet them exactly where they are.\n`;
 }
 function mentorOfficeSys(school, bus, journey = "") {
   const dna = school.knowledgeDNA ? `\nKNOWLEDGE DNA:\n${String(school.knowledgeDNA).slice(0, 4000)}\n` : "";
@@ -4167,6 +4177,37 @@ function LessonMap({ school, T, progress, onEnter, onEdit, readOnly }) {
     </div>
   );
 }
+// ── MULTI-CLASS: a school can hold several parallel "classes" (e.g. Mindset, Power, Brotherhood),
+// each its own track of semesters (tagged with classId) and optionally its own teacher mentor;
+// they share the school's knowledge, and the general mentor sees progress across all of them. ──
+function getClasses(school) {
+  return (Array.isArray(school?.classes) && school.classes.length) ? school.classes : null;
+}
+function classMentor(school, classId) {
+  const c = (school.classes || []).find(x => x.id === classId);
+  if (c && c.mentorName) return {
+    name: c.mentorName, personality: c.mentorPersonality || school.mentor?.personality || "",
+    sampleLine: c.sampleLine || school.mentor?.sampleLine || "",
+    teachingStyle: c.voicePreset ? `${c.voicePreset[0].toUpperCase()}${c.voicePreset.slice(1)} style` : (school.mentor?.teachingStyle || "Custom"),
+    systemVoice: c.systemVoice || VOICES[c.voicePreset] || school.mentor?.systemVoice || VOICES.sage,
+  };
+  return school.mentor;
+}
+function lessonClassId(school, lessonNumber) {
+  for (const s of (school.semesters || [])) if ((s.lessons || []).some(l => l.number === lessonNumber)) return s.classId || null;
+  return null;
+}
+// Generate a brand-new class (its own angle + teacher + semesters) grounded in the same school.
+async function genClass(school, prompt) {
+  const dna = school.knowledgeDNA ? `\nKNOWLEDGE DNA (stay grounded in this):\n${String(school.knowledgeDNA).slice(0, 3500)}` : "";
+  const sys = `You design ONE new CLASS inside an existing school on Senseito. A class is a focused track with its own teacher and curriculum, but it shares the school's overall subject. Return JSON ONLY:
+{ "title": short class name, "icon": one emoji, "mentorName": the class's teacher name, "voicePreset": one of sage|drill|socratic|scientist|storyteller|trickster|custom, "systemVoice": (ONLY if custom) 3-4 sentences on how this teacher speaks, "semesters": [ { "title", "theme", "weeks", "lessons": [ { "title", "type" (Dialogue|RolePlay|Mission|Reflection|SkillTest|Quiz|Debate|Journal), "concept", "openingLine", "mission", "passCriteria", "passLogic": {"mode": one of mentoronly|mentor|activities|hybrid}, "blockTypes": [1-3 block types valid for the "${school.learningPath || "mixed"}" learning path] } ] } ] }
+Make it 1-2 semesters, 3-4 lessons each, escalating, vivid, specific. Give this class a DISTINCT teacher voice from the school's main mentor "${school.mentor?.name || ""}".
+Allowed block types per path:\n${PATH_GUIDE}`;
+  const user = `SCHOOL: ${school.name} — ${flattenText(school.description) || ""}\nMAIN MENTOR: ${school.mentor?.name || "—"}\nEXISTING CLASSES: ${(school.classes || []).map(c => c.title).join(", ") || "(none yet)"}\n${dna}\n\nNEW CLASS TO CREATE: ${prompt}`;
+  return apiJSON(sys, [{ role: "user", content: user }], 6000, "sonnet");
+}
+
 // ARCADE — the gamified "one continuous run" mode: a single game-like track with a live HUD;
 // passing a lesson auto-advances you to the next, so the whole school plays like one game.
 function ArcadeRun({ school, T, progress, xp, onEnter, onEdit, readOnly }) {
@@ -4339,6 +4380,8 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const replaceInterludeBrick = (si, bi, nb) => setSemBricks(si, arr => arr.map((b, j) => j === bi ? nb : b));
   const [customLessonSem, setCustomLessonSem] = useState(null); // which part the wizard is adding to
   const [interludeOpen, setInterludeOpen] = useState(null); // which part's "add block" tray is open
+  const [activeClass, setActiveClass] = useState(null); // multi-class: which class track is in view
+  const [addingClass, setAddingClass] = useState(false); // building a new class
   const [activeLesson, setActiveLesson] = useState(null);
   const [editingLesson, setEditingLesson] = useState(null);
   const [buildingTool, setBuildingTool] = useState(null);
@@ -4347,14 +4390,67 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
 
   const progress = rec.progress || {};
   const xp = rec.xp || 0;
+  // Multi-class: which classes exist, and which one is in view (defaults to the first).
+  const classes = getClasses(school);
+  const curClassId = classes ? (activeClass || classes[0].id) : null;
+  const viewSemesters = classes ? (school.semesters || []).filter(s => (s.classId || classes[0].id) === curClassId) : (school.semesters || []);
+  const viewSchool = classes ? { ...school, semesters: viewSemesters } : school;
+
+  // Create a whole new class (own teacher + curriculum) grounded in the same school subject.
+  async function addClass() {
+    const prompt = window.prompt('New class — what should it teach? e.g. "Brotherhood: building a circle of men who hold you accountable"');
+    if (!prompt || !prompt.trim() || addingClass) return;
+    setAddingClass(true); showToast("Building your new class…");
+    try {
+      const c = await genClass(school, prompt.trim());
+      const newSems = Array.isArray(c.semesters) ? c.semesters : [];
+      if (!newSems.length) throw new Error("empty");
+      // Temp-number the new lessons so block authoring keys them correctly; real numbers are assigned on merge.
+      let tn = 0; newSems.forEach(s => (s.lessons || []).forEach(l => { l.number = ++tn; }));
+      await fillSchoolBlocks(c, { dna: school.knowledgeDNA });
+      // Ensure existing semesters are grouped under a base class before adding the new one.
+      let existing = school.classes ? [...school.classes] : [];
+      let sems = (school.semesters || []).map(s => ({ ...s }));
+      if (!existing.length) {
+        const baseId = "c_main";
+        existing = [{ id: baseId, title: school.category || "Core", icon: "📚", mentorName: school.mentor?.name, voicePreset: school.voicePreset }];
+        sems = sems.map(s => s.classId ? s : ({ ...s, classId: baseId }));
+      }
+      const newId = "c_" + Math.random().toString(36).slice(2, 7);
+      const taggedNew = (c.semesters || []).map(s => ({ ...s, classId: newId }));
+      const allSems = [...sems, ...taggedNew];
+      renumberSemesters(allSems);
+      const newClass = { id: newId, title: c.title || prompt.trim().slice(0, 32), icon: c.icon || "🎓", mentorName: c.mentorName, voicePreset: c.voicePreset, systemVoice: c.systemVoice };
+      onUpdate({ data: { ...school, classes: [...existing, newClass], semesters: allSems }, revision: (rec.revision || 0) + 1 });
+      setActiveClass(newId); setTab("lessons");
+      showToast(`✓ New class added: ${newClass.title}`);
+    } catch { showToast("Couldn't build that class — try again.", "err"); }
+    setAddingClass(false);
+  }
+  function deleteClass(id) {
+    if (!classes || classes.length <= 1) return;
+    if (!window.confirm("Delete this class and its lessons? This can be undone with ↩ Undo.")) return;
+    const remaining = classes.filter(c => c.id !== id);
+    const sems = (school.semesters || []).filter(s => (s.classId || classes[0].id) !== id);
+    renumberSemesters(sems);
+    onUpdate({ data: { ...school, classes: remaining.length > 1 ? remaining : undefined, semesters: sems }, revision: (rec.revision || 0) + 1 });
+    setActiveClass(remaining[0]?.id || null);
+  }
 
   function showToast(msg, type = "ok") { setToast({ msg, type }); clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setToast(null), 3500); }
 
   useEffect(() => {
+    // Each CLASS is its own parallel track: the first lesson of every class starts active.
     const p = { ...progress }; let changed = false;
-    school.semesters?.forEach((sem, si) => sem.lessons?.forEach((l, i) => {
-      if (p[l.number] === undefined) { p[l.number] = (si === 0 && i === 0) ? "active" : "locked"; changed = true; }
-    }));
+    const groups = {};
+    (school.semesters || []).forEach(sem => { (groups[sem.classId || "__main"] ||= []).push(sem); });
+    Object.values(groups).forEach(group => {
+      let first = true;
+      group.forEach(sem => (sem.lessons || []).forEach(l => {
+        if (p[l.number] === undefined) { p[l.number] = first ? "active" : "locked"; changed = true; }
+        first = false;
+      }));
+    });
     if (changed) onUpdate({ progress: p });
   }, [rec.revision]); // eslint-disable-line
 
@@ -4362,11 +4458,14 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
     if (progress[lessonNumber] === "passed") return; // already passed — don't re-award XP on revisit
     const nextXp = xp + (school.gamification?.xpPerLesson || 100);
     const next = { ...progress, [lessonNumber]: "passed" };
+    // Unlock the next locked lesson WITHIN THE SAME CLASS (classes advance independently).
+    const sems = school.semesters || [];
+    let cls = "__main"; sems.forEach(s => { if ((s.lessons || []).some(l => l.number === lessonNumber)) cls = s.classId || "__main"; });
     let found = false;
-    school.semesters?.forEach(sem => sem.lessons?.forEach(l => {
+    sems.forEach(sem => { if ((sem.classId || "__main") !== cls) return; (sem.lessons || []).forEach(l => {
       if (found && next[l.number] === "locked") { next[l.number] = "active"; found = false; }
       if (l.number === lessonNumber) found = true;
-    }));
+    }); });
     onUpdate({ progress: next, xp: nextXp });
   }
   function unlockAll() {
@@ -4488,7 +4587,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   return (
     <div style={{ position: "relative", fontFamily: fontStack(school) }}>
       <Toast toast={toast} />
-      {activeLesson && <LessonView school={school} lesson={activeLesson} T={T} onClose={() => {
+      {activeLesson && <LessonView school={classes ? { ...school, mentor: classMentor(school, lessonClassId(school, activeLesson.number)) } : school} lesson={activeLesson} T={T} onClose={() => {
           const finished = activeLesson; setActiveLesson(null);
           // Arcade: a continuous run — when you clear a lesson, roll straight into the next one.
           if (school.progression === "arcade" && finished && progress[finished.number] === "passed") {
@@ -4690,19 +4789,31 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
                 <div style={{ fontSize: 13, color: B.white, lineHeight: 1.65 }}><EditableText value={flattenText(school.transformation)} readOnly={readOnly} placeholder="Describe the before→after transformation…" onSave={v => onUpdate({ data: { ...school, transformation: v } })} /></div>
               </div>
             )}
+            {/* Class switcher — parallel tracks, each with its own teacher; the general mentor sees all */}
+            {(classes || !readOnly) && (
+              <div style={{ display: "flex", gap: 7, flexWrap: "wrap", alignItems: "center" }}>
+                {classes && classes.map(c => {
+                  const on = c.id === curClassId; const done = (school.semesters || []).filter(s => (s.classId || classes[0].id) === c.id).flatMap(s => s.lessons || []).filter(l => progress[l.number] === "passed").length;
+                  const tot = (school.semesters || []).filter(s => (s.classId || classes[0].id) === c.id).flatMap(s => s.lessons || []).length;
+                  return <button key={c.id} onClick={() => setActiveClass(c.id)} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: on ? T.grad : B.surface2, border: `1px solid ${on ? "transparent" : B.borderMid}`, borderRadius: 100, color: on ? "#fff" : B.mutedMid, padding: "6px 14px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 700, boxShadow: on ? `0 4px 14px ${T.pg}` : "none" }}>{c.icon} {c.title}<span style={{ fontSize: 10.5, opacity: 0.8, fontWeight: 600 }}>{done}/{tot}</span></button>;
+                })}
+                {!readOnly && <button onClick={addClass} disabled={addingClass} title="Create a new class (its own teacher + curriculum) in this school" style={{ background: "none", border: `1px dashed ${T.ba}`, borderRadius: 100, color: T.hi, padding: "6px 13px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 700, opacity: addingClass ? 0.6 : 1 }}>{addingClass ? "Building class…" : "＋ Add a class"}</button>}
+              </div>
+            )}
+            {classes && (() => { const cm = classMentor(school, curClassId); return cm?.name && cm.name !== school.mentor?.name ? <div style={{ fontSize: 11.5, color: B.muted }}>Teacher for this class: <span style={{ color: T.hi, fontWeight: 700 }}>{cm.name}</span></div> : null; })()}
             {!readOnly && <div style={{ display: "flex", gap: 6, alignItems: "center", justifyContent: "flex-end" }}>
               <span style={{ fontSize: 11, color: B.muted }}>Layout</span>
               {[["list", "☰ List"], ["map", "🗺️ Map"], ["arcade", "🎮 Arcade"]].map(([k, l]) => <button key={k} onClick={() => onUpdate({ data: { ...school, progression: k } })} style={{ background: (school.progression || "list") === k ? T.ps : "none", border: `1px solid ${(school.progression || "list") === k ? T.ba : B.borderMid}`, borderRadius: 8, color: (school.progression || "list") === k ? T.hi : B.mutedMid, padding: "5px 11px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 700 }}>{l}</button>)}
             </div>}
             {school.progression === "arcade" ? (
-              <ArcadeRun school={school} T={T} progress={progress} xp={xp} onEnter={setActiveLesson} onEdit={setEditingLesson} readOnly={readOnly} />
+              <ArcadeRun school={viewSchool} T={T} progress={progress} xp={xp} onEnter={setActiveLesson} onEdit={setEditingLesson} readOnly={readOnly} />
             ) : school.progression === "map" ? (
-              <LessonMap school={school} T={T} progress={progress} onEnter={setActiveLesson} onEdit={setEditingLesson} readOnly={readOnly} />
-            ) : school.semesters?.map((sem, si) => (
+              <LessonMap school={viewSchool} T={T} progress={progress} onEnter={setActiveLesson} onEdit={setEditingLesson} readOnly={readOnly} />
+            ) : viewSemesters.map((sem) => { const si = (school.semesters || []).indexOf(sem); return (
               <div key={si} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, padding: "2px 4px" }}>
                   <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
-                    <span style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 2, color: T.p }}>Part {sem.number || si + 1}</span>
+                    <span style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 2, color: T.p }}>Part {viewSemesters.indexOf(sem) + 1}</span>
                     <span style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 18, fontWeight: 700, color: B.white, letterSpacing: -0.3 }}><EditableText value={sem.title} readOnly={readOnly} onSave={v => setSemField(si, "title", v)} /></span>
                     {(sem.theme || !readOnly) && <span style={{ fontSize: 12, color: B.muted }}>· <EditableText value={sem.theme} readOnly={readOnly} placeholder="describe this part…" onSave={v => setSemField(si, "theme", v)} /></span>}
                   </div>
@@ -4744,7 +4855,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
                   </div>
                 )}
               </div>
-            ))}
+            ); })}
             {!readOnly && <AddLessonBar T={T} disabled={iterating} onAdd={(topic) => onIterate(`Add ONE new lesson about "${topic}" to the end of the lessons. Give it a fitting title, concept, mission, passCriteria and 1-3 activities allowed for the ${school.learningPath || "mixed"} learning path. Keep the school name and ALL existing lessons exactly as they are.`)} />}
             {school.gamification && (
               <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 18, padding: 26 }}>
