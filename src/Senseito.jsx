@@ -2749,6 +2749,16 @@ function ShowroomBlock({ data = {}, T, school, canEdit, onEditData, disabled }) 
       save(slides.map((s, k) => k === idx ? ns : s)); setSel(null); setEdit(true);
     } catch { } setBusy(false);
   }
+  // One-click "make this beautiful" — polishes the current slide's design while keeping every element.
+  async function beautify() {
+    if (busy || !(cur?.els?.length)) return;
+    setBusy("beautify");
+    try {
+      const j = await genShowroomSlideJSON(school, "Make this slide noticeably more beautiful and premium: refine the layout, spacing, alignment, colour harmony, typography and visual hierarchy, and add subtle tasteful polish. KEEP every existing element and all its text/meaning — improve styling and positioning only; do not remove or rewrite content.", cur);
+      const ns = normalizeSlide(j, T, { prompt: cur?.prompt || "", h: cur?.h || 360 });
+      save(slides.map((s, k) => k === idx ? ns : s)); setSel(null);
+    } catch { } setBusy(false);
+  }
   const addSlide = () => { const next = [...slides, { prompt: "", bg: defaultSlideBg(T), h: 360, els: [] }]; save(next, next.length - 1); setDraft(""); setEdit(true); setSel(null); };
   const delSlide = () => { const next = slides.filter((_, j) => j !== idx); save(next, Math.max(0, idx - 1)); };
   const resizeCanvas = (ev) => {
@@ -2764,7 +2774,8 @@ function ShowroomBlock({ data = {}, T, school, canEdit, onEditData, disabled }) 
     <div style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 14, padding: 14 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: B.white }}>🎬 {data.title || "Showroom"}</div>
-        <div style={{ display: "flex", gap: 6 }}>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {canEdit && !isLegacy && (cur?.els?.length > 0) && <button onClick={beautify} disabled={!!busy} title="One tap — let the AI make this slide more beautiful (keeps all your content)" style={{ background: T.grad, border: "none", borderRadius: 8, color: "#fff", padding: "6px 12px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 700, boxShadow: `0 3px 12px ${T.pg}`, opacity: busy ? 0.6 : 1 }}>{busy === "beautify" ? <><Spinner color="#fff" />Beautifying…</> : "✨ Make beautiful"}</button>}
           {canEdit && edit && !isLegacy && <button onClick={() => setSnap(s => !s)} title={snap ? "Magnetic aligner ON — snaps to guides; click for free-form" : "Free-form — click to turn the magnetic aligner on"} style={pill(snap)}>{snap ? "🧲 Aligner on" : "🧲 Aligner off"}</button>}
           {canEdit && cur && !isLegacy && <button onClick={() => { setEdit(!edit); setEditingText(false); setSel(null); }} style={pill(edit)}>{edit ? "✓ Done editing" : "✎ Edit slide"}</button>}
         </div>
