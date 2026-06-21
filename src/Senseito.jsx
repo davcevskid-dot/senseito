@@ -404,6 +404,7 @@ const BLOCK_META = {
   garden:              { label: "Mindset Garden",      icon: "🌱", cat: "Knowledge" },
   notebook:            { label: "Notebook",            icon: "📓", cat: "Knowledge" },
   showroom:            { label: "Showroom",            icon: "🎬", cat: "Media" },
+  game:                { label: "Game",                icon: "🎮", cat: "Media" },
   library:             { label: "Library",             icon: "📚", cat: "Media" },
   events:              { label: "Events",              icon: "📅", cat: "Community" },
   match_pairs:         { label: "Match Pairs",         icon: "🔀", cat: "Game" },
@@ -457,6 +458,7 @@ Every block's data MAY include "concepts": [concept ids from the school's concep
 - garden: { title?:"..." } — Mindset Garden: limiting beliefs the mentor captures appear as weeds the learner reframes (with AI) into flowers. No content needed. Ideal as a dashboard section for coaching, mindset, sales, therapy, confidence schools.
 - notebook: { title?, prompt? } — a real free-write space the learner types into and that auto-saves. Use this (NOT a reading block) whenever the section is for the learner to capture notes/thoughts/journal. No body content needed.
 - showroom: { title? } — an AI-generated animated slide deck the creator builds (each slide cached); students watch. No content needed up front.
+- game: { title? } — an AI-generated mini-game the creator builds (cached); students play. No content needed up front.
 - library: { title? } — a list of downloadable resources / links the creator curates. No content needed up front.
 - events: { title? } — upcoming live sessions / webinars / calls with per-student RSVP. No content needed up front.
 - reading_plain: { content (markdown), image?:"https… optional top image" }
@@ -623,7 +625,7 @@ Decide which SECTIONS this experience needs, based on the subject. Section kinds
 - "mentor": an always-available AI mentor for open questions/coaching.
 - "tools": a place where the learner builds and uses their own interactive tools.
 - "dashboard": an always-on grid of bricks the learner returns to (NOT gated). Perfect for practice-driven subjects — e.g. yoga → pose gallery + breath timer + streak tracker; trading → trade journal + metric tracker; meditation → reflection timer + mood quadrant. A dashboard can also be a feature hub: a "Library" (library brick — files & links), an "Events" page (events brick — upcoming lives/webinars with RSVP), or a "Showroom" (showroom brick — a slide deck). Add a Library and/or Events dashboard section when the request implies resources, downloads, a community, cohort, live calls, webinars or coaching.
-Pick ONLY the sections that genuinely fit. A yoga/habit/practice experience might be a dashboard + mentor with NO lessons at all; a philosophy course might be lessons + mentor. Honor any structure the creator asked for. Each dashboard section carries its own blockTypes the learner uses directly — these MUST be INTERACTIVE/TRACKING/FEATURE bricks (e.g. notebook, habit_checker, heatmap, metric_tracker, macro_tracker, mood_quadrant, reflection_timer, weekly_planner, calculator, flashcard, quiz, video_embed, review, garden, library, events, showroom). For a note-taking / "keep track of your thoughts" / journal hub, use a "notebook" brick (a real free-write space) — NEVER a reading brick (reading has a meaningless "mark as read"). For any course with lessons, a "review" brick on a dashboard is excellent (spaced repetition of weak concepts). NEVER put reading_plain or reading in a dashboard. A dashboard section MUST contain at least 2 useful bricks — never a single placeholder.
+Pick ONLY the sections that genuinely fit. A yoga/habit/practice experience might be a dashboard + mentor with NO lessons at all; a philosophy course might be lessons + mentor. Honor any structure the creator asked for. Each dashboard section carries its own blockTypes the learner uses directly — these MUST be INTERACTIVE/TRACKING/FEATURE bricks (e.g. notebook, habit_checker, heatmap, metric_tracker, macro_tracker, mood_quadrant, reflection_timer, weekly_planner, calculator, flashcard, quiz, video_embed, review, garden, library, events, showroom, game). For a note-taking / "keep track of your thoughts" / journal hub, use a "notebook" brick (a real free-write space) — NEVER a reading brick (reading has a meaningless "mark as read"). For any course with lessons, a "review" brick on a dashboard is excellent (spaced repetition of weak concepts). NEVER put reading_plain or reading in a dashboard. A dashboard section MUST contain at least 2 useful bricks — never a single placeholder.
 
 STEP 3 — PLAN BLOCKS PER LESSON (TYPES ONLY).
 For each lesson choose 1-3 DISTINCT block TYPES (never repeat the same type within a lesson) from the chosen path's ALLOWED list ONLY (never a forbidden one), ordered pedagogically (e.g. reading → practice → check); the LAST should prove mastery. List ONLY the type strings now — their detailed contents are generated later, so keep this plan compact.
@@ -2784,6 +2786,45 @@ function ShowroomBlock({ data = {}, T, school, canEdit, onEditData, disabled }) 
     </div>
   );
 }
+// ── GAME — an AI-generated, subject-themed mini-game the creator builds; students play. ──
+async function genGame(school, prompt, current) {
+  const T = themeFor(school);
+  const subject = `${school.name} — ${flattenText(school.description) || school.tagline || ""}`.slice(0, 320);
+  const sys = `You build ONE small, genuinely FUN, self-contained browser mini-game as a single HTML fragment (inline <style> + <script>, vanilla JS only). It must be playable with mouse/touch/keyboard and themed to the school's subject so playing reinforces the topic. RELIABLE game types you do well: a quiz with lives/streak/score, memory match, drag-to-sort or put-in-order, click-the-right-answer beat-the-clock, word scramble, a simple maze, whack-a-mole style, or a branching-choice scenario. HARD RULES: NO external URLs/images/fonts/libraries (it runs sandboxed offline); transparent page background; light text (#e7e9f5); use ${T.p} and ${T.a} as accents; include a clear start, live score/feedback, and a replay button; keep it ~360-460px tall and responsive. Return ONLY the HTML fragment — no markdown fences, no <html>/<head>/<body> wrappers, and NEVER include any postMessage/resize script.`;
+  const user = current
+    ? `Here is the CURRENT game HTML:\n${current}\n\nKeep it fully working and apply ONLY this change: ${prompt}`
+    : `Make a game for: ${prompt || "practising this school's key ideas"}\nSubject context: ${subject}`;
+  const code = await api(sys, [{ role: "user", content: user }], 3200);
+  return String(code).replace(/^```[a-z]*\n?/i, "").replace(/```\s*$/, "").trim();
+}
+function GameBlock({ data = {}, T, school, canEdit, onEditData }) {
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false); // "regen" | "iter" | false
+  async function gen(kind) {
+    const p = draft.trim(); if ((!p && kind !== "regen") || busy) return;
+    setBusy(kind);
+    try { const code = await genGame(school, p || data.prompt || "a fun quiz that tests this school's key ideas", kind === "iter" ? data.code : null); onEditData?.({ ...data, prompt: p || data.prompt || "", code }); }
+    catch { } setBusy(false);
+  }
+  return (
+    <div style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 14, padding: 14 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: B.white, marginBottom: 10 }}>🎮 {data.title || "Game"}</div>
+      {data.code
+        ? <MentorWidget code={data.code} T={T} />
+        : <div style={{ border: `1px dashed ${B.borderMid}`, borderRadius: 10, padding: "30px 16px", textAlign: "center", color: B.mutedMid, fontSize: 13 }}>{canEdit ? "Describe a game below and generate it." : "Game coming soon."}</div>}
+      {canEdit && (
+        <div style={{ marginTop: 12, borderTop: `1px solid ${B.border}`, paddingTop: 12 }}>
+          <textarea value={draft} onChange={e => setDraft(e.target.value)} placeholder={data.code ? 'Tell the AI what to change… e.g. "make it harder" or "add a timer"' : 'Describe the game… e.g. "A fast quiz on the 5 stages, lose a heart for a wrong answer"'} rows={2} style={{ width: "100%", background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, fontFamily: "inherit", fontSize: 12.5, padding: "8px 11px", resize: "vertical", boxSizing: "border-box" }} />
+          <div style={{ display: "flex", gap: 7, marginTop: 8, flexWrap: "wrap" }}>
+            <button onClick={() => gen("regen")} disabled={!!busy} title="Build/redesign the whole game" style={{ ...pBtn(T), opacity: busy ? 0.6 : 1 }}>{busy === "regen" ? "Building…" : (data.code ? "↻ Regenerate" : "✨ Generate game")}</button>
+            {data.code && <button onClick={() => gen("iter")} disabled={!!busy || !draft.trim()} title="Keep the game; change only what you describe" style={{ background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 9, color: T.hi, padding: "9px 14px", cursor: "pointer", fontSize: 13, fontFamily: "inherit", fontWeight: 700, opacity: (busy || !draft.trim()) ? 0.6 : 1 }}>{busy === "iter" ? "Iterating…" : "✎ Iterate"}</button>}
+          </div>
+          <div style={{ fontSize: 11, color: B.muted, marginTop: 7 }}>Saved once generated · students just play. Regenerate rebuilds it; Iterate changes only what you ask.</div>
+        </div>
+      )}
+    </div>
+  );
+}
 // ── LIBRARY — creator-curated downloadable resources / links ──
 const FILE_ICON = (name = "", url = "") => { const s = (name + url).toLowerCase(); if (/\.pdf/.test(s)) return "📕"; if (/\.(png|jpe?g|gif|webp|svg)/.test(s)) return "🖼️"; if (/\.(mp4|mov|webm|avi)/.test(s)) return "🎬"; if (/\.(mp3|wav|m4a|ogg)/.test(s)) return "🎧"; if (/\.(zip|rar|7z)/.test(s)) return "🗜️"; if (/\.(docx?|pages)/.test(s)) return "📘"; if (/\.(xlsx?|csv|numbers)/.test(s)) return "📊"; if (/\.(pptx?|key)/.test(s)) return "📙"; return "📄"; };
 function LibraryBlock({ data = {}, T, canEdit, onEditData }) {
@@ -3113,7 +3154,7 @@ const BLOCK_COMPONENTS = {
   image_gate: ImageGateBlock, video_gate: VideoGateBlock,
   reading_plain: ReadingPlainBlock, video_embed: VideoEmbedBlock, embed: EmbedBlock, quiz: QuizBlock, calculator: CalculatorBlock,
   divider: DividerBlock, callout: CalloutBlock, image: ImageBlock, cta_button: CtaButtonBlock, stat_grid: StatGridBlock,
-  review: ReviewBlock, garden: GardenBlock, notebook: NotebookBlock, showroom: ShowroomBlock, library: LibraryBlock, events: EventsBlock, match_pairs: MatchPairsBlock, fill_blank: FillBlankBlock, order_words: OrderWordsBlock, custom: CustomBlock,
+  review: ReviewBlock, garden: GardenBlock, notebook: NotebookBlock, showroom: ShowroomBlock, game: GameBlock, library: LibraryBlock, events: EventsBlock, match_pairs: MatchPairsBlock, fill_blank: FillBlankBlock, order_words: OrderWordsBlock, custom: CustomBlock,
 };
 // Concepts the learner is currently weak on that THIS brick teaches/tests.
 function weakLabelsFor(bus, school, concepts) {
@@ -3519,7 +3560,7 @@ function DashboardSection({ section, rec, T, onUpdate, readOnly, school, onInges
   const spanCss = (b) => b?.span === "full" ? "1 / -1" : b?.span === 2 ? "span 2" : "auto";
   const spanLabel = (b) => b?.span === "full" ? "▭" : b?.span === 2 ? "2" : "1";
   const setCols = (n) => mutateSection(s => ({ ...s, cols: n }));
-  const ADDABLE = [["divider", "🔤 Title / Divider"], ["callout", "📝 Text"], ["image", "🖼️ Image"], ["video_embed", "▶️ Video URL"], ["embed", "🔗 Iframe / Embed"], ["cta_button", "🔘 Button"], ["notebook", "📓 Notebook"], ["showroom", "🎬 Showroom"], ["library", "📚 Library"], ["events", "📅 Events"], ["stat_grid", "📊 Stat grid"], ["habit_checker", "✅ Habit checker"], ["metric_tracker", "📈 Metric tracker"], ["review", "🔁 Spaced review"], ["garden", "🌱 Mindset garden"]];
+  const ADDABLE = [["divider", "🔤 Title / Divider"], ["callout", "📝 Text"], ["image", "🖼️ Image"], ["video_embed", "▶️ Video URL"], ["embed", "🔗 Iframe / Embed"], ["cta_button", "🔘 Button"], ["notebook", "📓 Notebook"], ["showroom", "🎬 Showroom"], ["game", "🎮 Game"], ["library", "📚 Library"], ["events", "📅 Events"], ["stat_grid", "📊 Stat grid"], ["habit_checker", "✅ Habit checker"], ["metric_tracker", "📈 Metric tracker"], ["review", "🔁 Spaced review"], ["garden", "🌱 Mindset garden"]];
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       {section.intro && <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: "14px 20px", fontSize: 13, color: B.mutedMid, lineHeight: 1.6 }}>{section.intro}</div>}
@@ -4564,6 +4605,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
                     <button onClick={() => addFeatureSection("library", "library", "Library", "📚")} style={mi}>📚 Library — files & links</button>
                     <button onClick={() => addFeatureSection("events", "events", "Events", "📅")} style={mi}>📅 Events — lives & RSVP</button>
                     <button onClick={() => addFeatureSection("showroom", "showroom", "Showroom", "🎬")} style={mi}>🎬 Showroom — slide deck</button>
+                    <button onClick={() => addFeatureSection("game", "game", "Game", "🎮")} style={mi}>🎮 Game — AI mini-game</button>
                   </div>
                   <div style={{ height: 1, background: B.border, margin: "10px 0" }} />
                   <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: B.muted, marginBottom: 8 }}>Presets</div>
