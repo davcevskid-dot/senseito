@@ -1650,7 +1650,7 @@ function mdLite(t = "") {
   h = h.replace(/(<li>[\s\S]*?<\/li>)(?!\s*<li>)/g, "<ul style='margin:6px 0 6px 20px;display:flex;flex-direction:column;gap:3px'>$1</ul>");
   return h.replace(/\n{2,}/g, "<br/><br/>").replace(/\n/g, "<br/>");
 }
-function Markdown({ text }) { return <div style={{ fontSize: 13.5, lineHeight: 1.7, color: B.white }} dangerouslySetInnerHTML={{ __html: mdLite(text) }} />; }
+function Markdown({ text }) { return <div style={{ fontSize: 14, lineHeight: 1.78, color: B.white, letterSpacing: "0.005em", wordBreak: "break-word", overflowWrap: "anywhere" }} dangerouslySetInnerHTML={{ __html: mdLite(text) }} />; }
 
 function blockMentor(school) { return school?.mentor ? `Speak as ${school.mentor.name}. ${school.mentor.systemVoice || ""}` : "You are a sharp, fair, encouraging evaluator."; }
 
@@ -1874,7 +1874,7 @@ function ReadingBlock({ data = {}, onOutput, T, disabled, school }) {
   }
   return (<BlockShell type="reading" passed={passed} sub="Read, then tap each key phrase you'd highlight.">
     {/^https:\/\//i.test(data.image || "") && <img src={data.image} alt="" style={{ width: "100%", borderRadius: 10, marginBottom: 12, display: "block", border: `1px solid ${B.border}` }} />}
-    <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 10, padding: "12px 14px", fontSize: 14, lineHeight: 1.75, color: B.white, marginBottom: 12 }}>{data.passage}</div>
+    <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 12, padding: "16px 18px", fontSize: 14.5, lineHeight: 1.85, color: B.white, marginBottom: 12, whiteSpace: "pre-wrap", letterSpacing: "0.005em" }}>{data.passage}</div>
     <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 12 }}>
       {phrases.map((p, i) => (
         <button key={i} disabled={disabled || passed} onClick={() => setFound(f => ({ ...f, [i]: !f[i] }))} style={{ background: found[i] ? T.pg : B.surface, border: `1px solid ${found[i] ? T.ba : B.borderMid}`, borderRadius: 100, padding: "5px 12px", fontSize: 12, color: found[i] ? T.hi : B.mutedMid, cursor: "pointer", fontFamily: "inherit" }}>{found[i] ? "✓ " : ""}{p}</button>
@@ -2496,14 +2496,14 @@ function QuizBlock({ data = {}, onOutput, T, disabled, school, bus }) {
   }
   return (<BlockShell type="quiz" passed={answered && score >= questions.length * 0.7}>
     {questions.map((q, qi) => { const picked = ans[qi]; return (
-      <div key={qi} style={{ marginBottom: 16 }}>
-        <div style={{ fontSize: 14, fontWeight: 600, color: B.white, marginBottom: 8, lineHeight: 1.5 }}>{qi + 1}. {q.q}</div>
-        <div style={{ display: "grid", gap: 6 }}>
+      <div key={qi} style={{ marginBottom: 18 }}>
+        <div style={{ fontSize: 14.5, fontWeight: 600, color: B.white, marginBottom: 10, lineHeight: 1.55 }}>{qi + 1}. {q.q}</div>
+        <div style={{ display: "grid", gap: 7 }}>
           {q.options.map((opt, oi) => { const show = picked !== undefined, isC = oi === q.answer, isP = picked === oi; return (
-            <button key={oi} disabled={disabled} onClick={() => picked === undefined && setAns(a => ({ ...a, [qi]: oi }))} style={{ textAlign: "left", padding: "9px 13px", borderRadius: 9, fontSize: 13, fontFamily: "inherit", lineHeight: 1.45, cursor: picked === undefined ? "pointer" : "default", color: B.white, background: show && isC ? "rgba(74,222,128,0.12)" : show && isP ? "rgba(248,113,113,0.1)" : B.surface, border: `1px solid ${show && isC ? "rgba(74,222,128,0.4)" : show && isP ? "rgba(248,113,113,0.35)" : B.border}` }}>{show && isC ? "✓ " : show && isP ? "✕ " : ""}{opt}</button>
+            <button key={oi} disabled={disabled} onClick={() => picked === undefined && setAns(a => ({ ...a, [qi]: oi }))} style={{ textAlign: "left", padding: "11px 14px", borderRadius: 10, fontSize: 13.5, fontFamily: "inherit", lineHeight: 1.5, cursor: picked === undefined ? "pointer" : "default", color: B.white, background: show && isC ? "rgba(74,222,128,0.12)" : show && isP ? "rgba(248,113,113,0.1)" : B.surface, border: `1px solid ${show && isC ? "rgba(74,222,128,0.4)" : show && isP ? "rgba(248,113,113,0.35)" : B.border}`, transition: "background 0.15s, border-color 0.15s" }}>{show && isC ? "✓ " : show && isP ? "✕ " : ""}{opt}</button>
           ); })}
         </div>
-        {picked !== undefined && q.explain && <div style={{ fontSize: 12, color: picked === q.answer ? "#4ADE80" : "#F87171", marginTop: 7, lineHeight: 1.5 }}>{q.explain}</div>}
+        {picked !== undefined && q.explain && <div style={{ fontSize: 12.5, color: picked === q.answer ? "#4ADE80" : "#F87171", marginTop: 9, lineHeight: 1.55, padding: "8px 11px", background: picked === q.answer ? "rgba(74,222,128,0.07)" : "rgba(248,113,113,0.06)", borderRadius: 8 }}>{q.explain}</div>}
       </div>
     ); })}
     {answered && <div style={{ textAlign: "center", padding: 12, background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 10, fontSize: 14, fontWeight: 700, color: T.hi }}>Score: {score}/{questions.length} <button onClick={() => setAns({})} style={{ marginLeft: 10, background: "none", border: `1px solid ${T.ba}`, borderRadius: 8, color: T.hi, padding: "4px 12px", cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>Retake</button></div>}
