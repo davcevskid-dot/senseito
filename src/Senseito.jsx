@@ -22,6 +22,20 @@ async function supaFetch(path, { method = "GET", body, token, headers = {} } = {
   return text ? JSON.parse(text) : null;
 }
 
+// ── Library file upload → public Supabase Storage bucket "library". ──
+// Returns a permanent public URL. (Unrestricted for now; per-plan limits come later.)
+async function uploadToLibrary(file) {
+  const ext = (file.name.match(/\.[a-z0-9]+$/i) || [""])[0].toLowerCase();
+  const path = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
+  const res = await fetch(`${SUPA_URL}/storage/v1/object/library/${path}`, {
+    method: "POST",
+    headers: { apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}`, "Content-Type": file.type || "application/octet-stream", "x-upsert": "true" },
+    body: file,
+  });
+  if (!res.ok) { const t = await res.text().catch(() => ""); throw new Error(`Upload ${res.status}${t ? `: ${t.slice(0, 140)}` : ""}`); }
+  return `${SUPA_URL}/storage/v1/object/public/library/${path}`;
+}
+
 // ── AI via secure Edge proxy. structured=true → guaranteed JSON object. ──
 // model: "haiku" (default, fast+cheap) | "sonnet" (creative) — proxy falls back safely.
 async function api(system, messages, maxTokens = 4000, model) {
@@ -2487,9 +2501,27 @@ function ShowroomBlock({ data = {}, T, school, canEdit, onEditData, disabled }) 
   );
 }
 // ── LIBRARY — creator-curated downloadable resources / links ──
+const FILE_ICON = (name = "", url = "") => { const s = (name + url).toLowerCase(); if (/\.pdf/.test(s)) return "📕"; if (/\.(png|jpe?g|gif|webp|svg)/.test(s)) return "🖼️"; if (/\.(mp4|mov|webm|avi)/.test(s)) return "🎬"; if (/\.(mp3|wav|m4a|ogg)/.test(s)) return "🎧"; if (/\.(zip|rar|7z)/.test(s)) return "🗜️"; if (/\.(docx?|pages)/.test(s)) return "📘"; if (/\.(xlsx?|csv|numbers)/.test(s)) return "📊"; if (/\.(pptx?|key)/.test(s)) return "📙"; return "📄"; };
 function LibraryBlock({ data = {}, T, canEdit, onEditData }) {
   const files = data.files || [];
-  const add = () => { const title = window.prompt("Resource title:"); if (!title) return; const url = window.prompt("URL (https — Drive, PDF, Doc, anything):"); if (!url || !/^https?:\/\//i.test(url.trim())) return; onEditData?.({ ...data, files: [...files, { title: title.trim(), url: url.trim() }] }); };
+  const fileRef = useRef(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const addLink = () => { const title = window.prompt("Resource title:"); if (!title) return; const url = window.prompt("URL (https — Drive, PDF, Doc, anything):"); if (!url || !/^https?:\/\//i.test(url.trim())) return; onEditData?.({ ...data, files: [...files, { title: title.trim(), url: url.trim() }] }); };
+  const onPick = async (e) => {
+    const picked = Array.from(e.target.files || []); e.target.value = ""; if (!picked.length) return;
+    setErr(""); setBusy(true);
+    const added = [];
+    try {
+      for (const file of picked) {
+        if (file.size > 52428800) { setErr(`"${file.name}" is over 50 MB — skipped.`); continue; }
+        const url = await uploadToLibrary(file);
+        added.push({ title: file.name, url, size: file.size, uploaded: true });
+      }
+      if (added.length) onEditData?.({ ...data, files: [...files, ...added] });
+    } catch (e) { setErr(e.message || "Upload failed — please try again."); }
+    setBusy(false);
+  };
   const remove = (i) => onEditData?.({ ...data, files: files.filter((_, j) => j !== i) });
   return (
     <div style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 14, padding: 14 }}>
@@ -2497,15 +2529,22 @@ function LibraryBlock({ data = {}, T, canEdit, onEditData }) {
       <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
         {files.map((f, i) => (
           <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 10, padding: "10px 13px" }}>
-            <span style={{ fontSize: 16 }}>📄</span>
-            <a href={f.url} target="_blank" rel="noopener noreferrer" style={{ flex: 1, fontSize: 13, color: B.white, textDecoration: "none", fontWeight: 600 }}>{f.title}</a>
-            <a href={f.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: T.hi, textDecoration: "none", fontWeight: 700 }}>Open ↗</a>
+            <span style={{ fontSize: 16 }}>{FILE_ICON(f.title, f.url)}</span>
+            <a href={f.url} target="_blank" rel="noopener noreferrer" style={{ flex: 1, fontSize: 13, color: B.white, textDecoration: "none", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.title}{f.size ? <span style={{ color: B.muted, fontWeight: 400 }}> · {(f.size / 1048576).toFixed(f.size > 1048576 ? 1 : 2)} MB</span> : null}</a>
+            <a href={f.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: T.hi, textDecoration: "none", fontWeight: 700 }}>{f.uploaded ? "Download ↓" : "Open ↗"}</a>
             {canEdit && <button onClick={() => remove(i)} title="Remove" style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 13 }}>✕</button>}
           </div>
         ))}
-        {files.length === 0 && <div style={{ fontSize: 12.5, color: B.muted, padding: "10px 0" }}>{canEdit ? "No resources yet — add files & links for your students." : "No resources yet."}</div>}
+        {files.length === 0 && <div style={{ fontSize: 12.5, color: B.muted, padding: "10px 0" }}>{canEdit ? "No resources yet — upload files or add links for your students." : "No resources yet."}</div>}
       </div>
-      {canEdit && <button onClick={add} style={{ marginTop: 10, width: "100%", background: "none", border: `1px dashed ${B.borderMid}`, borderRadius: 10, color: B.mutedMid, padding: "9px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 700 }}>＋ Add a resource (link)</button>}
+      {err && <div style={{ marginTop: 8, fontSize: 11.5, color: "#F87171", lineHeight: 1.5 }}>{err}</div>}
+      {canEdit && (
+        <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+          <input ref={fileRef} type="file" multiple onChange={onPick} style={{ display: "none" }} />
+          <button onClick={() => fileRef.current?.click()} disabled={busy} style={{ flex: "1 1 140px", background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 10, color: T.hi, padding: "9px", cursor: busy ? "default" : "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 700, opacity: busy ? 0.6 : 1 }}>{busy ? "Uploading…" : "📎 Upload files"}</button>
+          <button onClick={addLink} disabled={busy} style={{ flex: "1 1 140px", background: "none", border: `1px dashed ${B.borderMid}`, borderRadius: 10, color: B.mutedMid, padding: "9px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 700 }}>🔗 Add a link</button>
+        </div>
+      )}
     </div>
   );
 }
