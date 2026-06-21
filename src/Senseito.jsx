@@ -163,6 +163,8 @@ const GLOBAL_CSS = `
   @keyframes confettiFall{to{transform:translateY(460px) rotate(540deg);opacity:0}}
   @keyframes popIn{0%{transform:scale(0.6);opacity:0}60%{transform:scale(1.08)}100%{transform:scale(1);opacity:1}}
   *{box-sizing:border-box;margin:0;padding:0}
+  html,body{max-width:100%;overflow-x:hidden}
+  img,iframe,video,svg{max-width:100%}
   textarea,input,select{outline:none}
   textarea::placeholder,input::placeholder{color:#55556E;font-style:italic}
   ::-webkit-scrollbar{width:7px;height:7px}
@@ -3620,6 +3622,11 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const SECTIONS = getSections(school);
   const [tab, setTab] = useState(() => SECTIONS[0]?.id || "mentor");
   const [addSecOpen, setAddSecOpen] = useState(false);
+  const [bodyAddOpen, setBodyAddOpen] = useState(false);
+  // Freestanding "body bricks" that sit between the hero and the sections (any content, any tab).
+  const addBodyBrick = (type) => { setBodyAddOpen(false); onUpdate({ data: { ...school, bodyBricks: [...(school.bodyBricks || []), fallbackBlock(type, { title: school.name }) ] } }); };
+  const removeBodyBrick = (i) => onUpdate({ data: { ...school, bodyBricks: (school.bodyBricks || []).filter((_, j) => j !== i) } });
+  const replaceBodyBrick = (i, nb) => onUpdate({ data: { ...school, bodyBricks: (school.bodyBricks || []).map((b, j) => j === i ? nb : b) } });
   const activeTab = SECTIONS.some(s => s.id === tab) ? tab : SECTIONS[0]?.id; // stay valid if layout changes
   // ── Section management (the "+" between tabs + layout presets) ──
   function addSection(kind) {
@@ -3925,6 +3932,30 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
             </div>
           </div>
 
+          {/* Body bricks — freestanding content between the hero and the sections (shows on every tab) */}
+          {((school.bodyBricks || []).length > 0 || !readOnly) && (
+            <div style={{ display: "flex", flexDirection: "column", gap: dens }}>
+              {(school.bodyBricks || []).map((b, i) => (
+                <div key={i} style={{ position: "relative" }}>
+                  {!readOnly && <button onClick={() => removeBodyBrick(i)} title="Remove block" style={{ position: "absolute", top: 8, left: 8, zIndex: 4, background: "rgba(248,113,113,0.12)", border: "1px solid rgba(248,113,113,0.35)", borderRadius: 8, color: "#F87171", width: 24, height: 22, cursor: "pointer", fontSize: 12, fontFamily: "inherit", lineHeight: 1 }}>✕</button>}
+                  <BrickFrame T={T} school={school} canEdit={!readOnly} blockType={b.type} block={b} ctx={{ title: school.name, concept: flattenText(school.description) }} onReplace={(nb) => replaceBodyBrick(i, nb)}>
+                    <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 16, padding: 16 }}>
+                      <BlockRenderer block={b} T={T} school={school} bus={bus} />
+                    </div>
+                  </BrickFrame>
+                </div>
+              ))}
+              {!readOnly && (bodyAddOpen ? (
+                <div style={{ background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 12, padding: 11, display: "flex", flexWrap: "wrap", gap: 7, alignItems: "center" }}>
+                  <span style={{ fontSize: 11.5, color: B.mutedMid, fontWeight: 700, marginRight: 2 }}>Add a block:</span>
+                  {[["divider", "🔤 Title"], ["callout", "📝 Text"], ["image", "🖼️ Image"], ["video_embed", "▶️ Video"], ["embed", "🔗 Iframe"], ["cta_button", "🔘 Button"]].map(([t, l]) => <button key={t} onClick={() => addBodyBrick(t)} style={{ background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, padding: "7px 11px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit" }}>{l}</button>)}
+                  <button onClick={() => setBodyAddOpen(false)} style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 14, marginLeft: "auto" }}>✕</button>
+                </div>
+              ) : (
+                <button onClick={() => setBodyAddOpen(true)} style={{ background: "none", border: `1px dashed ${B.borderMid}`, borderRadius: 12, color: B.mutedMid, padding: "9px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 700 }}>＋ Add a block here (title, text, image, video…)</button>
+              ))}
+            </div>
+          )}
           {/* Tabs + section content — two-column when navStyle is "sidebar" */}
           <div style={{ display: "flex", flexDirection: sidebar ? "row" : "column", gap: sidebar ? 16 : dens, alignItems: "flex-start" }}>
           <div style={{ position: "sticky", top: 10, zIndex: 80, ...(sidebar ? { width: 200, flexShrink: 0 } : { width: "100%" }) }}>
