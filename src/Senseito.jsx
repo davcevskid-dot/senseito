@@ -1794,11 +1794,11 @@ function BlockShell({ type, sub, passed, children, foot }) {
 // Mentor "generative widget": renders AI-authored SVG/HTML in a locked-down
 // sandboxed iframe (allow-scripts ONLY — no same-origin, so it can't touch the
 // app, cookies or storage). Auto-sizes via a postMessage from inside.
-function MentorWidget({ code, T }) {
+function MentorWidget({ code, T, height }) {
   const ref = useRef(null);
   const [h, setH] = useState(160);
   useEffect(() => {
-    function onMsg(e) { if (ref.current && e.source === ref.current.contentWindow && e.data && e.data.__mw) setH(Math.min(900, Math.max(60, e.data.h + 10))); }
+    function onMsg(e) { if (ref.current && e.source === ref.current.contentWindow && e.data && e.data.__mw) setH(Math.min(2000, Math.max(60, e.data.h + 10))); }
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
   }, []);
@@ -1812,7 +1812,7 @@ function MentorWidget({ code, T }) {
     .replace(/<script\b[^>]*>[\s\S]*?(?:__mw|parent\s*\.\s*postMessage)[\s\S]*?<\/script>/gi, "")
     .replace(/function\s+_r\s*\(\s*\)\s*\{[\s\S]*?setTimeout\(\s*_r\s*,\s*1500\s*\)\s*;?/gi, "");
   const srcDoc = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;padding:0;background:transparent;color:#e7e9f5;font-family:system-ui,-apple-system,sans-serif;font-size:14px}*{box-sizing:border-box}:root{--p:${accent};--a:${accent2}}button{font-family:inherit}</style></head><body>${safe}<script>function _r(){try{parent.postMessage({__mw:1,h:document.documentElement.scrollHeight},'*')}catch(e){}}window.addEventListener('load',_r);try{new ResizeObserver(_r).observe(document.body)}catch(e){}setTimeout(_r,120);setTimeout(_r,600);setTimeout(_r,1500)<\/script></body></html>`;
-  return <iframe ref={ref} title="mentor visual" sandbox="allow-scripts" srcDoc={srcDoc} style={{ width: "100%", height: h, border: `1px solid ${B.border}`, borderRadius: 10, background: B.surface, display: "block", marginTop: 8 }} />;
+  return <iframe ref={ref} title="mentor visual" sandbox="allow-scripts allow-pointer-lock" srcDoc={srcDoc} style={{ width: "100%", height: height || h, border: `1px solid ${B.border}`, borderRadius: 10, background: B.surface, display: "block", marginTop: 8 }} />;
 }
 // Curated visual primitives the mentor fills with simple JSON (```viz). App-
 // rendered → consistent, on-brand, cheap, and safe (no code execution).
@@ -2801,27 +2801,48 @@ function ShowroomBlock({ data = {}, T, school, canEdit, onEditData, disabled }) 
 async function genGame(school, prompt, current) {
   const T = themeFor(school);
   const subject = `${school.name} — ${flattenText(school.description) || school.tagline || ""}`.slice(0, 320);
-  const sys = `You build ONE small, genuinely FUN, self-contained browser mini-game as a single HTML fragment (inline <style> + <script>, vanilla JS only). It must be playable with mouse/touch/keyboard and themed to the school's subject so playing reinforces the topic. RELIABLE game types you do well: a quiz with lives/streak/score, memory match, drag-to-sort or put-in-order, click-the-right-answer beat-the-clock, word scramble, a simple maze, whack-a-mole style, or a branching-choice scenario. HARD RULES: NO external URLs/images/fonts/libraries (it runs sandboxed offline); transparent page background; light text (#e7e9f5); use ${T.p} and ${T.a} as accents; include a clear start, live score/feedback, and a replay button; keep it ~360-460px tall and responsive. Return ONLY the HTML fragment — no markdown fences, no <html>/<head>/<body> wrappers, and NEVER include any postMessage/resize script.`;
+  const sys = `You build ONE small but COMPLETE and FULLY PLAYABLE browser mini-game as a single self-contained HTML fragment (inline <style> + <script>, vanilla JS only), themed to the school's subject so playing reinforces the topic.
+
+GAME TYPES you do reliably (pick ONE and finish it completely): a quiz with lives/streak/score, memory match, drag-to-sort / put-in-order, click-the-right-answer beat-the-clock, word scramble, a simple maze, whack-a-mole style, or a branching-choice scenario.
+
+COMPLETENESS IS THE #1 RULE — the game MUST work end to end:
+- Implement the ENTIRE game loop: start → play (real questions/levels/rounds with actual content) → live score/feedback → win/lose → a working Replay button. No "coming soon", no TODOs, no empty handlers, no placeholders.
+- Every button and control MUST actually do something. The Start button MUST begin gameplay.
+- WIRING (critical): attach behaviour with addEventListener, and put your <script> AFTER the markup so the elements exist. If you instead use inline onclick="fn()" attributes, then every such fn MUST be declared on window (e.g. window.start = function(){…}) — otherwise the buttons silently do nothing. Prefer addEventListener.
+- Self-test mentally: clicking Start advances the screen; answering changes the score; finishing shows a result and Replay restarts. If any step wouldn't work, fix it before returning.
+- Put real subject content in (at least 4-6 questions/items), not lorem ipsum.
+
+STYLE: NO external URLs/images/fonts/libraries (runs sandboxed offline); transparent page background; light text (#e7e9f5); accents ${T.p} and ${T.a}; responsive; ~380-480px tall.
+OUTPUT: ONLY the HTML fragment — no markdown fences, no <html>/<head>/<body> wrappers, and NEVER any postMessage/resize script.`;
   const user = current
-    ? `Here is the CURRENT game HTML:\n${current}\n\nKeep it fully working and apply ONLY this change: ${prompt}`
-    : `Make a game for: ${prompt || "practising this school's key ideas"}\nSubject context: ${subject}`;
-  const code = await api(sys, [{ role: "user", content: user }], 3200);
+    ? `Here is the CURRENT game HTML:\n${current}\n\nKeep it fully working end-to-end and apply ONLY this change: ${prompt}. Return the COMPLETE updated fragment.`
+    : `Make a complete, fully playable game for: ${prompt || "practising this school's key ideas"}\nSubject context: ${subject}`;
+  // Games need real logic → use the stronger model + a generous budget so the code is never truncated.
+  const code = await api(sys, [{ role: "user", content: user }], 8000, "sonnet");
   return String(code).replace(/^```[a-z]*\n?/i, "").replace(/```\s*$/, "").trim();
 }
 function GameBlock({ data = {}, T, school, canEdit, onEditData }) {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false); // "regen" | "iter" | false
+  const h = data.h || 460;
   async function gen(kind) {
     const p = draft.trim(); if ((!p && kind !== "regen") || busy) return;
     setBusy(kind);
     try { const code = await genGame(school, p || data.prompt || "a fun quiz that tests this school's key ideas", kind === "iter" ? data.code : null); onEditData?.({ ...data, prompt: p || data.prompt || "", code }); }
     catch { } setBusy(false);
   }
+  const resize = (ev) => {
+    ev.preventDefault(); const sy = ev.clientY, oh = h;
+    const move = (m) => onEditData?.({ ...data, h: Math.max(240, Math.min(1400, oh + (m.clientY - sy))) });
+    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+  };
   return (
     <div style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 14, padding: 14 }}>
       <div style={{ fontSize: 13, fontWeight: 700, color: B.white, marginBottom: 10 }}>🎮 {data.title || "Game"}</div>
       {data.code
-        ? <MentorWidget code={data.code} T={T} />
+        ? <><MentorWidget code={data.code} T={T} height={h} />
+            {canEdit && <div onPointerDown={resize} title="Drag to resize the game" style={{ height: 14, marginTop: 2, display: "flex", alignItems: "center", justifyContent: "center", cursor: "ns-resize", color: B.muted, fontSize: 11 }}>⇕ drag to resize</div>}</>
         : <div style={{ border: `1px dashed ${B.borderMid}`, borderRadius: 10, padding: "30px 16px", textAlign: "center", color: B.mutedMid, fontSize: 13 }}>{canEdit ? "Describe a game below and generate it." : "Game coming soon."}</div>}
       {canEdit && (
         <div style={{ marginTop: 12, borderTop: `1px solid ${B.border}`, paddingTop: 12 }}>
@@ -3226,8 +3247,12 @@ function isThinBlock(b) {
     default: return false; // trackers, design bricks, garden, review, embed, calculator, image, etc. need no authored body
   }
 }
+// Bricks that manage their own content (own generate/regenerate/iterate/upload UI) — they
+// don't need the generic "✨ Tweak" overlay or the empty-fill card.
+const SELF_EDITING_BRICKS = new Set(["game", "showroom", "library", "events"]);
 function BrickFrame({ children, T, school, ctx, blockType, block, onReplace, canEdit }) {
   const [busy, setBusy] = useState(false);
+  if (SELF_EDITING_BRICKS.has(blockType)) return children;
   // Minimalist schools opt out of empty-detection entirely (deliberate terse content).
   const empty = !school?.minimal && isThinBlock(block || { type: blockType });
   async function generate(instruction) {
