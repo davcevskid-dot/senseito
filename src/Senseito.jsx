@@ -644,6 +644,7 @@ Otherwise return an object with these fields:
 - mentorPersonality (2 sentences), sampleLine (one powerful thing they'd say to a struggling student, in their exact voice)
 - systemVoice: ONLY if voicePreset is custom — 3-4 sentences capturing exactly how they speak, vocabulary, catchphrases, what they'd NEVER say. Else omit.
 - transformation: ONE vivid sentence (a plain STRING, not an object) describing the student's before→after journey
+- soul: a UNIQUE signature centerpiece that makes THIS school feel one-of-a-kind, tailored to its subject — { essence: one short evocative line capturing the school's spirit; signature: a vivid one-sentence description of a bespoke VISUAL/FUNCTIONAL hero element that fits this exact topic (e.g. climbing → "an animated mountain trail where each milestone is a camp on the ascent"; cooking → "a flip-through stack of recipe cards"; astronomy → "a slow-rotating constellation map") — make it specific to the subject, never generic }
 - gamiPreset: one of xp (default), belts (discipline/martial), quest (adventure/story), none
 - layout: best-fit of course | guided | course_toolkit | coach | practice | toolkit | custom
 - sections: ordered array describing the experience — each { kind:"lessons"|"mentor"|"tools"|"dashboard", title (short, subject-flavored, e.g. "Daily Practice"), icon (one emoji), intro (one short line, optional), blockTypes:[2-5 types] (ONLY for dashboard sections — use ONLY the available block types listed in STEP 3, never invent new ones) }. Include a "lessons" section ONLY if you actually provide semesters below.
@@ -1341,19 +1342,37 @@ function BuildProgress({ pct = 0, label = "", facts = [], title = "Building your
               </div>
             </div>
           );
-        })() : (
-          <div style={{ marginTop: 16 }}>
-            {/* Pre-plan: ghost skeletons so something is visibly happening from the very start */}
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {[0, 1, 2, 3].map(i => (
-                <div key={i} style={{ height: 38, borderRadius: 9, background: B.surface2, border: `1px solid ${B.border}`, position: "relative", overflow: "hidden", opacity: 0.6 }}>
-                  <div style={{ position: "absolute", inset: 0, background: `linear-gradient(110deg,transparent 35%,${hexA(ac1, 0.10)} 50%,transparent 65%)`, backgroundSize: "200% 100%", animation: `shimmer 1.6s ${i * 0.15}s linear infinite` }} />
+        })() : (() => {
+          // Pre-plan: the skeleton ASSEMBLES itself piece by piece as the bar creeps, so
+          // something small visibly changes roughly every ~5% even before the plan lands.
+          const sh = (at) => ({ opacity: shown >= at ? 1 : 0, maxHeight: shown >= at ? 200 : 0, transform: shown >= at ? "translateY(0)" : "translateY(8px)", overflow: "hidden", transition: "opacity 0.6s ease, transform 0.6s ease, max-height 0.6s ease" });
+          const shimmer = (delay = 0) => <div style={{ position: "absolute", inset: 0, background: `linear-gradient(110deg,transparent 35%,${hexA(ac1, 0.12)} 50%,transparent 65%)`, backgroundSize: "200% 100%", animation: `shimmer 1.6s ${delay}s linear infinite` }} />;
+          const ghostLine = (w, h = 12, mt = 0) => <div style={{ width: w, height: h, marginTop: mt, borderRadius: 6, background: B.surface3, position: "relative", overflow: "hidden" }}>{shimmer()}</div>;
+          return (
+            <div style={{ marginTop: 16 }}>
+              {/* ghost school card forms first */}
+              <div style={{ background: B.surface2, border: `1px solid ${hexA(ac1, 0.28)}`, borderRadius: 12, padding: "13px 15px", marginBottom: 10 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <div style={{ ...sh(6), width: 30, height: 30, borderRadius: 9, background: B.surface3, position: "relative", overflow: "hidden", flex: "0 0 auto" }}>{shimmer()}</div>
+                  <div style={{ flex: 1 }}>{shown >= 6 && ghostLine("62%", 13)}{shown >= 11 && ghostLine("40%", 9, 7)}</div>
                 </div>
-              ))}
+                <div style={{ ...sh(16), display: "flex", gap: 6, marginTop: 11 }}>
+                  {[34, 48, 40, 30].map((w, i) => <div key={i} style={{ width: w, height: 18, borderRadius: 100, background: B.surface3, position: "relative", overflow: "hidden", opacity: shown >= 16 + i * 3 ? 1 : 0.25, transition: "opacity 0.5s ease" }}>{shimmer(i * 0.12)}</div>)}
+                </div>
+              </div>
+              {/* ghost lesson rows reveal one by one */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {[21, 25, 29].map((at, i) => (
+                  <div key={i} style={{ ...sh(at), height: 38, borderRadius: 9, background: B.surface2, border: `1px solid ${B.border}`, position: "relative", display: "flex", alignItems: "center", gap: 9, padding: "0 11px" }}>
+                    <div style={{ width: 16, height: 16, borderRadius: 5, background: B.surface3, position: "relative", overflow: "hidden", flex: "0 0 auto" }}>{shimmer(i * 0.1)}</div>
+                    {ghostLine(`${55 - i * 8}%`, 11)}
+                  </div>
+                ))}
+              </div>
+              {facts.length > 0 && <div key={fi} style={{ marginTop: 12, background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 11, padding: "12px 14px", fontSize: 13, color: B.white, lineHeight: 1.5, animation: "fadeUp 0.5s ease" }}>💡 {facts[fi]}</div>}
             </div>
-            {facts.length > 0 && <div key={fi} style={{ marginTop: 12, background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 11, padding: "12px 14px", fontSize: 13, color: B.white, lineHeight: 1.5, animation: "fadeUp 0.5s ease" }}>💡 {facts[fi]}</div>}
-          </div>
-        )}
+          );
+        })()}
         <div style={{ fontSize: 11.5, color: B.muted, marginTop: 14, textAlign: "center" }}>Richer schools take a minute or two — please keep this tab open, it’s worth the wait.</div>
       </div>
     </div>
@@ -2543,6 +2562,39 @@ Compose 3-6 elements into ONE beautiful, balanced, readable slide (light text on
     ? `Here is the CURRENT slide JSON:\n${JSON.stringify({ bg: current.bg, els: current.els })}\n\nApply ONLY this change and return the FULL updated JSON, preserving every element and property you were NOT asked to change (same "id"s, positions, text, styles): ${prompt}`
     : `Design this slide: ${prompt}`;
   return apiJSON(sys, [{ role: "user", content: user }], 2000);
+}
+
+// The school's "soul": a bespoke signature centerpiece, generated as a self-contained themed
+// HTML fragment unique to the subject. Rendered (read-only) via the sanitized MentorWidget.
+async function genSignature(school) {
+  const T = themeFor(school);
+  const subject = `${school.name} — ${flattenText(school.description) || school.tagline || ""}`.slice(0, 320);
+  const idea = school.soul?.signature || `a unique visual centerpiece that instantly captures the essence of ${school.name}`;
+  const sys = `You craft ONE bespoke, premium "signature" centerpiece for a learning school — a self-contained HTML fragment (inline <style> + an optional gentle <script> animation). It must feel UNIQUELY tailored to the subject: a glance should evoke the topic. HARD RULES: NO external URLs/images/fonts/scripts (it runs sandboxed offline); transparent background; light text (#e7e9f5); use ${T.p} and ${T.a} as accent colors; ~180-260px tall, responsive, centered, tasteful (elegant, not cluttered). Return ONLY the HTML fragment — no markdown fences, no <html>/<head>/<body> wrappers, and NEVER include any postMessage/resize script.`;
+  const code = await api(sys, [{ role: "user", content: `Subject: ${subject}\nSignature idea: ${idea}` }], 1700);
+  return String(code).replace(/^```[a-z]*\n?/i, "").replace(/```\s*$/, "").trim();
+}
+function SignaturePanel({ school, T, canEdit, onUpdate }) {
+  const soul = school.soul || null;
+  const [busy, setBusy] = useState(false);
+  async function regen() {
+    setBusy(true);
+    try { const code = await genSignature(school); onUpdate({ data: { ...school, soul: { ...(soul || {}), code } } }); } catch { } setBusy(false);
+  }
+  if (!soul?.code) {
+    if (!canEdit) return null;
+    return <div style={{ textAlign: "center" }}><button onClick={regen} disabled={busy} style={{ background: "none", border: `1px dashed ${T.ba}`, borderRadius: 14, color: T.hi, padding: "11px 16px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 700, opacity: busy ? 0.6 : 1 }}>{busy ? "Crafting your school's signature…" : "✨ Add a signature centerpiece"}</button></div>;
+  }
+  return (
+    <div style={{ position: "relative", background: B.surface, border: `1px solid ${B.border}`, borderRadius: 16, padding: 16 }}>
+      {soul.essence && <div style={{ fontSize: 12.5, color: T.hi, fontStyle: "italic", textAlign: "center", marginBottom: 6 }}>{soul.essence}</div>}
+      <MentorWidget code={soul.code} T={T} />
+      {canEdit && <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 8 }}>
+        <button onClick={regen} disabled={busy} style={{ background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "5px 11px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit", fontWeight: 700, opacity: busy ? 0.6 : 1 }}>{busy ? "…" : "↻ Regenerate"}</button>
+        <button onClick={() => onUpdate({ data: { ...school, soul: { ...soul, code: undefined } } })} style={{ background: "none", border: "1px solid rgba(248,113,113,0.3)", borderRadius: 8, color: "#F87171", padding: "5px 11px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit", fontWeight: 700 }}>✕ Remove</button>
+      </div>}
+    </div>
+  );
 }
 
 function ShowroomEl({ e, T, selected, editMode, onSelect, onChange, onEditText, editingText }) {
@@ -4456,6 +4508,9 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
             </div>
           </div>
 
+          {/* The school's signature centerpiece — its unique "soul" */}
+          {(school.soul?.code || !readOnly) && <SignaturePanel school={school} T={T} canEdit={!readOnly} onUpdate={onUpdate} />}
+
           {/* Body bricks — freestanding content between the hero and the sections (shows on every tab) */}
           {((school.bodyBricks || []).length > 0 || !readOnly) && (
             <div style={{ display: "flex", flexDirection: "column", gap: dens }}>
@@ -4667,7 +4722,10 @@ function Home({ onCreated }) {
       // PHASE 2 — author block data per semester (parallel, budgeted, graceful fallback).
       const facts = schoolFacts(content);
       setProg({ pct: 30, label: `Writing the lessons for “${content.name}”…`, facts, preview: content });
+      // Give the school its "soul" — a bespoke signature centerpiece — in parallel with lesson authoring.
+      const soulP = genSignature(content).then(code => { content.soul = { ...(content.soul || {}), code }; }).catch(() => { });
       await fillSchoolBlocks(content, { dna, onProgress: (d, t) => setProg(p => ({ ...p, pct: 30 + Math.round((d / t) * 64), label: `Authoring activities… (${d}/${t} done)` })) });
+      await soulP;
       autoFixSchool(content); // deterministic self-review so the one-shot feels finished
       const built = composeSchool(content, dna);
       setProg(p => ({ ...p, pct: 100, label: "Your school is ready! ✨" })); // completion beat
