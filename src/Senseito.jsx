@@ -1191,6 +1191,8 @@ function BuildProgress({ pct = 0, label = "", facts = [], title = "Building your
   useEffect(() => { if (!facts.length) return; setFi(0); const id = setInterval(() => setFi(i => (i + 1) % facts.length), 2900); return () => clearInterval(id); }, [facts.length]);
   const shown = Math.min(100, Math.round(disp));
   const eta = pct >= 100 ? "Done!" : shown < 35 ? "about a minute or two" : shown < 75 ? "under a minute" : "almost there";
+  const PT = preview ? themeFor(preview) : null; // tint the loader with the school's own theme → smooth hand-off
+  const ac1 = PT?.p || "#7C3AED", ac2 = PT?.a || "#06B6D4";
   return (
     <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 18, padding: "34px 30px", position: "relative", overflow: "hidden" }}>
       <div style={{ position: "absolute", inset: 0, background: "linear-gradient(110deg,transparent 30%,rgba(124,58,237,0.07) 50%,transparent 70%)", backgroundSize: "200% 100%", animation: "shimmer 1.8s linear infinite" }} />
@@ -1205,28 +1207,32 @@ function BuildProgress({ pct = 0, label = "", facts = [], title = "Building your
           </div>
         </div>
         <div style={{ height: 9, borderRadius: 6, background: B.surface2, overflow: "hidden", border: `1px solid ${B.border}` }}>
-          <div style={{ height: "100%", width: `${shown}%`, borderRadius: 6, background: "linear-gradient(90deg,#7C3AED,#06B6D4)", transition: "width 0.3s ease" }} />
+          <div style={{ height: "100%", width: `${shown}%`, borderRadius: 6, background: `linear-gradient(90deg,${ac1},${ac2})`, transition: "width 0.3s ease" }} />
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: B.muted, marginTop: 7 }}>
           <span>{shown}%</span><span>{eta}</span>
         </div>
         {preview ? (() => {
           const lessons = (preview.semesters || []).flatMap(s => s.lessons || []);
-          const ready = Math.max(0, Math.min(lessons.length, Math.round(((shown - 30) / 64) * lessons.length)));
+          const allDone = pct >= 100;
+          const ready = allDone ? lessons.length : Math.max(0, Math.min(lessons.length, Math.round(((shown - 30) / 64) * lessons.length)));
           const mentorName = preview.mentorName || preview.mentor?.name;
           const secs = [...new Set((preview.sections || []).map(s => s.title || SECTION_META[s.kind]?.title).filter(Boolean))];
           return (
             <div style={{ marginTop: 16 }}>
-              <div style={{ background: B.surface2, border: "1px solid rgba(124,58,237,0.3)", borderRadius: 12, padding: "13px 15px", marginBottom: 10, animation: "fadeUp 0.5s ease" }}>
+              <div style={{ background: B.surface2, border: `1px solid ${hexA(ac1, 0.35)}`, borderRadius: 12, padding: "13px 15px", marginBottom: 10, animation: "fadeUp 0.5s ease" }}>
                 <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 16, fontWeight: 700, color: B.white }}>{preview.emoji || "🎓"} {preview.name}</div>
-                {preview.tagline && <div style={{ fontSize: 12, color: "#A78BFA", marginTop: 2, fontStyle: "italic" }}>{preview.tagline}</div>}
+                {preview.tagline && <div style={{ fontSize: 12, color: ac1, marginTop: 2, fontStyle: "italic" }}>{preview.tagline}</div>}
                 {mentorName && <div style={{ fontSize: 12, color: B.mutedMid, marginTop: 4 }}>Mentor: {mentorName}</div>}
-                {secs.length > 0 && <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 9 }}>{secs.map((s, i) => <span key={i} style={{ fontSize: 11, color: "#A78BFA", background: "rgba(124,58,237,0.12)", border: "1px solid rgba(124,58,237,0.3)", borderRadius: 100, padding: "2px 9px", animation: "fadeUp 0.4s ease backwards", animationDelay: `${i * 60}ms` }}>{s}</span>)}</div>}
+                {secs.length > 0 && <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 9 }}>{secs.map((s, i) => <span key={i} style={{ fontSize: 11, color: ac1, background: hexA(ac1, 0.12), border: `1px solid ${hexA(ac1, 0.3)}`, borderRadius: 100, padding: "2px 9px", animation: "fadeUp 0.4s ease backwards", animationDelay: `${i * 60}ms` }}>{s}</span>)}</div>}
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 7 }}>
+                <span style={{ fontSize: 11.5, fontWeight: 700, color: allDone ? "#4ADE80" : B.mutedMid }}>{allDone ? `✨ ${lessons.length} lesson${lessons.length !== 1 ? "s" : ""} ready — opening your school…` : `Writing your lessons — ${ready} of ${lessons.length} ready`}</span>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 {lessons.slice(0, 9).map((l, i) => { const done = i < ready; return (
                   <div key={i} style={{ display: "flex", alignItems: "center", gap: 9, background: B.surface2, border: `1px solid ${done ? "rgba(74,222,128,0.3)" : B.border}`, borderRadius: 9, padding: "8px 11px", position: "relative", overflow: "hidden", opacity: done ? 1 : 0.6, transition: "border-color 0.4s, opacity 0.4s" }}>
-                    {!done && <div style={{ position: "absolute", inset: 0, background: "linear-gradient(110deg,transparent 35%,rgba(124,58,237,0.10) 50%,transparent 65%)", backgroundSize: "200% 100%", animation: "shimmer 1.6s linear infinite" }} />}
+                    {!done && <div style={{ position: "absolute", inset: 0, background: `linear-gradient(110deg,transparent 35%,${hexA(ac1, 0.10)} 50%,transparent 65%)`, backgroundSize: "200% 100%", animation: "shimmer 1.6s linear infinite" }} />}
                     <span style={{ fontSize: 13, position: "relative" }}>{done ? "✅" : "✍️"}</span>
                     <span style={{ fontSize: 12.5, color: B.white, position: "relative", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{l.title}</span>
                     <span style={{ marginLeft: "auto", fontSize: 10.5, color: done ? "#4ADE80" : B.muted, position: "relative", whiteSpace: "nowrap" }}>{done ? "ready" : "writing…"}</span>
@@ -1236,9 +1242,17 @@ function BuildProgress({ pct = 0, label = "", facts = [], title = "Building your
               </div>
             </div>
           );
-        })() : facts.length > 0 && (
-          <div key={fi} style={{ marginTop: 18, background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 11, padding: "12px 14px", fontSize: 13, color: B.white, lineHeight: 1.5, animation: "fadeUp 0.5s ease" }}>
-            💡 {facts[fi]}
+        })() : (
+          <div style={{ marginTop: 16 }}>
+            {/* Pre-plan: ghost skeletons so something is visibly happening from the very start */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {[0, 1, 2, 3].map(i => (
+                <div key={i} style={{ height: 38, borderRadius: 9, background: B.surface2, border: `1px solid ${B.border}`, position: "relative", overflow: "hidden", opacity: 0.6 }}>
+                  <div style={{ position: "absolute", inset: 0, background: `linear-gradient(110deg,transparent 35%,${hexA(ac1, 0.10)} 50%,transparent 65%)`, backgroundSize: "200% 100%", animation: `shimmer 1.6s ${i * 0.15}s linear infinite` }} />
+                </div>
+              ))}
+            </div>
+            {facts.length > 0 && <div key={fi} style={{ marginTop: 12, background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 11, padding: "12px 14px", fontSize: 13, color: B.white, lineHeight: 1.5, animation: "fadeUp 0.5s ease" }}>💡 {facts[fi]}</div>}
           </div>
         )}
         <div style={{ fontSize: 11.5, color: B.muted, marginTop: 14, textAlign: "center" }}>Richer schools take a minute or two — please keep this tab open, it’s worth the wait.</div>
@@ -4038,9 +4052,11 @@ function Home({ onCreated }) {
       const facts = schoolFacts(content);
       setProg({ pct: 30, label: `Writing the lessons for “${content.name}”…`, facts, preview: content });
       await fillSchoolBlocks(content, { dna, onProgress: (d, t) => setProg(p => ({ ...p, pct: 30 + Math.round((d / t) * 64), label: `Authoring activities… (${d}/${t} done)` })) });
-      setProg(p => ({ ...p, pct: 100, label: "Reviewing & finishing up…" }));
       autoFixSchool(content); // deterministic self-review so the one-shot feels finished
-      onCreated(composeSchool(content, dna));
+      const built = composeSchool(content, dna);
+      setProg(p => ({ ...p, pct: 100, label: "Your school is ready! ✨" })); // completion beat
+      await new Promise(r => setTimeout(r, 900)); // let the "ready" moment land before opening
+      onCreated(built);
     } catch (e) { setError(e.message || "Build failed — try again."); setPhase("error"); }
   }
 
