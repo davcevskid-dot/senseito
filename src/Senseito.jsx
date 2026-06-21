@@ -389,6 +389,9 @@ const BLOCK_META = {
   review:              { label: "Spaced Review",       icon: "🔁", cat: "Knowledge" },
   garden:              { label: "Mindset Garden",      icon: "🌱", cat: "Knowledge" },
   notebook:            { label: "Notebook",            icon: "📓", cat: "Knowledge" },
+  showroom:            { label: "Showroom",            icon: "🎬", cat: "Media" },
+  library:             { label: "Library",             icon: "📚", cat: "Media" },
+  events:              { label: "Events",              icon: "📅", cat: "Community" },
   match_pairs:         { label: "Match Pairs",         icon: "🔀", cat: "Game" },
   fill_blank:          { label: "Fill the Blank",      icon: "✏️", cat: "Game" },
   order_words:         { label: "Word Order",          icon: "🔤", cat: "Game" },
@@ -439,6 +442,9 @@ Every block's data MAY include "concepts": [concept ids from the school's concep
 - order_words: { prompt (what to say, e.g. "Say: I am learning"), answer:[words IN CORRECT ORDER] } — sentence-building game (words are shuffled for the learner).
 - garden: { title?:"..." } — Mindset Garden: limiting beliefs the mentor captures appear as weeds the learner reframes (with AI) into flowers. No content needed. Ideal as a dashboard section for coaching, mindset, sales, therapy, confidence schools.
 - notebook: { title?, prompt? } — a real free-write space the learner types into and that auto-saves. Use this (NOT a reading block) whenever the section is for the learner to capture notes/thoughts/journal. No body content needed.
+- showroom: { title? } — an AI-generated animated slide deck the creator builds (each slide cached); students watch. No content needed up front.
+- library: { title? } — a list of downloadable resources / links the creator curates. No content needed up front.
+- events: { title? } — upcoming live sessions / webinars / calls with per-student RSVP. No content needed up front.
 - reading_plain: { content (markdown), image?:"https… optional top image" }
 - video_embed: { url, title }
 - embed: { url, title, height? } — embeds an external resource (Google Drive file/folder, Google Docs/Sheets/Slides, Figma, a PDF, or any https page). Use this for "connect Google Drive", "attach a doc", "embed a figma", external reference material. If you don't have a real URL, OMIT this block (or leave url empty — it shows a "needs setup" prompt) rather than inventing one.
@@ -1487,7 +1493,7 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, canEdit, onUpda
                 );
                 return (
                   <BrickFrame key={i} T={T} school={school} canEdit={canEdit} blockType={blk.type} block={blk} ctx={{ title: lesson.title, concept: lesson.concept }} onReplace={(nb) => replaceLessonBlock(i, nb)}>
-                    <BlockRenderer block={blk} T={T} school={school} bus={bus} onOutput={(o) => { setOutputs(s => ({ ...s, [i]: o })); onIngest?.({ title: blk.data?.title || lesson.title, lessonId: lesson.number, concepts: blk.data?.concepts }, o); }} />
+                    <BlockRenderer block={blk} T={T} school={school} bus={bus} canEdit={canEdit} onEditData={(nd) => replaceLessonBlock(i, { ...blk, data: nd })} onOutput={(o) => { setOutputs(s => ({ ...s, [i]: o })); onIngest?.({ title: blk.data?.title || lesson.title, lessonId: lesson.number, concepts: blk.data?.concepts }, o); }} />
                   </BrickFrame>
                 );
               })}
@@ -2415,6 +2421,108 @@ function StatGridBlock({ data = {}, T, school, bus }) {
   </div>);
 }
 
+// ── SHOWROOM — creator builds an AI-generated, animated slide deck; each slide's
+// HTML is SAVED (cached), so students just watch — no regeneration, no AI cost. ──
+async function genShowroomSlide(school, prompt) {
+  const T = themeFor(school);
+  const sys = `You design ONE beautiful presentation slide as a SELF-CONTAINED HTML fragment (inline <style> and <script> allowed; gentle CSS animations welcome). HARD RULES: NO external URLs/images/fonts/scripts — it runs sandboxed offline; transparent background; light text (#e7e9f5); large, readable, well-centered content; use ${T.p} and ${T.a} as accent colors. Make it feel premium and alive. Return ONLY the HTML — no markdown fences.`;
+  const code = await api(sys, [{ role: "user", content: `Slide: ${prompt}` }], 1800);
+  return String(code).replace(/^```[a-z]*\n?/i, "").replace(/```\s*$/, "").trim();
+}
+function ShowroomBlock({ data = {}, T, school, canEdit, onEditData, disabled }) {
+  const slides = data.slides || [];
+  const [i, setI] = useState(0);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const cur = slides[Math.min(i, Math.max(0, slides.length - 1))];
+  const save = (next, goTo) => { onEditData?.({ ...data, slides: next }); if (goTo != null) setI(goTo); };
+  async function generate() {
+    const p = draft.trim(); if (!p || busy) return; setBusy(true);
+    try { const code = await genShowroomSlide(school, p); const next = [...slides]; next[i] = { prompt: p, code }; save(next); }
+    catch { } setBusy(false);
+  }
+  const addSlide = () => { const next = [...slides, { prompt: "", code: "" }]; save(next, next.length - 1); setDraft(""); };
+  const delSlide = () => { const next = slides.filter((_, j) => j !== i); save(next, Math.max(0, i - 1)); };
+  return (
+    <div style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 14, padding: 14 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: B.white, marginBottom: 10 }}>🎬 {data.title || "Showroom"}</div>
+      {slides.length === 0 && !canEdit && <div style={{ fontSize: 13, color: B.muted, textAlign: "center", padding: "20px 0" }}>No slides yet.</div>}
+      {cur?.code ? <MentorWidget code={cur.code} T={T} /> : (slides.length > 0 && <div style={{ border: `1px dashed ${B.borderMid}`, borderRadius: 10, padding: "26px 16px", textAlign: "center", color: B.mutedMid, fontSize: 13 }}>{canEdit ? "Write a prompt below and Generate this slide." : "Slide coming soon."}</div>)}
+      {slides.length > 0 && <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 14, marginTop: 10 }}>
+        <button onClick={() => setI(Math.max(0, i - 1))} disabled={i === 0} style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.white, width: 30, height: 28, cursor: "pointer", opacity: i === 0 ? 0.4 : 1 }}>◀</button>
+        <span style={{ fontSize: 12, color: B.mutedMid }}>{Math.min(i + 1, slides.length)} / {slides.length}</span>
+        <button onClick={() => setI(Math.min(slides.length - 1, i + 1))} disabled={i >= slides.length - 1} style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.white, width: 30, height: 28, cursor: "pointer", opacity: i >= slides.length - 1 ? 0.4 : 1 }}>▶</button>
+      </div>}
+      {canEdit && <div style={{ marginTop: 12, borderTop: `1px solid ${B.border}`, paddingTop: 12 }}>
+        <textarea value={draft || cur?.prompt || ""} onChange={e => setDraft(e.target.value)} placeholder='Describe slide… e.g. "Title slide: The Water Cycle, with 3 animated droplets"' rows={2} style={{ width: "100%", background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, fontFamily: "inherit", fontSize: 12.5, padding: "8px 11px", resize: "vertical" }} />
+        <div style={{ display: "flex", gap: 7, marginTop: 8, flexWrap: "wrap" }}>
+          {slides.length === 0 && <button onClick={() => { addSlide(); }} style={{ ...pBtn(T), opacity: 1 }}>＋ First slide</button>}
+          {slides.length > 0 && <button onClick={generate} disabled={busy} style={{ ...pBtn(T), opacity: busy ? 0.6 : 1 }}>{busy ? "Generating…" : (cur?.code ? "↻ Regenerate" : "✨ Generate slide")}</button>}
+          {slides.length > 0 && <button onClick={addSlide} style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, padding: "9px 13px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit" }}>＋ Add slide</button>}
+          {slides.length > 0 && <button onClick={delSlide} style={{ background: "none", border: "1px solid rgba(248,113,113,0.3)", borderRadius: 9, color: "#F87171", padding: "9px 13px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit" }}>Delete slide</button>}
+        </div>
+        <div style={{ fontSize: 11, color: B.muted, marginTop: 7 }}>Slides are saved once generated — students just watch, nothing regenerates.</div>
+      </div>}
+    </div>
+  );
+}
+// ── LIBRARY — creator-curated downloadable resources / links ──
+function LibraryBlock({ data = {}, T, canEdit, onEditData }) {
+  const files = data.files || [];
+  const add = () => { const title = window.prompt("Resource title:"); if (!title) return; const url = window.prompt("URL (https — Drive, PDF, Doc, anything):"); if (!url || !/^https?:\/\//i.test(url.trim())) return; onEditData?.({ ...data, files: [...files, { title: title.trim(), url: url.trim() }] }); };
+  const remove = (i) => onEditData?.({ ...data, files: files.filter((_, j) => j !== i) });
+  return (
+    <div style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 14, padding: 14 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: B.white, marginBottom: 10 }}>📚 {data.title || "Library"}</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+        {files.map((f, i) => (
+          <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 10, padding: "10px 13px" }}>
+            <span style={{ fontSize: 16 }}>📄</span>
+            <a href={f.url} target="_blank" rel="noopener noreferrer" style={{ flex: 1, fontSize: 13, color: B.white, textDecoration: "none", fontWeight: 600 }}>{f.title}</a>
+            <a href={f.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: T.hi, textDecoration: "none", fontWeight: 700 }}>Open ↗</a>
+            {canEdit && <button onClick={() => remove(i)} title="Remove" style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 13 }}>✕</button>}
+          </div>
+        ))}
+        {files.length === 0 && <div style={{ fontSize: 12.5, color: B.muted, padding: "10px 0" }}>{canEdit ? "No resources yet — add files & links for your students." : "No resources yet."}</div>}
+      </div>
+      {canEdit && <button onClick={add} style={{ marginTop: 10, width: "100%", background: "none", border: `1px dashed ${B.borderMid}`, borderRadius: 10, color: B.mutedMid, padding: "9px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 700 }}>＋ Add a resource (link)</button>}
+    </div>
+  );
+}
+// ── EVENTS — upcoming lives / webinars / calls, with per-student RSVP ──
+function EventsBlock({ data = {}, T, canEdit, onEditData, state, onState }) {
+  const events = data.events || [];
+  const rsvp = state?.rsvp || {};
+  const toggleRsvp = (i) => onState?.({ rsvp: { ...rsvp, [i]: !rsvp[i] } });
+  const add = () => { const title = window.prompt("Event title (e.g. Live Q&A):"); if (!title) return; const when = window.prompt("When (e.g. Fri Jun 20, 6pm PT):") || ""; const url = window.prompt("Join link (Zoom/Meet URL):") || ""; onEditData?.({ ...data, events: [...events, { title: title.trim(), when: when.trim(), url: url.trim() }] }); };
+  const remove = (i) => onEditData?.({ ...data, events: events.filter((_, j) => j !== i) });
+  return (
+    <div style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 14, padding: 14 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: B.white, marginBottom: 10 }}>📅 {data.title || "Upcoming live sessions"}</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {events.map((e, i) => (
+          <div key={i} style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 11, padding: "11px 13px" }}>
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 700, color: B.white }}>{e.title}</div>
+                {e.when && <div style={{ fontSize: 12, color: T.a, marginTop: 2 }}>🕒 {e.when}</div>}
+                {e.desc && <div style={{ fontSize: 12, color: B.mutedMid, marginTop: 4, lineHeight: 1.5 }}>{e.desc}</div>}
+              </div>
+              {canEdit && <button onClick={() => remove(i)} title="Remove" style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 13, flexShrink: 0 }}>✕</button>}
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 9, flexWrap: "wrap" }}>
+              <button onClick={() => toggleRsvp(i)} style={{ background: rsvp[i] ? "rgba(74,222,128,0.12)" : T.ps, border: `1px solid ${rsvp[i] ? "rgba(74,222,128,0.4)" : T.ba}`, borderRadius: 8, color: rsvp[i] ? "#4ADE80" : T.hi, padding: "6px 13px", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>{rsvp[i] ? "✓ You're going" : "RSVP"}</button>
+              {/^https?:\/\//i.test(e.url || "") && <a href={e.url} target="_blank" rel="noopener noreferrer" style={{ background: T.grad, color: "white", borderRadius: 8, padding: "6px 14px", fontSize: 12.5, fontWeight: 700, textDecoration: "none" }}>Join ↗</a>}
+            </div>
+          </div>
+        ))}
+        {events.length === 0 && <div style={{ fontSize: 12.5, color: B.muted, padding: "10px 0" }}>{canEdit ? "No events yet — add upcoming lives, webinars or calls." : "No upcoming sessions yet."}</div>}
+      </div>
+      {canEdit && <button onClick={add} style={{ marginTop: 10, width: "100%", background: "none", border: `1px dashed ${B.borderMid}`, borderRadius: 10, color: B.mutedMid, padding: "9px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 700 }}>＋ Add an event</button>}
+    </div>
+  );
+}
+
 // ── GAME BRICKS (Duolingo-style — vocabulary, grammar, sentence building) ──
 function MatchPairsBlock({ data = {}, onOutput, T, disabled }) {
   const pairs = (data.pairs || []).slice(0, 8);
@@ -2662,7 +2770,7 @@ const BLOCK_COMPONENTS = {
   image_gate: ImageGateBlock, video_gate: VideoGateBlock,
   reading_plain: ReadingPlainBlock, video_embed: VideoEmbedBlock, embed: EmbedBlock, quiz: QuizBlock, calculator: CalculatorBlock,
   divider: DividerBlock, callout: CalloutBlock, image: ImageBlock, cta_button: CtaButtonBlock, stat_grid: StatGridBlock,
-  review: ReviewBlock, garden: GardenBlock, notebook: NotebookBlock, match_pairs: MatchPairsBlock, fill_blank: FillBlankBlock, order_words: OrderWordsBlock, custom: CustomBlock,
+  review: ReviewBlock, garden: GardenBlock, notebook: NotebookBlock, showroom: ShowroomBlock, library: LibraryBlock, events: EventsBlock, match_pairs: MatchPairsBlock, fill_blank: FillBlankBlock, order_words: OrderWordsBlock, custom: CustomBlock,
 };
 // Concepts the learner is currently weak on that THIS brick teaches/tests.
 function weakLabelsFor(bus, school, concepts) {
@@ -2680,7 +2788,7 @@ function FocusBanner({ labels, T }) {
     </div>
   );
 }
-function BlockRenderer({ block, onOutput, T, disabled, state, onState, school, bus }) {
+function BlockRenderer({ block, onOutput, T, disabled, state, onState, school, bus, canEdit, onEditData }) {
   const Comp = BLOCK_COMPONENTS[block?.type];
   if (!Comp) return <div style={{ fontSize: 12, color: B.muted, padding: 14, border: `1px dashed ${B.borderMid}`, borderRadius: 12 }}>Unknown block: {block?.type}</div>;
   const isDesign = BLOCK_META[block?.type]?.cat === "Design"; // dividers/images etc. never show learner hints
@@ -2688,7 +2796,7 @@ function BlockRenderer({ block, onOutput, T, disabled, state, onState, school, b
   return (
     <Boundary fallback={() => <div style={{ fontSize: 12.5, color: "#F87171", padding: 14, border: "1px solid rgba(248,113,113,0.3)", borderRadius: 12 }}>⚠️ This {BLOCK_META[block.type]?.label || block.type} activity couldn't load. Try editing or regenerating it.</div>}>
       <FocusBanner labels={focus} T={T} />
-      <Comp data={block.data || {}} onOutput={onOutput} T={T} disabled={disabled} state={state} onState={onState} school={school} bus={bus} />
+      <Comp data={block.data || {}} onOutput={onOutput} T={T} disabled={disabled} state={state} onState={onState} school={school} bus={bus} canEdit={canEdit} onEditData={onEditData} />
     </Boundary>
   );
 }
@@ -3068,7 +3176,7 @@ function DashboardSection({ section, rec, T, onUpdate, readOnly, school, onInges
   const spanCss = (b) => b?.span === "full" ? "1 / -1" : b?.span === 2 ? "span 2" : "auto";
   const spanLabel = (b) => b?.span === "full" ? "▭" : b?.span === 2 ? "2" : "1";
   const setCols = (n) => mutateSection(s => ({ ...s, cols: n }));
-  const ADDABLE = [["divider", "🔤 Title / Divider"], ["callout", "📝 Text"], ["image", "🖼️ Image"], ["video_embed", "▶️ Video URL"], ["embed", "🔗 Iframe / Embed"], ["cta_button", "🔘 Button"], ["notebook", "📓 Notebook"], ["stat_grid", "📊 Stat grid"], ["habit_checker", "✅ Habit checker"], ["metric_tracker", "📈 Metric tracker"], ["review", "🔁 Spaced review"], ["garden", "🌱 Mindset garden"]];
+  const ADDABLE = [["divider", "🔤 Title / Divider"], ["callout", "📝 Text"], ["image", "🖼️ Image"], ["video_embed", "▶️ Video URL"], ["embed", "🔗 Iframe / Embed"], ["cta_button", "🔘 Button"], ["notebook", "📓 Notebook"], ["showroom", "🎬 Showroom"], ["library", "📚 Library"], ["events", "📅 Events"], ["stat_grid", "📊 Stat grid"], ["habit_checker", "✅ Habit checker"], ["metric_tracker", "📈 Metric tracker"], ["review", "🔁 Spaced review"], ["garden", "🌱 Mindset garden"]];
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       {section.intro && <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: "14px 20px", fontSize: 13, color: B.mutedMid, lineHeight: 1.6 }}>{section.intro}</div>}
@@ -3091,7 +3199,7 @@ function DashboardSection({ section, rec, T, onUpdate, readOnly, school, onInges
             </div>}
             <BrickFrame T={T} school={school} canEdit={!readOnly} blockType={b.type} block={b} ctx={{ title: section.title, concept: section.intro }} onReplace={(nb) => replaceBlock(i, nb)}>
               <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 16, padding: 16, animation: "fadeUp 0.4s ease backwards", animationDelay: `${Math.min(i, 8) * 55}ms` }}>
-                <BlockRenderer block={b} T={T} school={school} bus={rec.toolStates?.__bus} state={stateFor(i)} onState={(s) => setStateFor(i, s)} onOutput={(o) => onIngest?.({ title: section.title, concepts: b.data?.concepts }, o)} />
+                <BlockRenderer block={b} T={T} school={school} bus={rec.toolStates?.__bus} state={stateFor(i)} onState={(s) => setStateFor(i, s)} onOutput={(o) => onIngest?.({ title: section.title, concepts: b.data?.concepts }, o)} canEdit={!readOnly} onEditData={(nd) => replaceBlock(i, { ...b, data: nd })} />
               </div>
             </BrickFrame>
           </div>
@@ -3950,7 +4058,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
                   {!readOnly && <button onClick={() => removeBodyBrick(i)} title="Remove block" style={{ position: "absolute", top: 8, left: 8, zIndex: 4, background: "rgba(248,113,113,0.12)", border: "1px solid rgba(248,113,113,0.35)", borderRadius: 8, color: "#F87171", width: 24, height: 22, cursor: "pointer", fontSize: 12, fontFamily: "inherit", lineHeight: 1 }}>✕</button>}
                   <BrickFrame T={T} school={school} canEdit={!readOnly} blockType={b.type} block={b} ctx={{ title: school.name, concept: flattenText(school.description) }} onReplace={(nb) => replaceBodyBrick(i, nb)}>
                     <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 16, padding: 16 }}>
-                      <BlockRenderer block={b} T={T} school={school} bus={bus} />
+                      <BlockRenderer block={b} T={T} school={school} bus={bus} canEdit={!readOnly} onEditData={(nd) => replaceBodyBrick(i, { ...b, data: nd })} />
                     </div>
                   </BrickFrame>
                 </div>
