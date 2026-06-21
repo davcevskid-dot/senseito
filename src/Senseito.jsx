@@ -820,11 +820,15 @@ ${MENTOR_WIDGET_NOTE}${schoolHasGarden(school) ? `\n${MENTOR_GARDEN_NOTE}` : ""}
 // the student knows concepts from lessons they haven't reached yet.
 function journeyContext(school, progress) {
   const lessons = (school?.semesters || []).flatMap(s => s.lessons || []);
-  if (!lessons.length || !progress) return "";
-  const passed = lessons.filter(l => progress[l.number] === "passed");
-  const current = lessons.find(l => progress[l.number] === "active") || lessons.find(l => (progress[l.number] || "locked") !== "passed");
-  const recent = passed.slice(-6).map(l => l.title).join("; ");
-  return `\nLEARNER'S JOURNEY: ${passed.length}/${lessons.length} lessons completed${recent ? ` (recently: ${recent})` : ""}. Currently on: "${current?.title || "—"}". You may preview later ideas, but do NOT assume they've learned concepts from lessons they haven't completed yet.\n`;
+  if (!lessons.length) return "";
+  const p = progress || {};
+  const reached = l => l.open || p[l.number] === "passed" || p[l.number] === "active";
+  const passed = lessons.filter(l => p[l.number] === "passed");
+  const current = lessons.find(l => p[l.number] === "active") || lessons.find(l => reached(l) && p[l.number] !== "passed") || lessons[0];
+  const locked = lessons.filter(l => !reached(l));
+  const recent = passed.slice(-5).map(l => l.title).join("; ");
+  const lockedNames = locked.slice(0, 6).map(l => l.title).join("; ");
+  return `\nLEARNER'S JOURNEY: ${passed.length}/${lessons.length} lessons completed${recent ? ` (recently: ${recent})` : ""}. Currently on: "${current?.title || "—"}".${lockedNames ? ` STILL LOCKED (they have NOT seen these — don't assume the concepts; you may tease them): ${lockedNames}.` : " Everything is unlocked for them."} Meet them exactly where they are.\n`;
 }
 function mentorOfficeSys(school, bus, journey = "") {
   const dna = school.knowledgeDNA ? `\nKNOWLEDGE DNA:\n${String(school.knowledgeDNA).slice(0, 4000)}\n` : "";
@@ -2998,7 +3002,7 @@ function ToolsSection({ rec, T, onUpdate, buildTool, buildingTool, readOnly, onR
 // ─────────────────────────────────────────────────────────────
 // MENTOR FAB — floating chat bubble overlay (Layer 3 wrapper around the mentor)
 // ─────────────────────────────────────────────────────────────
-function MentorFab({ school, bus, T }) {
+function MentorFab({ school, bus, T, progress }) {
   const [open, setOpen] = useState(false);
   const greeting = school.overlay?.greeting || `Hi! I'm ${school.mentor?.name || "your mentor"}. Ask me anything.`;
   const [msgs, setMsgs] = useState([{ role: "assistant", content: greeting }]);
@@ -3008,7 +3012,7 @@ function MentorFab({ school, bus, T }) {
   async function send() {
     const t = input.trim(); if (!t || loading) return; setInput("");
     const next = [...msgs, { role: "user", content: t }]; setMsgs(next); setLoading(true);
-    try { const r = await api(mentorOfficeSys(school, bus), toApiMessages(next), 2000); setMsgs([...next, { role: "assistant", content: r }]); }
+    try { const r = await api(mentorOfficeSys(school, bus, journeyContext(school, progress)), toApiMessages(next), 2000); setMsgs([...next, { role: "assistant", content: r }]); }
     catch (e) { setMsgs([...next, { role: "assistant", content: "Error: " + e.message }]); }
     setLoading(false);
   }
@@ -3052,7 +3056,7 @@ function DashboardSection({ section, rec, T, onUpdate, readOnly, school, onInges
   const spanCss = (b) => b?.span === "full" ? "1 / -1" : b?.span === 2 ? "span 2" : "auto";
   const spanLabel = (b) => b?.span === "full" ? "▭" : b?.span === 2 ? "2" : "1";
   const setCols = (n) => mutateSection(s => ({ ...s, cols: n }));
-  const ADDABLE = [["callout", "💡 Callout"], ["image", "🖼️ Image"], ["cta_button", "🔘 Button"], ["divider", "➖ Divider"], ["stat_grid", "📊 Stat grid"], ["habit_checker", "✅ Habit checker"], ["metric_tracker", "📈 Metric tracker"], ["review", "🔁 Spaced review"], ["garden", "🌱 Mindset garden"]];
+  const ADDABLE = [["divider", "🔤 Title / Divider"], ["callout", "📝 Text"], ["image", "🖼️ Image"], ["video_embed", "▶️ Video URL"], ["embed", "🔗 Iframe / Embed"], ["cta_button", "🔘 Button"], ["notebook", "📓 Notebook"], ["stat_grid", "📊 Stat grid"], ["habit_checker", "✅ Habit checker"], ["metric_tracker", "📈 Metric tracker"], ["review", "🔁 Spaced review"], ["garden", "🌱 Mindset garden"]];
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       {section.intro && <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: "14px 20px", fontSize: 13, color: B.mutedMid, lineHeight: 1.6 }}>{section.intro}</div>}
@@ -3868,7 +3872,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
 
         {iterating && <div style={{ position: "sticky", top: 12, zIndex: 90, marginBottom: 16 }}><BuildProgress title="Applying your change…" pct={iterProg.pct} label={iterProg.label} facts={[]} /></div>}
 
-        {school.overlay?.type === "mentorFab" && <MentorFab school={school} bus={bus} T={T} />}
+        {school.overlay?.type === "mentorFab" && <MentorFab school={school} bus={bus} T={T} progress={progress} />}
         <div style={{ display: "flex", flexDirection: "column", gap: dens, zoom: school.fontScale || 1, opacity: iterating ? 0.35 : 1, filter: iterating ? "saturate(0.6)" : "none", transition: "opacity 0.4s, filter 0.4s", paddingTop: readOnly ? 18 : 0 }}>
           {warnings.length > 0 && (
             <div style={{ background: "rgba(251,191,36,0.06)", border: "1px solid rgba(251,191,36,0.3)", borderRadius: 12, padding: "11px 15px" }}>
@@ -3983,7 +3987,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
                     {!readOnly && <button onClick={() => deleteSemester(si)} title="Delete this part/semester" style={{ background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.3)", borderRadius: 8, color: "#F87171", padding: "4px 9px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit", fontWeight: 700 }}>🗑 Delete part</button>}
                   </div>
                 </div>
-                {sem.lessons?.map((l, li) => <LessonRow key={li} lesson={l} idx={li} T={T} progress={progress} mentorName={school.mentor?.name} onEnter={setActiveLesson} onEdit={setEditingLesson} onToggleLock={toggleLock} readOnly={readOnly} />)}
+                {sem.lessons?.map((l, li) => <LessonRow key={li} lesson={l} idx={(school.semesters || []).slice(0, si).reduce((a, s2) => a + (s2.lessons?.length || 0), 0) + li} T={T} progress={progress} mentorName={school.mentor?.name} onEnter={setActiveLesson} onEdit={setEditingLesson} onToggleLock={toggleLock} readOnly={readOnly} />)}
               </div>
             ))}
             {!readOnly && <AddLessonBar T={T} disabled={iterating} onAdd={(topic) => onIterate(`Add ONE new lesson about "${topic}" to the end of the lessons. Give it a fitting title, concept, mission, passCriteria and 1-3 activities allowed for the ${school.learningPath || "mixed"} learning path. Keep the school name and ALL existing lessons exactly as they are.`)} />}
