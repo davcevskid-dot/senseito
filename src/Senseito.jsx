@@ -176,6 +176,7 @@ const GLOBAL_CSS = `
   @keyframes sgSpin{to{transform:rotate(360deg)}}
   @keyframes confettiFall{to{transform:translateY(460px) rotate(540deg);opacity:0}}
   @keyframes popIn{0%{transform:scale(0.6);opacity:0}60%{transform:scale(1.08)}100%{transform:scale(1);opacity:1}}
+  @keyframes arcadeGlow{0%,100%{transform:scale(1)}50%{transform:scale(1.08)}}
   *{box-sizing:border-box;margin:0;padding:0}
   html,body{max-width:100%;overflow-x:hidden}
   img,iframe,video,svg{max-width:100%}
@@ -766,7 +767,7 @@ DECIDE which of three modes this message is:
 - "cover": an https image URL for a hero banner, or "" to remove. "coverPos": CSS object-position for the cover focal point (e.g. "50% 25%", "left top").
 - "fontScale": a number 0.8–1.4 for overall text size (1 = default).
 - "minimal": true/false — minimalist mode. When true, deliberately terse/short activities are shown as-is and never hidden or flagged as empty. Use for "keep it minimal", "distilled one-liner lessons", "don't pad the content".
-- "progression": "list" | "map" — how the lessons section is laid out. "map" = a Duolingo-style winding path of lesson nodes. Use for "make the lessons a map/journey/path". (Add-anywhere — works on any theme.)
+- "progression": "list" | "map" | "arcade" — how the lessons section is laid out. "map" = a Duolingo-style winding path of lesson nodes ("make the lessons a map/journey/path"). "arcade" = a gamified single "run" screen with an XP/streak HUD that auto-advances to the next lesson as you clear each ("make it a game", "arcade mode", "play it like a game", "one continuous game"). (Add-anywhere — works on any theme.)
 - "navStyle": "pills" | "topbar" | "chunky" | "minimal" | "soft" | "sidebar" — override the section navigation style independently of the theme. "sidebar" = a left vertical nav with content beside it (two-column).
 - "navGrad": a CSS gradient string for the navigation/sidebar background, e.g. "linear-gradient(180deg,#ef4444,#3b82f6)". Use for "make the sidebar a red→blue gradient". "" to clear.
 IMPORTANT: "brand" is ONLY a company logo + nav links bar. A picture/illustration the user wants INSIDE the page body is NOT brand and NOT a cover — it's a content image: handle that as an "action" ("add an image brick of … to the dashboard/lesson"), not a design field.
@@ -4166,6 +4167,64 @@ function LessonMap({ school, T, progress, onEnter, onEdit, readOnly }) {
     </div>
   );
 }
+// ARCADE — the gamified "one continuous run" mode: a single game-like track with a live HUD;
+// passing a lesson auto-advances you to the next, so the whole school plays like one game.
+function ArcadeRun({ school, T, progress, xp, onEnter, onEdit, readOnly }) {
+  const p = progress || {};
+  const lessons = (school.semesters || []).flatMap(s => (s.lessons || []).map(l => ({ ...l })));
+  if (!lessons.length) return <div style={{ textAlign: "center", padding: "30px 20px", fontSize: 13, color: B.muted }}>No lessons yet.</div>;
+  const reached = (l, i) => l.open || p[l.number] === "passed" || p[l.number] === "active" || (i === 0 && !lessons.some(x => p[x.number] === "active" || p[x.number] === "passed"));
+  const passedCount = lessons.filter(l => p[l.number] === "passed").length;
+  const total = lessons.length;
+  const current = lessons.find(l => p[l.number] === "active") || lessons.find((l, i) => reached(l, i) && p[l.number] !== "passed") || lessons[lessons.length - 1];
+  // streak = consecutive passes from the start
+  let streak = 0; for (const l of lessons) { if (p[l.number] === "passed") streak++; else break; }
+  const pctDone = Math.round((passedCount / total) * 100);
+  return (
+    <div style={{ borderRadius: 18, overflow: "hidden", border: `1px solid ${T.ba}`, background: `linear-gradient(180deg, ${hexA(T.p, 0.10)}, transparent 220px), ${B.surface}` }}>
+      {/* HUD */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", padding: "14px 18px", borderBottom: `1px solid ${B.border}`, background: B.surface2 }}>
+        <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 14, fontWeight: 800, color: B.white }}>🎮 Your Run</div>
+        <div style={{ display: "flex", gap: 8, marginLeft: "auto", flexWrap: "wrap" }}>
+          {school.gamification && <span style={{ fontSize: 12, fontWeight: 800, color: T.hi, background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 100, padding: "4px 12px" }}>⚡ {xp || 0} XP</span>}
+          <span style={{ fontSize: 12, fontWeight: 800, color: streak > 1 ? "#FBBF24" : B.mutedMid, background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 100, padding: "4px 12px" }}>🔥 {streak} streak</span>
+          <span style={{ fontSize: 12, fontWeight: 800, color: "#4ADE80", background: "rgba(74,222,128,0.1)", border: "1px solid rgba(74,222,128,0.3)", borderRadius: 100, padding: "4px 12px" }}>{passedCount}/{total} cleared</span>
+        </div>
+        <div style={{ flexBasis: "100%", height: 8, background: B.surface3, borderRadius: 5, overflow: "hidden" }}><div style={{ width: `${pctDone}%`, height: "100%", background: `linear-gradient(90deg,${T.p},${T.a})`, borderRadius: 5, transition: "width 0.6s ease" }} /></div>
+      </div>
+      {/* Continue CTA */}
+      {current && p[current.number] !== "passed" && (
+        <div style={{ padding: "16px 18px", textAlign: "center", borderBottom: `1px solid ${B.border}` }}>
+          <div style={{ fontSize: 12, color: B.muted, marginBottom: 3 }}>{passedCount === 0 ? "Start your run" : "Up next"}</div>
+          <div style={{ fontSize: 16, fontWeight: 700, color: B.white, marginBottom: 10 }}>{TM[current.type]?.icon || "▶"} {current.title}</div>
+          <button onClick={() => onEnter(current)} style={{ ...pBtn(T), fontSize: 15, padding: "11px 26px", boxShadow: `0 8px 26px ${T.pg}` }}>▶ {passedCount === 0 ? "Begin" : "Continue"}</button>
+        </div>
+      )}
+      {passedCount === total && <div style={{ padding: "20px 18px", textAlign: "center", color: "#4ADE80", fontWeight: 800, fontSize: 15 }}>🏆 Run complete — every lesson cleared!</div>}
+      {/* Node track */}
+      <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 0, padding: "18px" }}>
+        {lessons.map((l, i) => {
+          const st = p[l.number] === "passed" ? "passed" : (reached(l, i) ? "active" : "locked");
+          const isCurrent = current && l.number === current.number && st !== "passed";
+          const accent = st === "passed" ? "#4ADE80" : st === "locked" ? B.muted : T.p;
+          return (
+            <div key={i} style={{ display: "flex", alignItems: "center" }}>
+              {i > 0 && <div style={{ width: 22, height: 3, background: st === "locked" ? B.borderMid : hexA(T.p, 0.6), borderRadius: 2 }} />}
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", width: 64 }}>
+                <button onClick={() => st !== "locked" && onEnter(l)} disabled={st === "locked"} title={l.title}
+                  style={{ width: isCurrent ? 50 : 42, height: isCurrent ? 50 : 42, borderRadius: "50%", border: `3px solid ${accent}`, background: st === "passed" ? "rgba(74,222,128,0.15)" : st === "locked" ? B.surface2 : T.ps, color: B.white, cursor: st === "locked" ? "not-allowed" : "pointer", fontSize: isCurrent ? 19 : 15, display: "flex", alignItems: "center", justifyContent: "center", boxShadow: isCurrent ? `0 0 20px ${T.pg}` : "none", transition: "all 0.2s", animation: isCurrent ? "arcadeGlow 1.8s ease-in-out infinite" : "none" }}>
+                  {st === "passed" ? "✓" : st === "locked" ? "🔒" : (TM[l.type]?.icon || (i + 1))}
+                </button>
+                <div style={{ fontSize: 9.5, color: st === "locked" ? B.muted : B.mutedMid, marginTop: 4, textAlign: "center", lineHeight: 1.2, maxWidth: 62, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{l.title}</div>
+                {!readOnly && <button onClick={() => onEdit(l)} style={{ background: "none", border: "none", color: B.muted, fontSize: 10, cursor: "pointer", fontFamily: "inherit", marginTop: 1 }}>✎</button>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, publicBase, token, onSetSlug, onIterate, iterating = false, iterProg = { pct: 0, label: "" } }) {
   const school = rec.data;
   const T = themeFor(school);
@@ -4429,7 +4488,15 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   return (
     <div style={{ position: "relative", fontFamily: fontStack(school) }}>
       <Toast toast={toast} />
-      {activeLesson && <LessonView school={school} lesson={activeLesson} T={T} onClose={() => setActiveLesson(null)} onPass={() => handlePass(activeLesson.number)}
+      {activeLesson && <LessonView school={school} lesson={activeLesson} T={T} onClose={() => {
+          const finished = activeLesson; setActiveLesson(null);
+          // Arcade: a continuous run — when you clear a lesson, roll straight into the next one.
+          if (school.progression === "arcade" && finished && progress[finished.number] === "passed") {
+            const all = (school.semesters || []).flatMap(s => s.lessons || []);
+            const next = all.find(l => l.number !== finished.number && progress[l.number] !== "passed" && (l.open || progress[l.number] === "active"));
+            if (next) setTimeout(() => setActiveLesson(next), 350);
+          }
+        }} onPass={() => handlePass(activeLesson.number)}
         canEdit={!readOnly} onUpdateBlock={(i, nb) => updateLessonBlock(activeLesson.number, i, nb)} bus={bus} onIngest={ingestOutput}
         chat={rec.lessonChats?.[activeLesson.number]} onChat={(msgs) => onUpdate({ lessonChats: { ...(rec.lessonChats || {}), [activeLesson.number]: msgs } })}
         outputs={rec.lessonOutputs?.[activeLesson.number]} onOutputs={(o) => onUpdate({ lessonOutputs: { ...(rec.lessonOutputs || {}), [activeLesson.number]: o } })}
@@ -4625,9 +4692,11 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
             )}
             {!readOnly && <div style={{ display: "flex", gap: 6, alignItems: "center", justifyContent: "flex-end" }}>
               <span style={{ fontSize: 11, color: B.muted }}>Layout</span>
-              {[["list", "☰ List"], ["map", "🗺️ Map"]].map(([k, l]) => <button key={k} onClick={() => onUpdate({ data: { ...school, progression: k } })} style={{ background: (school.progression || "list") === k ? T.ps : "none", border: `1px solid ${(school.progression || "list") === k ? T.ba : B.borderMid}`, borderRadius: 8, color: (school.progression || "list") === k ? T.hi : B.mutedMid, padding: "5px 11px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 700 }}>{l}</button>)}
+              {[["list", "☰ List"], ["map", "🗺️ Map"], ["arcade", "🎮 Arcade"]].map(([k, l]) => <button key={k} onClick={() => onUpdate({ data: { ...school, progression: k } })} style={{ background: (school.progression || "list") === k ? T.ps : "none", border: `1px solid ${(school.progression || "list") === k ? T.ba : B.borderMid}`, borderRadius: 8, color: (school.progression || "list") === k ? T.hi : B.mutedMid, padding: "5px 11px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 700 }}>{l}</button>)}
             </div>}
-            {school.progression === "map" ? (
+            {school.progression === "arcade" ? (
+              <ArcadeRun school={school} T={T} progress={progress} xp={xp} onEnter={setActiveLesson} onEdit={setEditingLesson} readOnly={readOnly} />
+            ) : school.progression === "map" ? (
               <LessonMap school={school} T={T} progress={progress} onEnter={setActiveLesson} onEdit={setEditingLesson} readOnly={readOnly} />
             ) : school.semesters?.map((sem, si) => (
               <div key={si} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
