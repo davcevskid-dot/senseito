@@ -160,6 +160,8 @@ const GLOBAL_CSS = `
   @keyframes sgGrow{0%{stroke-dashoffset:100;opacity:0}10%{opacity:1}33%{stroke-dashoffset:0;opacity:1}52%{stroke-dashoffset:0;opacity:1}66%{stroke-dashoffset:0;opacity:0}100%{stroke-dashoffset:100;opacity:0}}
   @keyframes sgNd{0%,100%{opacity:.5}50%{opacity:1}}
   @keyframes sgSpin{to{transform:rotate(360deg)}}
+  @keyframes confettiFall{to{transform:translateY(460px) rotate(540deg);opacity:0}}
+  @keyframes popIn{0%{transform:scale(0.6);opacity:0}60%{transform:scale(1.08)}100%{transform:scale(1);opacity:1}}
   *{box-sizing:border-box;margin:0;padding:0}
   textarea,input,select{outline:none}
   textarea::placeholder,input::placeholder{color:#55556E;font-style:italic}
@@ -1285,6 +1287,23 @@ function Toast({ toast }) {
 // ─────────────────────────────────────────────────────────────
 // MENTOR LESSON CHAT
 // ─────────────────────────────────────────────────────────────
+// Duolingo-style lesson-complete celebration: confetti burst + a "ready" card.
+function CelebrationOverlay({ title, xp, badge, T, onClose }) {
+  const colors = [T.p, T.a, T.hi, "#4ADE80", "#FBBF24", "#F472B6"];
+  const pieces = Array.from({ length: 28 }, (_, i) => ({ left: Math.random() * 100, dur: 1.6 + Math.random() * 1.4, delay: Math.random() * 0.5, c: colors[i % colors.length], w: 6 + Math.random() * 6 }));
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 300, background: "rgba(0,0,0,0.55)", backdropFilter: "blur(4px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, overflow: "hidden" }}>
+      {pieces.map((p, i) => <div key={i} style={{ position: "absolute", top: -14, left: `${p.left}%`, width: p.w, height: p.w * 1.6, background: p.c, borderRadius: 2, animation: `confettiFall ${p.dur}s ${p.delay}s linear forwards` }} />)}
+      <div onClick={e => e.stopPropagation()} style={{ position: "relative", background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 22, padding: "32px 30px", textAlign: "center", maxWidth: 360, width: "100%", boxShadow: `0 0 80px ${T.pg}`, animation: "popIn 0.45s cubic-bezier(.2,1.3,.4,1) both" }}>
+        <div style={{ fontSize: 56, marginBottom: 8 }}>{badge || "🎉"}</div>
+        <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 22, fontWeight: 700, color: B.white, marginBottom: 6 }}>Lesson complete!</div>
+        <div style={{ fontSize: 13.5, color: B.mutedMid, lineHeight: 1.5, marginBottom: 16 }}>{title}</div>
+        {xp ? <div style={{ display: "inline-block", background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 100, padding: "6px 16px", fontSize: 14, fontWeight: 700, color: T.hi, marginBottom: 18 }}>+{xp} XP</div> : null}
+        <button onClick={onClose} style={{ display: "block", width: "100%", background: T.grad, border: "none", borderRadius: 12, color: "white", fontFamily: "inherit", fontSize: 15, fontWeight: 700, padding: "12px", cursor: "pointer", boxShadow: `0 6px 20px ${T.pg}` }}>Continue →</button>
+      </div>
+    </div>
+  );
+}
 function LessonView({ school, lesson, T: Tprop, onClose, onPass, canEdit, onUpdateBlock, chat, onChat, bus, onIngest, outputs: outputsProp, onOutputs, blockOverrides, onOverrideBlock }) {
   // Per-lesson accent override (lesson.accent) recolors the whole lesson modal.
   const T = (lesson.accent && HEX_RE.test(lesson.accent))
@@ -1334,7 +1353,8 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, canEdit, onUpda
   // Record the pass the moment it happens (unlocks the next lesson + saves progress),
   // so the student advances even if they close with ✕ instead of clicking Complete.
   const passFired = useRef(false);
-  useEffect(() => { if (passed && !passFired.current) { passFired.current = true; onPass?.(); } }, [passed]); // eslint-disable-line
+  const [celebrate, setCelebrate] = useState(false);
+  useEffect(() => { if (passed && !passFired.current) { passFired.current = true; onPass?.(); if (!canEdit) setCelebrate(true); } }, [passed]); // eslint-disable-line
 
   async function send() {
     if (!input.trim() || loading || chatPassed) return;
@@ -1391,6 +1411,8 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, canEdit, onUpda
   const TABS = [["mentor", "💬 Guided Lesson"], ...(blocks.length && mode !== "mentoronly" ? [["activities", `🧩 Activities (${blocks.length})`]] : [])];
 
   return (
+    <>
+    {celebrate && <CelebrationOverlay title={lesson.title} xp={school.gamification?.xpPerLesson || 0} badge={school.template === "kids" ? "🌟" : "🎉"} T={T} onClose={() => { setCelebrate(false); onClose(); }} />}
     <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(0,0,0,0.82)", backdropFilter: "blur(10px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onClose}>
       <div style={{ background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 20, width: "100%", maxWidth: 680, height: "86vh", maxHeight: 760, display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: `0 0 80px ${T.pg}` }} onClick={e => e.stopPropagation()}>
         {/^https:\/\//i.test(lesson.cover || "") && <img src={lesson.cover} alt="" style={{ width: "100%", height: 130, objectFit: "cover", objectPosition: lesson.coverPos || "center", display: "block", flexShrink: 0 }} />}
@@ -1492,6 +1514,7 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, canEdit, onUpda
         </>)}
       </div>
     </div>
+    </>
   );
 }
 
