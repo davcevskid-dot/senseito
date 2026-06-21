@@ -177,6 +177,12 @@ const GLOBAL_CSS = `
   @keyframes confettiFall{to{transform:translateY(460px) rotate(540deg);opacity:0}}
   @keyframes popIn{0%{transform:scale(0.6);opacity:0}60%{transform:scale(1.08)}100%{transform:scale(1);opacity:1}}
   @keyframes arcadeGlow{0%,100%{transform:scale(1)}50%{transform:scale(1.08)}}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  @keyframes glowPulse{0%,100%{opacity:0.5;transform:translateX(-50%) scale(1)}50%{opacity:0.9;transform:translateX(-50%) scale(1.15)}}
+  @keyframes twinkle{0%,100%{opacity:0.15}50%{opacity:0.9}}
+  @keyframes gridDrift{to{background-position:0 -44px}}
+  @keyframes meshShift{0%,100%{background-position:0% 50%}50%{background-position:100% 50%}}
+  @keyframes floatUp{to{transform:translateY(-112vh)}}
   *{box-sizing:border-box;margin:0;padding:0}
   html,body{max-width:100%;overflow-x:hidden}
   img,iframe,video,svg{max-width:100%}
@@ -705,6 +711,7 @@ DESIGN FIELDS (Generative UI — set these on the school object when the instruc
 - "cover": an https image URL to show as a hero cover banner (use a real, stable Unsplash-style URL only if the user supplies or clearly wants one; otherwise omit). To remove a cover, set "cover": "".
 - "hero": { "emoji": false to hide the emoji, "tagline": false to hide the tagline, "description": false to hide the description, "off": true for a minimal title-only header }. Omit a key (or set true) to keep it showing.
 - "overlay": { "type": "mentorFab", "greeting": "<short greeting>" } to add a floating chat bubble that opens the mentor. Set "overlay": null to remove it.
+- "effect": an ambient animated background for the whole school — one of aurora, glow, starfield, grid, mesh, embers, none. Set when the user asks for atmosphere ("aurora effect", "starry/cosmic" → starfield, "glow", "floating embers" → embers). PRESERVE the existing value unless asked to change it.
 Interpret natural requests: "make it calmer/airier" → density spacious + a soft theme; "remove the description"/"just the title" → hero settings; "add a chat bubble"/"floating mentor" → overlay mentorFab; "add a cover/header image" → cover.
 SPECIAL CASE: lesson locking/unlocking and progress are managed by the app. If the instruction is purely about unlocking lessons or progress, return ONLY: {"appAction": "unlockAll"}.`;
 
@@ -768,6 +775,7 @@ DECIDE which of three modes this message is:
 - "fontScale": a number 0.8–1.4 for overall text size (1 = default).
 - "minimal": true/false — minimalist mode. When true, deliberately terse/short activities are shown as-is and never hidden or flagged as empty. Use for "keep it minimal", "distilled one-liner lessons", "don't pad the content".
 - "progression": "list" | "map" | "arcade" — how the lessons section is laid out. "map" = a Duolingo-style winding path of lesson nodes ("make the lessons a map/journey/path"). "arcade" = a gamified single "run" screen with an XP/streak HUD that auto-advances to the next lesson as you clear each ("make it a game", "arcade mode", "play it like a game", "one continuous game"). (Add-anywhere — works on any theme.)
+- "effect": an ambient animated background effect for the whole school — one of ${EFFECT_KEYS.join(", ")}. Use when the user asks for atmosphere/vibes ("add an aurora effect", "make it feel cosmic/starry" → starfield, "add a glow", "floating embers/sparks" → embers, "subtle grid", "flowing gradient" → mesh). Set "effect": "none" to remove it.
 - "navStyle": "pills" | "topbar" | "chunky" | "minimal" | "soft" | "sidebar" — override the section navigation style independently of the theme. "sidebar" = a left vertical nav with content beside it (two-column).
 - "navGrad": a CSS gradient string for the navigation/sidebar background, e.g. "linear-gradient(180deg,#ef4444,#3b82f6)". Use for "make the sidebar a red→blue gradient". "" to clear.
 IMPORTANT: "brand" is ONLY a company logo + nav links bar. A picture/illustration the user wants INSIDE the page body is NOT brand and NOT a cover — it's a content image: handle that as an "action" ("add an image brick of … to the dashboard/lesson"), not a design field.
@@ -1739,6 +1747,10 @@ const bx = {
 function pBtn(T, on = true) { return { background: on ? T.p : B.surface2, border: on ? "none" : `1px solid ${B.borderMid}`, borderRadius: 9, padding: "9px 16px", color: on ? "white" : B.mutedMid, fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer" }; }
 function pBtnLite() { return { background: "linear-gradient(135deg,#7C3AED,#6D28D9)", border: "none", borderRadius: 8, padding: "8px 12px", color: "white", fontFamily: "inherit", fontSize: 12, fontWeight: 700, cursor: "pointer" }; }
 function PassPill({ passed }) { return passed ? <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "rgba(74,222,128,0.12)", border: "1px solid rgba(74,222,128,0.35)", borderRadius: 100, padding: "3px 11px", fontSize: 11, fontWeight: 700, color: "#4ADE80", flexShrink: 0 }}>✓ Passed</div> : null; }
+// Tiny inline spinner for "generating / iterating" buttons — gives async actions some life.
+function Spinner({ size = 13, color = "currentColor" }) {
+  return <span style={{ display: "inline-block", width: size, height: size, border: `2px solid ${hexA(color === "currentColor" ? "#ffffff" : color, 0.3)}`, borderTopColor: color, borderRadius: "50%", animation: "spin 0.7s linear infinite", verticalAlign: "-2px", marginRight: 6 }} />;
+}
 
 // Controlled-or-local state so a block persists when used as a tool.
 function useBlockState(initial, state, onState) {
@@ -1811,8 +1823,13 @@ function MentorWidget({ code, T, height }) {
     .replace(/<\/?(?:html|head|body)\b[^>]*>/gi, "")
     .replace(/<script\b[^>]*>[\s\S]*?(?:__mw|parent\s*\.\s*postMessage)[\s\S]*?<\/script>/gi, "")
     .replace(/function\s+_r\s*\(\s*\)\s*\{[\s\S]*?setTimeout\(\s*_r\s*,\s*1500\s*\)\s*;?/gi, "");
-  const srcDoc = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;padding:0;background:transparent;color:#e7e9f5;font-family:system-ui,-apple-system,sans-serif;font-size:14px}*{box-sizing:border-box}:root{--p:${accent};--a:${accent2}}button{font-family:inherit}</style></head><body>${safe}<script>function _r(){try{parent.postMessage({__mw:1,h:document.documentElement.scrollHeight},'*')}catch(e){}}window.addEventListener('load',_r);try{new ResizeObserver(_r).observe(document.body)}catch(e){}setTimeout(_r,120);setTimeout(_r,600);setTimeout(_r,1500)<\/script></body></html>`;
-  return <iframe ref={ref} title="mentor visual" sandbox="allow-scripts allow-pointer-lock" srcDoc={srcDoc} style={{ width: "100%", height: height || h, border: `1px solid ${B.border}`, borderRadius: 10, background: B.surface, display: "block", marginTop: 8 }} />;
+  // The iframe runs sandboxed with an OPAQUE origin (no allow-same-origin — so a creator's
+  // game can never read a viewer's session). In that context localStorage/sessionStorage THROW,
+  // which silently crashes games that touch storage on start ("click Start, nothing happens").
+  // Shim them with an in-memory store so such games just work. Loaded BEFORE the game body.
+  const shim = `<script>(function(){function mk(){var m={};return{getItem:function(k){return Object.prototype.hasOwnProperty.call(m,k)?m[k]:null},setItem:function(k,v){m[k]=String(v)},removeItem:function(k){delete m[k]},clear:function(){m={}},key:function(i){return Object.keys(m)[i]||null},get length(){return Object.keys(m).length}}}try{window.localStorage.getItem('__t')}catch(e){try{Object.defineProperty(window,'localStorage',{value:mk(),configurable:true})}catch(_){} }try{window.sessionStorage.getItem('__t')}catch(e){try{Object.defineProperty(window,'sessionStorage',{value:mk(),configurable:true})}catch(_){} }})();<\/script>`;
+  const srcDoc = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${shim}<style>html,body{margin:0;padding:0;background:transparent;color:#e7e9f5;font-family:system-ui,-apple-system,sans-serif;font-size:14px}*{box-sizing:border-box}:root{--p:${accent};--a:${accent2}}button{font-family:inherit}</style></head><body>${safe}<script>function _r(){try{parent.postMessage({__mw:1,h:document.documentElement.scrollHeight},'*')}catch(e){}}window.addEventListener('load',_r);try{new ResizeObserver(_r).observe(document.body)}catch(e){}setTimeout(_r,120);setTimeout(_r,600);setTimeout(_r,1500)<\/script></body></html>`;
+  return <iframe ref={ref} title="mentor visual" sandbox="allow-scripts allow-pointer-lock allow-forms allow-modals" srcDoc={srcDoc} style={{ width: "100%", height: height || h, border: `1px solid ${B.border}`, borderRadius: 10, background: B.surface, display: "block", marginTop: 8 }} />;
 }
 // Curated visual primitives the mentor fills with simple JSON (```viz). App-
 // rendered → consistent, on-brand, cheap, and safe (no code execution).
@@ -2579,33 +2596,50 @@ Compose 3-6 elements into ONE beautiful, balanced, readable slide (light text on
 
 // The school's "soul": a bespoke signature centerpiece, generated as a self-contained themed
 // HTML fragment unique to the subject. Rendered (read-only) via the sanitized MentorWidget.
-async function genSignature(school) {
+async function genSignature(school, prompt, current) {
   const T = themeFor(school);
   const subject = `${school.name} — ${flattenText(school.description) || school.tagline || ""}`.slice(0, 320);
-  const idea = school.soul?.signature || `a unique visual centerpiece that instantly captures the essence of ${school.name}`;
-  const sys = `You craft ONE bespoke, premium "signature" centerpiece for a learning school — a self-contained HTML fragment (inline <style> + an optional gentle <script> animation). It must feel UNIQUELY tailored to the subject: a glance should evoke the topic. HARD RULES: NO external URLs/images/fonts/scripts (it runs sandboxed offline); transparent background; light text (#e7e9f5); use ${T.p} and ${T.a} as accent colors; ~180-260px tall, responsive, centered, tasteful (elegant, not cluttered). Return ONLY the HTML fragment — no markdown fences, no <html>/<head>/<body> wrappers, and NEVER include any postMessage/resize script.`;
-  const code = await api(sys, [{ role: "user", content: `Subject: ${subject}\nSignature idea: ${idea}` }], 1700);
+  const idea = prompt || school.soul?.signature || `a unique visual centerpiece that instantly captures the essence of ${school.name}`;
+  const sys = `You craft ONE bespoke, premium "signature" centerpiece that gives a learning school its SOUL — a self-contained HTML fragment (inline <style> + optional <script> for gentle animation/light interaction, vanilla JS only). It can be LITERALLY ANYTHING that makes this school feel one-of-a-kind and unmistakably about its subject: an animated hero scene, a tiny interactive diagram, a themed crest/emblem, a living illustration, an evocative data-viz, a parallax band — whatever fits THIS topic best. Surprise and delight; never generic. HARD RULES: NO external URLs/images/fonts/libraries (runs sandboxed offline; if a sandboxed API throws, wrap in try/catch); transparent background; light text (#e7e9f5); use ${T.p} and ${T.a} as accent colors; responsive; tasteful (elegant, not cluttered). Return ONLY the HTML fragment — no markdown fences, no <html>/<head>/<body> wrappers, and NEVER any postMessage/resize script.`;
+  const user = current
+    ? `Here is the CURRENT signature HTML:\n${current}\n\nKeep it working and apply ONLY this change, preserving the rest: ${idea}. Return the COMPLETE updated fragment.`
+    : `Subject: ${subject}\nSignature idea: ${idea}`;
+  const code = await api(sys, [{ role: "user", content: user }], 2600, "sonnet");
   return String(code).replace(/^```[a-z]*\n?/i, "").replace(/```\s*$/, "").trim();
 }
 function SignaturePanel({ school, T, canEdit, onUpdate }) {
   const soul = school.soul || null;
-  const [busy, setBusy] = useState(false);
-  async function regen() {
-    setBusy(true);
-    try { const code = await genSignature(school); onUpdate({ data: { ...school, soul: { ...(soul || {}), code } } }); } catch { } setBusy(false);
+  const [busy, setBusy] = useState(false); // "regen" | "iter" | false
+  const [draft, setDraft] = useState("");
+  const h = soul?.h;
+  async function run(kind) {
+    const p = draft.trim(); if ((kind === "iter" && !p) || busy) return;
+    setBusy(kind);
+    try { const code = await genSignature(school, p || undefined, kind === "iter" ? soul?.code : null); onUpdate({ data: { ...school, soul: { ...(soul || {}), code } } }); if (kind === "iter") setDraft(""); } catch { } setBusy(false);
   }
+  const resize = (ev) => {
+    ev.preventDefault(); const sy = ev.clientY, oh = h || 240;
+    const move = (m) => onUpdate({ data: { ...school, soul: { ...(soul || {}), h: Math.max(140, Math.min(1200, oh + (m.clientY - sy))) } } });
+    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+  };
   if (!soul?.code) {
     if (!canEdit) return null;
-    return <div style={{ textAlign: "center" }}><button onClick={regen} disabled={busy} style={{ background: "none", border: `1px dashed ${T.ba}`, borderRadius: 14, color: T.hi, padding: "11px 16px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 700, opacity: busy ? 0.6 : 1 }}>{busy ? "Crafting your school's signature…" : "✨ Add a signature centerpiece"}</button></div>;
+    return <div style={{ textAlign: "center" }}><button onClick={() => run("regen")} disabled={!!busy} style={{ background: "none", border: `1px dashed ${T.ba}`, borderRadius: 14, color: T.hi, padding: "11px 16px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 700, opacity: busy ? 0.6 : 1 }}>{busy ? <><Spinner color={T.hi} />Crafting your school's signature…</> : "✨ Add a signature centerpiece"}</button></div>;
   }
   return (
     <div style={{ position: "relative", background: B.surface, border: `1px solid ${B.border}`, borderRadius: 16, padding: 16 }}>
       {soul.essence && <div style={{ fontSize: 12.5, color: T.hi, fontStyle: "italic", textAlign: "center", marginBottom: 6 }}>{soul.essence}</div>}
-      <MentorWidget code={soul.code} T={T} />
-      {canEdit && <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 8 }}>
-        <button onClick={regen} disabled={busy} style={{ background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "5px 11px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit", fontWeight: 700, opacity: busy ? 0.6 : 1 }}>{busy ? "…" : "↻ Regenerate"}</button>
-        <button onClick={() => onUpdate({ data: { ...school, soul: { ...soul, code: undefined } } })} style={{ background: "none", border: "1px solid rgba(248,113,113,0.3)", borderRadius: 8, color: "#F87171", padding: "5px 11px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit", fontWeight: 700 }}>✕ Remove</button>
-      </div>}
+      <MentorWidget code={soul.code} T={T} height={h} />
+      {canEdit && <>
+        <div onPointerDown={resize} title="Drag to resize" style={{ height: 14, marginTop: 2, display: "flex", alignItems: "center", justifyContent: "center", cursor: "ns-resize", color: B.muted, fontSize: 11 }}>⇕ drag to resize</div>
+        <input value={draft} onChange={e => setDraft(e.target.value)} placeholder='Tweak it… e.g. "make it more alive" or "add slow drifting particles"' style={{ width: "100%", background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, fontFamily: "inherit", fontSize: 12.5, padding: "8px 11px", marginTop: 6, boxSizing: "border-box" }} />
+        <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 8, flexWrap: "wrap" }}>
+          <button onClick={() => run("iter")} disabled={!!busy || !draft.trim()} title="Keep it; change only what you describe" style={{ background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 8, color: T.hi, padding: "6px 13px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 700, opacity: (busy || !draft.trim()) ? 0.6 : 1 }}>{busy === "iter" ? <><Spinner color={T.hi} />Tweaking…</> : "✎ Iterate"}</button>
+          <button onClick={() => run("regen")} disabled={!!busy} style={{ background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "6px 13px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 700, opacity: busy ? 0.6 : 1 }}>{busy === "regen" ? <><Spinner color={B.mutedMid} />Reimagining…</> : "↻ Regenerate"}</button>
+          <button onClick={() => onUpdate({ data: { ...school, soul: { ...soul, code: undefined } } })} style={{ background: "none", border: "1px solid rgba(248,113,113,0.3)", borderRadius: 8, color: "#F87171", padding: "6px 13px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 700 }}>✕ Remove</button>
+        </div>
+      </>}
     </div>
   );
 }
@@ -2715,7 +2749,7 @@ function ShowroomBlock({ data = {}, T, school, canEdit, onEditData, disabled }) 
       {isLegacy ? (
         <>
           <MentorWidget code={cur.code} T={T} />
-          {canEdit && <button onClick={() => ai("regen")} disabled={!!busy} style={{ ...pBtn(T), marginTop: 8, opacity: busy ? 0.6 : 1 }}>{busy ? "Rebuilding…" : "↻ Rebuild as an editable slide"}</button>}
+          {canEdit && <button onClick={() => ai("regen")} disabled={!!busy} style={{ ...pBtn(T), marginTop: 8, opacity: busy ? 0.6 : 1 }}>{busy ? <><Spinner color="#fff" />Rebuilding…</> : "↻ Rebuild as an editable slide"}</button>}
         </>
       ) : cur && (
         <div style={{ position: "relative" }}>
@@ -2786,8 +2820,8 @@ function ShowroomBlock({ data = {}, T, school, canEdit, onEditData, disabled }) 
           <textarea value={draft} onChange={e => setDraft(e.target.value)} placeholder={cur?.els?.length ? 'Tell the AI what to change… e.g. "make this more beautiful" or "add a subtitle under the title"' : 'Describe the slide… e.g. "Title slide: The Water Cycle, big bold title + 3 labelled stages"'} rows={2} style={{ width: "100%", background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, fontFamily: "inherit", fontSize: 12.5, padding: "8px 11px", resize: "vertical", boxSizing: "border-box" }} />
           <div style={{ display: "flex", gap: 7, marginTop: 8, flexWrap: "wrap" }}>
             {slides.length === 0 && <button onClick={addSlide} style={pBtn(T)}>＋ First slide</button>}
-            {slides.length > 0 && !isLegacy && <button onClick={() => ai("regen")} disabled={!!busy} title="Redesign the whole slide from your prompt" style={{ ...pBtn(T), opacity: busy ? 0.6 : 1 }}>{busy === "regen" ? "Designing…" : "↻ Regenerate"}</button>}
-            {slides.length > 0 && !isLegacy && (cur?.els?.length > 0) && <button onClick={() => ai("iter")} disabled={!!busy || !draft.trim()} title="Keep everything; change only what you describe" style={{ background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 9, color: T.hi, padding: "9px 14px", cursor: "pointer", fontSize: 13, fontFamily: "inherit", fontWeight: 700, opacity: (busy || !draft.trim()) ? 0.6 : 1 }}>{busy === "iter" ? "Iterating…" : "✎ Iterate (surgical)"}</button>}
+            {slides.length > 0 && !isLegacy && <button onClick={() => ai("regen")} disabled={!!busy} title="Redesign the whole slide from your prompt" style={{ ...pBtn(T), opacity: busy ? 0.6 : 1 }}>{busy === "regen" ? <><Spinner color="#fff" />Designing…</> : "↻ Regenerate"}</button>}
+            {slides.length > 0 && !isLegacy && (cur?.els?.length > 0) && <button onClick={() => ai("iter")} disabled={!!busy || !draft.trim()} title="Keep everything; change only what you describe" style={{ background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 9, color: T.hi, padding: "9px 14px", cursor: "pointer", fontSize: 13, fontFamily: "inherit", fontWeight: 700, opacity: (busy || !draft.trim()) ? 0.6 : 1 }}>{busy === "iter" ? <><Spinner color={T.hi} />Iterating…</> : "✎ Iterate (surgical)"}</button>}
             {slides.length > 0 && <button onClick={addSlide} style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, padding: "9px 13px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit" }}>＋ Add slide</button>}
             {slides.length > 0 && <button onClick={delSlide} style={{ background: "none", border: "1px solid rgba(248,113,113,0.3)", borderRadius: 9, color: "#F87171", padding: "9px 13px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit" }}>Delete slide</button>}
           </div>
@@ -2848,8 +2882,8 @@ function GameBlock({ data = {}, T, school, canEdit, onEditData }) {
         <div style={{ marginTop: 12, borderTop: `1px solid ${B.border}`, paddingTop: 12 }}>
           <textarea value={draft} onChange={e => setDraft(e.target.value)} placeholder={data.code ? 'Tell the AI what to change… e.g. "make it harder" or "add a timer"' : 'Describe the game… e.g. "A fast quiz on the 5 stages, lose a heart for a wrong answer"'} rows={2} style={{ width: "100%", background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, fontFamily: "inherit", fontSize: 12.5, padding: "8px 11px", resize: "vertical", boxSizing: "border-box" }} />
           <div style={{ display: "flex", gap: 7, marginTop: 8, flexWrap: "wrap" }}>
-            <button onClick={() => gen("regen")} disabled={!!busy} title="Build/redesign the whole game" style={{ ...pBtn(T), opacity: busy ? 0.6 : 1 }}>{busy === "regen" ? "Building…" : (data.code ? "↻ Regenerate" : "✨ Generate game")}</button>
-            {data.code && <button onClick={() => gen("iter")} disabled={!!busy || !draft.trim()} title="Keep the game; change only what you describe" style={{ background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 9, color: T.hi, padding: "9px 14px", cursor: "pointer", fontSize: 13, fontFamily: "inherit", fontWeight: 700, opacity: (busy || !draft.trim()) ? 0.6 : 1 }}>{busy === "iter" ? "Iterating…" : "✎ Iterate"}</button>}
+            <button onClick={() => gen("regen")} disabled={!!busy} title="Build/redesign the whole game" style={{ ...pBtn(T), opacity: busy ? 0.6 : 1 }}>{busy === "regen" ? <><Spinner color="#fff" />Building…</> : (data.code ? "↻ Regenerate" : "✨ Generate game")}</button>
+            {data.code && <button onClick={() => gen("iter")} disabled={!!busy || !draft.trim()} title="Keep the game; change only what you describe" style={{ background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 9, color: T.hi, padding: "9px 14px", cursor: "pointer", fontSize: 13, fontFamily: "inherit", fontWeight: 700, opacity: (busy || !draft.trim()) ? 0.6 : 1 }}>{busy === "iter" ? <><Spinner color={T.hi} />Iterating…</> : "✎ Iterate"}</button>}
           </div>
           <div style={{ fontSize: 11, color: B.muted, marginTop: 7 }}>Saved once generated · students just play. Regenerate rebuilds it; Iterate changes only what you ask.</div>
         </div>
@@ -4233,6 +4267,26 @@ Allowed block types per path:\n${PATH_GUIDE}`;
   return apiJSON(sys, [{ role: "user", content: user }], 6000, "sonnet");
 }
 
+// ── Ambient school-wide visual EFFECTS (set via chat/design: "add an aurora effect", etc.) ──
+const EFFECT_KEYS = ["aurora", "glow", "starfield", "grid", "mesh", "embers", "none"];
+function SchoolEffects({ effect, T }) {
+  const stars = useMemo(() => Array.from({ length: 46 }, () => ({ x: Math.random() * 100, y: Math.random() * 100, s: 1 + Math.random() * 2, d: 2 + Math.random() * 4, delay: Math.random() * 4 })), []);
+  const embers = useMemo(() => Array.from({ length: 18 }, () => ({ x: Math.random() * 100, s: 3 + Math.random() * 5, d: 8 + Math.random() * 10, delay: Math.random() * 10 })), []);
+  if (!effect || effect === "none" || !EFFECT_KEYS.includes(effect)) return null;
+  const p = T.p, a = T.a;
+  const base = { position: "fixed", inset: 0, pointerEvents: "none", zIndex: 0, overflow: "hidden" };
+  if (effect === "aurora") return <div style={base}>
+    <div style={{ position: "absolute", inset: 0, background: `radial-gradient(ellipse 60% 45% at 25% -5%, ${hexA(p, 0.20)}, transparent 60%)`, animation: "aurora 9s ease-in-out infinite" }} />
+    <div style={{ position: "absolute", inset: 0, background: `radial-gradient(ellipse 55% 45% at 85% 5%, ${hexA(a, 0.16)}, transparent 58%)`, animation: "aurora 12s ease-in-out infinite reverse" }} />
+  </div>;
+  if (effect === "glow") return <div style={base}><div style={{ position: "absolute", left: "50%", top: "-12%", transform: "translateX(-50%)", width: "85vw", height: "60vh", borderRadius: "50%", background: `radial-gradient(circle, ${hexA(p, 0.22)}, transparent 70%)`, animation: "glowPulse 7s ease-in-out infinite" }} /></div>;
+  if (effect === "starfield") return <div style={base}>{stars.map((s, i) => <div key={i} style={{ position: "absolute", left: `${s.x}%`, top: `${s.y}%`, width: s.s, height: s.s, borderRadius: "50%", background: "#fff", animation: `twinkle ${s.d}s ease-in-out ${s.delay}s infinite` }} />)}</div>;
+  if (effect === "grid") return <div style={{ ...base, backgroundImage: `linear-gradient(${hexA(p, 0.10)} 1px, transparent 1px), linear-gradient(90deg, ${hexA(p, 0.10)} 1px, transparent 1px)`, backgroundSize: "44px 44px", animation: "gridDrift 6s linear infinite", maskImage: "radial-gradient(ellipse 80% 60% at 50% 0%, #000, transparent 75%)", WebkitMaskImage: "radial-gradient(ellipse 80% 60% at 50% 0%, #000, transparent 75%)" }} />;
+  if (effect === "mesh") return <div style={{ ...base, background: `linear-gradient(120deg, ${hexA(p, 0.16)}, ${hexA(a, 0.12)}, ${hexA(p, 0.10)})`, backgroundSize: "300% 300%", animation: "meshShift 16s ease-in-out infinite" }} />;
+  if (effect === "embers") return <div style={base}>{embers.map((e, i) => <div key={i} style={{ position: "absolute", bottom: -10, left: `${e.x}%`, width: e.s, height: e.s, borderRadius: "50%", background: hexA(a, 0.8), boxShadow: `0 0 6px ${hexA(a, 0.7)}`, animation: `floatUp ${e.d}s linear ${e.delay}s infinite`, opacity: 0.6 }} />)}</div>;
+  return null;
+}
+
 // ARCADE — the gamified "one continuous run" mode: a single game-like track with a live HUD;
 // passing a lesson auto-advances you to the next, so the whole school plays like one game.
 function ArcadeRun({ school, T, progress, xp, onEnter, onEdit, readOnly }) {
@@ -4611,6 +4665,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
 
   return (
     <div style={{ position: "relative", fontFamily: fontStack(school) }}>
+      <SchoolEffects effect={school.effect} T={T} />
       <Toast toast={toast} />
       {activeLesson && <LessonView school={classes ? { ...school, mentor: classMentor(school, lessonClassId(school, activeLesson.number)) } : school} lesson={activeLesson} T={T} onClose={() => {
           const finished = activeLesson; setActiveLesson(null);
@@ -4709,6 +4764,20 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
             </div>
           )}
           <BrandBar school={school} T={T} readOnly={readOnly} onUpdate={onUpdate} />
+          {/* Classes — a top-level header menu (parallel tracks, each with its own teacher) */}
+          {(classes || !readOnly) && (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: "9px 13px" }}>
+              <span style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.5, color: B.muted, marginRight: 2 }}>{classes ? "Classes" : "Class"}</span>
+              {classes && classes.map(c => {
+                const on = c.id === curClassId;
+                const ls = (school.semesters || []).filter(s => (s.classId || classes[0].id) === c.id).flatMap(s => s.lessons || []);
+                const done = ls.filter(l => progress[l.number] === "passed").length;
+                const goLessons = () => { setActiveClass(c.id); const lt = SECTIONS.find(s => s.kind === "lessons")?.id; if (lt) setTab(lt); };
+                return <button key={c.id} onClick={goLessons} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: on ? T.grad : B.surface2, border: `1px solid ${on ? "transparent" : B.borderMid}`, borderRadius: 100, color: on ? "#fff" : B.mutedMid, padding: "6px 14px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 700, boxShadow: on ? `0 4px 14px ${T.pg}` : "none" }}>{c.icon} {c.title}<span style={{ fontSize: 10.5, opacity: 0.85, fontWeight: 600 }}>{done}/{ls.length}</span></button>;
+              })}
+              {!readOnly && <button onClick={addClass} disabled={addingClass} title="Create a new class (its own teacher + curriculum) in this school" style={{ background: "none", border: `1px dashed ${T.ba}`, borderRadius: 100, color: T.hi, padding: "6px 13px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 700, opacity: addingClass ? 0.6 : 1 }}>{addingClass ? <><Spinner color={T.hi} />Building class…</> : "＋ Add a class"}</button>}
+            </div>
+          )}
           {/* Banner — varies by the school's visual skin */}
           <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: sk.radius, overflow: "hidden", animation: "fadeUp 0.5s ease" }}>
             {school.cover && <div style={{ position: "relative" }}>
@@ -4786,7 +4855,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
             {!readOnly && addSecOpen && (() => {
               const mi = { textAlign: "left", background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 9, color: B.white, padding: "9px 12px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" };
               return (
-                <div style={{ position: "absolute", right: 0, top: "calc(100% + 6px)", zIndex: 95, background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 12, padding: 11, width: 250, boxShadow: "0 14px 44px rgba(0,0,0,0.45)" }}>
+                <div style={{ position: "absolute", right: 0, top: "calc(100% + 6px)", zIndex: 95, background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 12, padding: 11, width: 250, maxHeight: "min(60vh, 420px)", overflowY: "auto", boxShadow: "0 14px 44px rgba(0,0,0,0.45)" }}>
                   <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: B.muted, marginBottom: 8 }}>Add a section</div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                     <button onClick={() => addSection("dashboard")} style={mi}>🧭 Dashboard — grid of bricks</button>
@@ -4814,18 +4883,8 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
                 <div style={{ fontSize: 13, color: B.white, lineHeight: 1.65 }}><EditableText value={flattenText(school.transformation)} readOnly={readOnly} placeholder="Describe the before→after transformation…" onSave={v => onUpdate({ data: { ...school, transformation: v } })} /></div>
               </div>
             )}
-            {/* Class switcher — parallel tracks, each with its own teacher; the general mentor sees all */}
-            {(classes || !readOnly) && (
-              <div style={{ display: "flex", gap: 7, flexWrap: "wrap", alignItems: "center" }}>
-                {classes && classes.map(c => {
-                  const on = c.id === curClassId; const done = (school.semesters || []).filter(s => (s.classId || classes[0].id) === c.id).flatMap(s => s.lessons || []).filter(l => progress[l.number] === "passed").length;
-                  const tot = (school.semesters || []).filter(s => (s.classId || classes[0].id) === c.id).flatMap(s => s.lessons || []).length;
-                  return <button key={c.id} onClick={() => setActiveClass(c.id)} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: on ? T.grad : B.surface2, border: `1px solid ${on ? "transparent" : B.borderMid}`, borderRadius: 100, color: on ? "#fff" : B.mutedMid, padding: "6px 14px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 700, boxShadow: on ? `0 4px 14px ${T.pg}` : "none" }}>{c.icon} {c.title}<span style={{ fontSize: 10.5, opacity: 0.8, fontWeight: 600 }}>{done}/{tot}</span></button>;
-                })}
-                {!readOnly && <button onClick={addClass} disabled={addingClass} title="Create a new class (its own teacher + curriculum) in this school" style={{ background: "none", border: `1px dashed ${T.ba}`, borderRadius: 100, color: T.hi, padding: "6px 13px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 700, opacity: addingClass ? 0.6 : 1 }}>{addingClass ? "Building class…" : "＋ Add a class"}</button>}
-              </div>
-            )}
-            {classes && (() => { const cm = classMentor(school, curClassId); return cm?.name && cm.name !== school.mentor?.name ? <div style={{ fontSize: 11.5, color: B.muted }}>Teacher for this class: <span style={{ color: T.hi, fontWeight: 700 }}>{cm.name}</span></div> : null; })()}
+            {/* The class switcher now lives in the top header; here we just note the active class's teacher. */}
+            {classes && (() => { const cm = classMentor(school, curClassId); const cc = classes.find(c => c.id === curClassId); return <div style={{ fontSize: 11.5, color: B.muted }}>{cc ? <><span style={{ color: T.hi, fontWeight: 700 }}>{cc.icon} {cc.title}</span>{cm?.name && cm.name !== school.mentor?.name ? <> · teacher: <span style={{ color: T.hi, fontWeight: 700 }}>{cm.name}</span></> : null}</> : null}</div>; })()}
             {!readOnly && <div style={{ display: "flex", gap: 6, alignItems: "center", justifyContent: "flex-end" }}>
               <span style={{ fontSize: 11, color: B.muted }}>Layout</span>
               {[["list", "☰ List"], ["map", "🗺️ Map"], ["arcade", "🎮 Arcade"]].map(([k, l]) => <button key={k} onClick={() => onUpdate({ data: { ...school, progression: k } })} style={{ background: (school.progression || "list") === k ? T.ps : "none", border: `1px solid ${(school.progression || "list") === k ? T.ba : B.borderMid}`, borderRadius: 8, color: (school.progression || "list") === k ? T.hi : B.mutedMid, padding: "5px 11px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 700 }}>{l}</button>)}
@@ -5607,7 +5666,7 @@ export default function Senseito() {
   function applyDesign(rec, d) {
     if (!d || typeof d !== "object") return false;
     const cur = rec.data; const patch = {};
-    for (const k of ["theme", "skin", "density", "font", "fontScale", "cover", "coverPos", "minimal", "progression", "navStyle", "navGrad"]) if (k in d) patch[k] = d[k];
+    for (const k of ["theme", "skin", "density", "font", "fontScale", "cover", "coverPos", "minimal", "progression", "navStyle", "navGrad", "effect"]) if (k in d) patch[k] = d[k];
     if (d.template && TEMPLATES[d.template]) { const t = TEMPLATES[d.template]; patch.template = d.template; patch.theme = t.theme; patch.skin = t.skin; patch.font = t.font; patch.density = t.density; }
     if ("palette" in d) patch.palette = d.palette === null ? undefined : { ...(cur.palette || {}), ...(d.palette || {}) };
     if ("hero" in d) patch.hero = d.hero === null ? undefined : { ...(cur.hero || {}), ...(d.hero || {}) };
