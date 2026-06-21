@@ -683,7 +683,12 @@ Format exactly:
 Output only the markdown. No preamble.`;
 
 const ITERATE_SYS = `You are the Senseito School Editor AI. You receive an existing school PLAN as JSON (lessons describe activities as "blockTypes": [type strings] only — NOT full block data) and an edit instruction.
-Return the FULL updated plan as JSON with the EXACT same structure and field names. Apply ONLY the requested change; preserve everything else exactly, including all lesson "number" values, each lesson's "blockTypes" array, the "sections" array, the "concepts" array, "layout", and learningPath/voicePreset/gamiPreset/theme (change those only if asked). If the change introduces a genuinely new concept, you may add it to "concepts". Also refresh "suggestions" to 3-4 NEW specific ideas that fit after this change.
+Return the FULL updated plan as JSON with the EXACT same structure and field names. Apply ONLY the requested change; preserve everything else exactly, including each lesson's "blockTypes" array, the "sections" array, the "concepts" array, "layout", and learningPath/voicePreset/gamiPreset/theme (change those only if asked). If the change introduces a genuinely new concept, you may add it to "concepts". Also refresh "suggestions" to 3-4 NEW specific ideas that fit after this change.
+NUMBERING & MOVING LESSONS: lesson "number" values are assigned AUTOMATICALLY by position — the app renumbers every lesson sequentially across the parts after your edit, so you do NOT need to keep them consistent. What matters is WHICH PART a lesson sits in and its ORDER within that part.
+- "Add a lesson to part 1" → insert it into part 1's "lessons" array at the right spot. Do NOT move it to another part. (It will get the next number in that part automatically; the rest shift down.)
+- "Change lesson X's number to N" → this means MOVE it so it becomes the Nth lesson overall — reorder it into that position, keeping it in the part that position falls in. Don't just relabel.
+- "Move lesson X to part 2" → physically move the object into part 2's "lessons" array.
+- Keep parts contiguous (part 1 holds the first lessons, part 2 the next, etc.). The app also refreshes each part's lesson-range label, so don't fret about week/range text.
 SECTIONS: the experience is made of "sections" (kinds: lessons, mentor, tools, dashboard). PRESERVE the existing sections and their order unless the instruction asks to add/remove/reorder them. A "dashboard" section has its own "blockTypes": [type strings] — keep them unless asked; if adding a tool to a dashboard, append a blockType. A dashboard section MAY also include "cols": 1, 2 or 3 (how many columns its bricks lay out in) — set/change it when the user asks about columns/layout. If the user asks for a new always-available tool/section (or "just a chat", a stats panel, etc.), you may add a section. Design/display bricks (divider, callout, image, cta_button, stat_grid) are allowed on dashboards.
 BLOCKS: keep each lesson's existing "blockTypes" unless the instruction changes them. When ADDING or RE-ORIENTING lessons, give each 1-3 blockTypes allowed for the school's learningPath (see list). Do NOT output block data — only type names. Block contents are authored in a separate step.
 Allowed block types per learning path:
@@ -745,7 +750,7 @@ The creator chats with you to shape this project. Reply in JSON ONLY:
 DECIDE which of three modes this message is:
 1) JUST TALKING — a question, brainstorming, asking your opinion/advice, or thinking out loud ("what do you think of…", "should I…", "how would you design…", "explain…"). Then reply helpfully and set BOTH action and design to null. DO NOT edit the school. If their wish is ambiguous, ASK ONE clarifying question in the reply and keep action/design null — wait for their answer before changing anything.
 2) DESIGN / LAYOUT change — they want to change how it LOOKS or is ARRANGED (colors, gradient, theme, font, spacing/density, cover image, hero title/tagline/description, a floating chat bubble, which sections exist or their order/columns, "just one chat in the middle, no title", etc.). Put the change in "design" (action = null). NEVER turn a design request into a learning activity/block. "add a cover" = a hero cover image, NOT a photo-upload activity.
-3) CONTENT / STRUCTURE change — add/remove/rewrite lessons, activities, bricks, dashboards, tools, copy. Put a precise one-line instruction in "action" (design = null).
+3) CONTENT / STRUCTURE change — add/remove/rewrite lessons, activities, bricks, dashboards, tools, copy. Put a precise one-line instruction in "action" (design = null). NOTE: lesson numbers and each part's lesson-range label are managed AUTOMATICALLY by the app (renumbered by position, parts kept contiguous). So for "add a lesson to part 1", "move lesson 5 to part 2", or "make this lesson number 4", just describe the move/insert in plain terms in "action" — say which part and where in the order — and never tell the creator they must fix numbers by hand.
 
 "design" object — include ONLY the keys you're changing:
 - "template": the whole experience vibe — one of ${TEMPLATE_KEYS.join(", ")} (${Object.entries(TEMPLATES).map(([k, t]) => `${k}=${t.label}`).join("; ")}). Use for "make this corporate/business", "make it kid-friendly/game-like", "turn this into a quick skill". Sets theme/skin/font/density together.
@@ -879,8 +884,27 @@ function flattenText(v) {
 }
 // Deterministic post-generation/edit self-review. Safe, no AI — only fixes that
 // can never make a school worse, so a one-shot generation feels finished.
+// Renumber every lesson sequentially across parts (parts stay contiguous), refresh any
+// lesson-range part labels, and return an old→new number map (for remapping progress).
+// Mutates in place. This is why creators never have to micromanage lesson numbers.
+function renumberSemesters(semesters) {
+  const map = {}; let n = 0;
+  (semesters || []).forEach((sem, si) => {
+    sem.number = si + 1;
+    const lessons = Array.isArray(sem.lessons) ? sem.lessons : [];
+    const start = n + 1;
+    lessons.forEach(l => { if (!l) return; n += 1; if (l.number != null) map[l.number] = n; l.number = n; });
+    const end = n;
+    // Only rewrite labels that clearly encode a lesson range (e.g. "Lessons 1-3", "1 to 3") — leave "Week 1", "3 weeks" alone.
+    if (lessons.length && typeof sem.weeks === "string" && (/lesson/i.test(sem.weeks) || /^\s*\d+\s*(?:-|–|—|to)\s*\d+\s*$/i.test(sem.weeks))) {
+      sem.weeks = `Lessons ${start}${end > start ? `–${end}` : ""}`;
+    }
+  });
+  return map;
+}
 function autoFixSchool(content) {
   if (!content || typeof content !== "object") return content;
+  if (Array.isArray(content.semesters)) renumberSemesters(content.semesters);
   if (Array.isArray(content.sections)) {
     content.sections = content.sections.map(s => {
       if (s.kind !== "dashboard") return s;
@@ -1206,13 +1230,26 @@ function schoolFacts(content) {
 // label, and rotating fun facts from the user's own school so the wait feels alive.
 function BuildProgress({ pct = 0, label = "", facts = [], title = "Building your school…", preview = null }) {
   const start = useRef(Date.now());
+  const previewSince = useRef(0);
   const [disp, setDisp] = useState(Math.max(3, pct));
+  const [, force] = useState(0); // tick so time-based reveal keeps animating between pct changes
   const [fi, setFi] = useState(0);
+  useEffect(() => { if (preview && !previewSince.current) previewSince.current = Date.now(); }, [preview]);
   useEffect(() => {
     const id = setInterval(() => {
       const elapsed = (Date.now() - start.current) / 1000;
       const trickle = 95 * (1 - Math.exp(-elapsed / 40)); // creeps toward 95 over ~2 min
-      setDisp(d => { const target = pct >= 100 ? 100 : Math.max(pct, trickle, d); return d + (target - d) * 0.22; });
+      setDisp(d => {
+        // Honest bar: never run more than a small lead ahead of the REAL pct, so it
+        // can't pretend to be ~85% while the long architect call is still pending
+        // (which made the whole school pop in at once). It eases up as real work lands.
+        const ceiling = pct >= 100 ? 100 : pct + 12;
+        let target = Math.max(pct, Math.min(trickle, ceiling));
+        if (target < d) target = d;             // never go backwards
+        if (d >= ceiling && pct < 100) return d; // hold at the ceiling until real pct moves
+        return d + (target - d) * 0.22;
+      });
+      force(x => (x + 1) % 100000);
     }, 200);
     return () => clearInterval(id);
   }, [pct]);
@@ -1220,6 +1257,9 @@ function BuildProgress({ pct = 0, label = "", facts = [], title = "Building your
   const [pi, setPi] = useState(0);
   useEffect(() => { const id = setInterval(() => setPi(p => p + 1), 3000); return () => clearInterval(id); }, []); // rotating phase phrases
   const shown = Math.min(100, Math.round(disp));
+  // Time-based reveal: the moment the plan lands, the school visibly assembles itself
+  // (name → tagline → mentor → nav tabs → lessons) over ~2.6s instead of popping in at once.
+  const rev = preview && previewSince.current ? Math.min(1, (Date.now() - previewSince.current) / 2600) : 0;
   const eta = pct >= 100 ? "Done!" : shown < 35 ? "about a minute or two" : shown < 75 ? "under a minute" : "almost there";
   const PHASES = [
     { upTo: 14, lines: ["Reading your vision…", "Finding the soul of your school…", "Imagining the perfect mentor…"] },
@@ -1253,20 +1293,23 @@ function BuildProgress({ pct = 0, label = "", facts = [], title = "Building your
         {preview ? (() => {
           const lessons = (preview.semesters || []).flatMap(s => s.lessons || []);
           const allDone = pct >= 100;
-          const ready = allDone ? lessons.length : Math.max(0, Math.min(lessons.length, Math.round(((shown - 30) / 64) * lessons.length)));
+          // Lessons reveal from the time-based cascade first, then keep filling as real authoring (pct) lands.
+          const ready = allDone ? lessons.length : Math.max(0, Math.min(lessons.length, Math.round(Math.max((shown - 30) / 64, Math.min(rev, 0.4)) * lessons.length)));
           const mentorName = preview.mentorName || preview.mentor?.name;
           const secs = [...new Set((preview.sections || []).map(s => s.title || SECTION_META[s.kind]?.title).filter(Boolean))];
-          // "Morph into reality": ghost tabs that progressively become the school's real, themed nav from ~40% up.
+          // "Morph into reality": ghost tabs that become the real, themed nav — cascade in on reveal, then track pct.
           const tabs = ["Home", ...secs, "Lessons"];
-          const morph = Math.max(0, Math.min(1, (shown - 38) / 54)); // 0 @38% → 1 @92%
+          const morph = Math.max(Math.min(1, (shown - 30) / 60), rev);
           const realTabs = allDone ? tabs.length : Math.round(morph * tabs.length);
+          // Staggered entrance for each piece of the school card.
+          const stg = (at) => ({ opacity: rev >= at ? 1 : 0, transform: rev >= at ? "translateY(0)" : "translateY(6px)", transition: "opacity 0.5s ease, transform 0.5s ease" });
           return (
             <div style={{ marginTop: 16 }}>
               <div style={{ background: B.surface2, border: `1px solid ${hexA(ac1, 0.35)}`, borderRadius: 12, padding: "13px 15px", marginBottom: 10, animation: "fadeUp 0.5s ease" }}>
-                <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 16, fontWeight: 700, color: B.white }}>{preview.emoji || "🎓"} {preview.name}</div>
-                {preview.tagline && <div style={{ fontSize: 12, color: ac1, marginTop: 2, fontStyle: "italic" }}>{preview.tagline}</div>}
-                {mentorName && <div style={{ fontSize: 12, color: B.mutedMid, marginTop: 4 }}>Mentor: {mentorName}</div>}
-                {secs.length > 0 && <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 9 }}>{secs.map((s, i) => <span key={i} style={{ fontSize: 11, color: ac1, background: hexA(ac1, 0.12), border: `1px solid ${hexA(ac1, 0.3)}`, borderRadius: 100, padding: "2px 9px", animation: "fadeUp 0.4s ease backwards", animationDelay: `${i * 60}ms` }}>{s}</span>)}</div>}
+                <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 16, fontWeight: 700, color: B.white, ...stg(0) }}>{preview.emoji || "🎓"} {preview.name}</div>
+                {preview.tagline && <div style={{ fontSize: 12, color: ac1, marginTop: 2, fontStyle: "italic", ...stg(0.15) }}>{preview.tagline}</div>}
+                {mentorName && <div style={{ fontSize: 12, color: B.mutedMid, marginTop: 4, ...stg(0.3) }}>Mentor: {mentorName}</div>}
+                {secs.length > 0 && <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 9 }}>{secs.map((s, i) => <span key={i} style={{ fontSize: 11, color: ac1, background: hexA(ac1, 0.12), border: `1px solid ${hexA(ac1, 0.3)}`, borderRadius: 100, padding: "2px 9px", ...stg(0.2 + i * 0.06) }}>{s}</span>)}</div>}
               </div>
               {/* The school's nav morphing into reality — ghost outlines fill into real, themed tabs */}
               {morph > 0 && (
@@ -1728,7 +1771,15 @@ function MentorWidget({ code, T }) {
     return () => window.removeEventListener("message", onMsg);
   }, []);
   const accent = (T?.p || "#7C3AED"), accent2 = (T?.a || "#06B6D4");
-  const srcDoc = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;padding:0;background:transparent;color:#e7e9f5;font-family:system-ui,-apple-system,sans-serif;font-size:14px}*{box-sizing:border-box}:root{--p:${accent};--a:${accent2}}button{font-family:inherit}</style></head><body>${code}<script>function _r(){try{parent.postMessage({__mw:1,h:document.documentElement.scrollHeight},'*')}catch(e){}}window.addEventListener('load',_r);try{new ResizeObserver(_r).observe(document.body)}catch(e){}setTimeout(_r,120);setTimeout(_r,600);setTimeout(_r,1500)<\/script></body></html>`;
+  // Sanitize the AI fragment so OUR resize script can never render as visible text:
+  //  • drop document-level tags (a stray </body>/</html> closes the body early → trailing script shows)
+  //  • drop any auto-size/postMessage script the model echoed (it leaked "function _r(){…}" next to slides)
+  const safe = String(code || "")
+    .replace(/<!doctype[^>]*>/gi, "")
+    .replace(/<\/?(?:html|head|body)\b[^>]*>/gi, "")
+    .replace(/<script\b[^>]*>[\s\S]*?(?:__mw|parent\s*\.\s*postMessage)[\s\S]*?<\/script>/gi, "")
+    .replace(/function\s+_r\s*\(\s*\)\s*\{[\s\S]*?setTimeout\(\s*_r\s*,\s*1500\s*\)\s*;?/gi, "");
+  const srcDoc = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;padding:0;background:transparent;color:#e7e9f5;font-family:system-ui,-apple-system,sans-serif;font-size:14px}*{box-sizing:border-box}:root{--p:${accent};--a:${accent2}}button{font-family:inherit}</style></head><body>${safe}<script>function _r(){try{parent.postMessage({__mw:1,h:document.documentElement.scrollHeight},'*')}catch(e){}}window.addEventListener('load',_r);try{new ResizeObserver(_r).observe(document.body)}catch(e){}setTimeout(_r,120);setTimeout(_r,600);setTimeout(_r,1500)<\/script></body></html>`;
   return <iframe ref={ref} title="mentor visual" sandbox="allow-scripts" srcDoc={srcDoc} style={{ width: "100%", height: h, border: `1px solid ${B.border}`, borderRadius: 10, background: B.surface, display: "block", marginTop: 8 }} />;
 }
 // Curated visual primitives the mentor fills with simple JSON (```viz). App-
@@ -2457,46 +2508,227 @@ function StatGridBlock({ data = {}, T, school, bus }) {
 
 // ── SHOWROOM — creator builds an AI-generated, animated slide deck; each slide's
 // HTML is SAVED (cached), so students just watch — no regeneration, no AI cost. ──
-async function genShowroomSlide(school, prompt) {
-  const T = themeFor(school);
-  const sys = `You design ONE beautiful presentation slide as a SELF-CONTAINED HTML fragment (inline <style> and <script> allowed; gentle CSS animations welcome). HARD RULES: NO external URLs/images/fonts/scripts — it runs sandboxed offline; transparent background; light text (#e7e9f5); large, readable, well-centered content; use ${T.p} and ${T.a} as accent colors. Make it feel premium and alive. Return ONLY the HTML — no markdown fences.`;
-  const code = await api(sys, [{ role: "user", content: `Slide: ${prompt}` }], 1800);
-  return String(code).replace(/^```[a-z]*\n?/i, "").replace(/```\s*$/, "").trim();
+// ── SHOWROOM — a structured, editable slide canvas (native React, no iframe). ──
+// Slides are JSON {bg, h, els[]} so they're fully editable AND the AI's resize
+// script can never leak into them. Elements: text / box / ellipse / line / image.
+const _sid = () => Math.random().toString(36).slice(2, 9);
+const _clamp = (v, lo = 0, hi = 100) => Math.max(lo, Math.min(hi, Number(v) || 0));
+function defaultSlideBg(T) { return `linear-gradient(135deg, ${hexA(T.p, 0.22)}, ${hexA(T.a, 0.10)}), #0b0d1a`; }
+function normalizeSlideEl(e) {
+  return {
+    id: e.id || _sid(), type: ["text", "box", "ellipse", "line", "image"].includes(e.type) ? e.type : "text",
+    x: _clamp(e.x), y: _clamp(e.y), w: _clamp(e.w ?? 30, 1, 100), h: _clamp(e.h ?? 14, 0, 100),
+    html: typeof e.html === "string" ? e.html : (typeof e.text === "string" ? e.text : ""),
+    size: Number(e.size) || undefined, color: e.color, align: e.align, weight: e.weight,
+    fill: e.fill, border: e.border, radius: e.radius, thickness: Number(e.thickness) || undefined,
+    url: e.url || "", fit: e.fit, frame: !!e.frame, rot: Number(e.rot) || 0,
+  };
 }
+function normalizeSlide(j, T, keep = {}) {
+  const els = Array.isArray(j?.els) ? j.els.map(normalizeSlideEl) : [];
+  return { ...keep, bg: j?.bg || keep.bg || defaultSlideBg(T), h: keep.h || 360, els };
+}
+async function genShowroomSlideJSON(school, prompt, current) {
+  const T = themeFor(school);
+  const schema = `Return JSON {"bg": string, "els": Element[]}.
+"bg" = a CSS background for the whole slide — dark & premium, ideally a linear-gradient using accents ${T.p} and ${T.a}.
+Each Element: { "type", "x","y","w","h" (PERCENT of slide, 0-100, keep an inner margin, never overflow the edges), plus type fields }
+- text: "html" (short, punchy; may use <b> <i> <br>), "size" (px 16-72), "color" (hex, light), "align" ("left"|"center"|"right"), "weight" (400-800)
+- box / ellipse: "fill" (css color, may be semi-transparent), "border" (css, e.g. "1px solid rgba(255,255,255,0.25)"), "radius" (px)
+- line: "color" (hex), "thickness" (px 1-8)
+- image: "url" (ALWAYS ""), "fit" ("cover"|"contain"), "radius" (px), "frame" (bool — a bordered mat where the creator drops a visual)
+Compose 3-6 elements into ONE beautiful, balanced, readable slide (light text on dark). Leave image url empty so the creator adds their own visuals.`;
+  const sys = `You are a world-class presentation designer building ONE slide for "${school.name}". ${schema}`;
+  const user = current
+    ? `Here is the CURRENT slide JSON:\n${JSON.stringify({ bg: current.bg, els: current.els })}\n\nApply ONLY this change and return the FULL updated JSON, preserving every element and property you were NOT asked to change (same "id"s, positions, text, styles): ${prompt}`
+    : `Design this slide: ${prompt}`;
+  return apiJSON(sys, [{ role: "user", content: user }], 2000);
+}
+
+function ShowroomEl({ e, T, selected, editMode, onSelect, onChange, onEditText, editingText }) {
+  const lineH = e.type === "line";
+  const base = { position: "absolute", left: e.x + "%", top: e.y + "%", width: e.w + "%", height: lineH ? (e.thickness || 3) : e.h + "%", transform: e.rot ? `rotate(${e.rot}deg)` : undefined, boxSizing: "border-box", userSelect: editingText ? "text" : "none" };
+  const ring = selected && editMode ? { outline: `2px solid ${T.hi}`, outlineOffset: 2 } : {};
+  let inner;
+  if (e.type === "text") {
+    const ts = { width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: e.align === "left" ? "flex-start" : e.align === "right" ? "flex-end" : "center", textAlign: e.align || "center", fontSize: (e.size || 28), color: e.color || "#fff", fontWeight: e.weight || 700, lineHeight: 1.25, overflowWrap: "anywhere", padding: 4 };
+    inner = editingText
+      ? <div contentEditable suppressContentEditableWarning onBlur={ev => onEditText(ev.currentTarget.innerHTML)} style={{ ...ts, outline: "none", cursor: "text" }} dangerouslySetInnerHTML={{ __html: e.html || "" }} />
+      : <div style={ts} dangerouslySetInnerHTML={{ __html: e.html || "<span style='opacity:.5'>Text</span>" }} />;
+  } else if (e.type === "box" || e.type === "ellipse") {
+    inner = <div style={{ width: "100%", height: "100%", background: e.fill || "transparent", border: e.border || "none", borderRadius: e.type === "ellipse" ? "50%" : (e.radius ?? 12) }} />;
+  } else if (e.type === "line") {
+    inner = <div style={{ width: "100%", height: "100%", background: e.color || T.p, borderRadius: 4 }} />;
+  } else if (e.type === "image") {
+    inner = e.url
+      ? <img src={e.url} alt="" style={{ width: "100%", height: "100%", objectFit: e.fit || "contain", borderRadius: e.radius ?? 10, border: e.frame ? `2px solid ${hexA(T.p, 0.6)}` : "none", background: e.frame ? hexA(T.p, 0.08) : "transparent", padding: e.frame ? 6 : 0, boxSizing: "border-box" }} />
+      : <div style={{ width: "100%", height: "100%", border: `2px dashed ${hexA(T.p, 0.5)}`, borderRadius: e.radius ?? 10, display: "flex", alignItems: "center", justifyContent: "center", color: hexA(T.p, 0.8), fontSize: 12, background: hexA(T.p, 0.06), textAlign: "center", padding: 6 }}>🖼️ {editMode ? "Add image URL →" : "Visual"}</div>;
+  }
+  // Drag to move (edit mode, not while editing text).
+  const onDown = (ev) => {
+    if (!editMode || editingText) return;
+    onSelect(); ev.stopPropagation();
+    if (ev.target.dataset.handle) return; // resize handled separately
+    const canvas = ev.currentTarget.parentElement.getBoundingClientRect();
+    const sx = ev.clientX, sy = ev.clientY, ox = e.x, oy = e.y;
+    const move = (m) => onChange({ x: _clamp(ox + (m.clientX - sx) / canvas.width * 100, -5, 98), y: _clamp(oy + (m.clientY - sy) / canvas.height * 100, -5, 98) });
+    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+  };
+  const onResize = (ev) => {
+    ev.stopPropagation(); ev.preventDefault();
+    const canvas = ev.currentTarget.parentElement.parentElement.getBoundingClientRect();
+    const sx = ev.clientX, sy = ev.clientY, ow = e.w, oh = e.h;
+    const move = (m) => onChange({ w: _clamp(ow + (m.clientX - sx) / canvas.width * 100, 2, 100), h: lineH ? e.h : _clamp(oh + (m.clientY - sy) / canvas.height * 100, 1, 100) });
+    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+  };
+  return (
+    <div onPointerDown={onDown} onDoubleClick={() => editMode && e.type === "text" && onEditText()} style={{ ...base, ...ring, cursor: editMode ? (editingText ? "text" : "move") : "default" }}>
+      {inner}
+      {selected && editMode && !editingText && <div data-handle="1" onPointerDown={onResize} style={{ position: "absolute", right: -7, bottom: -7, width: 14, height: 14, borderRadius: "50%", background: T.hi, border: "2px solid #fff", cursor: "nwse-resize" }} />}
+    </div>
+  );
+}
+
 function ShowroomBlock({ data = {}, T, school, canEdit, onEditData, disabled }) {
   const slides = data.slides || [];
   const [i, setI] = useState(0);
   const [draft, setDraft] = useState("");
-  const [busy, setBusy] = useState(false);
-  const cur = slides[Math.min(i, Math.max(0, slides.length - 1))];
+  const [busy, setBusy] = useState(false);       // "regen" | "iter" | false
+  const [edit, setEdit] = useState(false);
+  const [sel, setSel] = useState(null);
+  const [editingText, setEditingText] = useState(false);
+  const idx = Math.min(i, Math.max(0, slides.length - 1));
+  const cur = slides[idx];
   const save = (next, goTo) => { onEditData?.({ ...data, slides: next }); if (goTo != null) setI(goTo); };
-  async function generate() {
-    const p = draft.trim(); if (!p || busy) return; setBusy(true);
-    try { const code = await genShowroomSlide(school, p); const next = [...slides]; next[i] = { prompt: p, code }; save(next); }
-    catch { } setBusy(false);
+  const setSlide = (patch) => { const next = slides.map((s, j) => j === idx ? { ...s, ...patch } : s); save(next); };
+  const setEls = (els) => setSlide({ els });
+  const selEl = (cur?.els || []).find(e => e.id === sel);
+  const updEl = (id, patch) => setEls((cur.els || []).map(e => e.id === id ? { ...e, ...patch } : e));
+  const addEl = (type) => {
+    const presets = {
+      text: { x: 14, y: 38, w: 72, h: 18, html: "New text", size: 30, color: "#fff", align: "center", weight: 700 },
+      box: { x: 30, y: 30, w: 40, h: 30, fill: hexA(T.p, 0.18), border: `1px solid ${hexA(T.p, 0.5)}`, radius: 14 },
+      ellipse: { x: 36, y: 28, w: 28, h: 28, fill: hexA(T.a, 0.18), border: `1px solid ${hexA(T.a, 0.5)}` },
+      line: { x: 20, y: 50, w: 60, h: 0, color: T.p, thickness: 3 },
+      image: { x: 30, y: 22, w: 40, h: 50, url: "", fit: "contain", radius: 12, frame: true },
+    };
+    const e = normalizeSlideEl({ type, ...presets[type] });
+    setEls([...(cur.els || []), e]); setSel(e.id);
+  };
+  const delEl = (id) => { setEls((cur.els || []).filter(e => e.id !== id)); setSel(null); };
+  const zMove = (id, dir) => { const arr = [...(cur.els || [])]; const k = arr.findIndex(e => e.id === id); if (k < 0) return; const e = arr.splice(k, 1)[0]; if (dir === "front") arr.push(e); else arr.unshift(e); setEls(arr); };
+  async function ai(kind) {
+    const p = draft.trim(); if ((!p && kind !== "regen") || busy) return;
+    setBusy(kind);
+    try {
+      const j = await genShowroomSlideJSON(school, p || cur?.prompt || "a beautiful title slide", kind === "iter" ? cur : null);
+      const ns = normalizeSlide(j, T, { prompt: p || cur?.prompt || "", h: cur?.h || 360 });
+      save(slides.map((s, k) => k === idx ? ns : s)); setSel(null); setEdit(true);
+    } catch { } setBusy(false);
   }
-  const addSlide = () => { const next = [...slides, { prompt: "", code: "" }]; save(next, next.length - 1); setDraft(""); };
-  const delSlide = () => { const next = slides.filter((_, j) => j !== i); save(next, Math.max(0, i - 1)); };
+  const addSlide = () => { const next = [...slides, { prompt: "", bg: defaultSlideBg(T), h: 360, els: [] }]; save(next, next.length - 1); setDraft(""); setEdit(true); setSel(null); };
+  const delSlide = () => { const next = slides.filter((_, j) => j !== idx); save(next, Math.max(0, idx - 1)); };
+  const resizeCanvas = (ev) => {
+    ev.preventDefault(); const sy = ev.clientY, oh = cur?.h || 360;
+    const move = (m) => setSlide({ h: Math.max(180, Math.min(900, oh + (m.clientY - sy))) });
+    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+  };
+  const isLegacy = cur && cur.code && !cur.els;
+  const pill = (active) => ({ background: active ? T.ps : B.surface3, border: `1px solid ${active ? T.ba : B.borderMid}`, borderRadius: 8, color: active ? T.hi : B.mutedMid, padding: "6px 11px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 700 });
   return (
     <div style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 14, padding: 14 }}>
-      <div style={{ fontSize: 13, fontWeight: 700, color: B.white, marginBottom: 10 }}>🎬 {data.title || "Showroom"}</div>
-      {slides.length === 0 && !canEdit && <div style={{ fontSize: 13, color: B.muted, textAlign: "center", padding: "20px 0" }}>No slides yet.</div>}
-      {cur?.code ? <MentorWidget code={cur.code} T={T} /> : (slides.length > 0 && <div style={{ border: `1px dashed ${B.borderMid}`, borderRadius: 10, padding: "26px 16px", textAlign: "center", color: B.mutedMid, fontSize: 13 }}>{canEdit ? "Write a prompt below and Generate this slide." : "Slide coming soon."}</div>)}
-      {slides.length > 0 && <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 14, marginTop: 10 }}>
-        <button onClick={() => setI(Math.max(0, i - 1))} disabled={i === 0} style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.white, width: 30, height: 28, cursor: "pointer", opacity: i === 0 ? 0.4 : 1 }}>◀</button>
-        <span style={{ fontSize: 12, color: B.mutedMid }}>{Math.min(i + 1, slides.length)} / {slides.length}</span>
-        <button onClick={() => setI(Math.min(slides.length - 1, i + 1))} disabled={i >= slides.length - 1} style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.white, width: 30, height: 28, cursor: "pointer", opacity: i >= slides.length - 1 ? 0.4 : 1 }}>▶</button>
-      </div>}
-      {canEdit && <div style={{ marginTop: 12, borderTop: `1px solid ${B.border}`, paddingTop: 12 }}>
-        <textarea value={draft || cur?.prompt || ""} onChange={e => setDraft(e.target.value)} placeholder='Describe slide… e.g. "Title slide: The Water Cycle, with 3 animated droplets"' rows={2} style={{ width: "100%", background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, fontFamily: "inherit", fontSize: 12.5, padding: "8px 11px", resize: "vertical" }} />
-        <div style={{ display: "flex", gap: 7, marginTop: 8, flexWrap: "wrap" }}>
-          {slides.length === 0 && <button onClick={() => { addSlide(); }} style={{ ...pBtn(T), opacity: 1 }}>＋ First slide</button>}
-          {slides.length > 0 && <button onClick={generate} disabled={busy} style={{ ...pBtn(T), opacity: busy ? 0.6 : 1 }}>{busy ? "Generating…" : (cur?.code ? "↻ Regenerate" : "✨ Generate slide")}</button>}
-          {slides.length > 0 && <button onClick={addSlide} style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, padding: "9px 13px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit" }}>＋ Add slide</button>}
-          {slides.length > 0 && <button onClick={delSlide} style={{ background: "none", border: "1px solid rgba(248,113,113,0.3)", borderRadius: 9, color: "#F87171", padding: "9px 13px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit" }}>Delete slide</button>}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: B.white }}>🎬 {data.title || "Showroom"}</div>
+        {canEdit && cur && !isLegacy && <button onClick={() => { setEdit(!edit); setEditingText(false); setSel(null); }} style={pill(edit)}>{edit ? "✓ Done editing" : "✎ Edit slide"}</button>}
+      </div>
+      {slides.length === 0 && <div style={{ fontSize: 13, color: B.muted, textAlign: "center", padding: "20px 0" }}>{canEdit ? "Add your first slide below." : "No slides yet."}</div>}
+
+      {/* Legacy HTML slides render read-only (sanitized); offer a one-click rebuild into the editable format. */}
+      {isLegacy ? (
+        <>
+          <MentorWidget code={cur.code} T={T} />
+          {canEdit && <button onClick={() => ai("regen")} disabled={!!busy} style={{ ...pBtn(T), marginTop: 8, opacity: busy ? 0.6 : 1 }}>{busy ? "Rebuilding…" : "↻ Rebuild as an editable slide"}</button>}
+        </>
+      ) : cur && (
+        <div style={{ position: "relative" }}>
+          <div onPointerDown={() => { setSel(null); setEditingText(false); }} style={{ position: "relative", width: "100%", height: cur.h || 360, background: cur.bg || defaultSlideBg(T), borderRadius: 12, overflow: "hidden", border: `1px solid ${B.border}` }}>
+            {(cur.els || []).map(e => (
+              <ShowroomEl key={e.id} e={e} T={T} editMode={edit} selected={sel === e.id} editingText={editingText && sel === e.id}
+                onSelect={() => { setSel(e.id); setEditingText(false); }}
+                onChange={(patch) => updEl(e.id, patch)}
+                onEditText={(html) => { if (html === undefined) { setSel(e.id); setEditingText(true); } else { updEl(e.id, { html }); setEditingText(false); } }} />
+            ))}
+            {(cur.els || []).length === 0 && <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: hexA("#ffffff", 0.5), fontSize: 13 }}>{canEdit ? "Empty slide — add elements or generate with AI." : ""}</div>}
+          </div>
+          {edit && <div data-handle="1" onPointerDown={resizeCanvas} title="Drag to resize the slide" style={{ height: 12, marginTop: 2, display: "flex", alignItems: "center", justifyContent: "center", cursor: "ns-resize", color: B.muted, fontSize: 11 }}>⇕ drag to resize</div>}
         </div>
-        <div style={{ fontSize: 11, color: B.muted, marginTop: 7 }}>Slides are saved once generated — students just watch, nothing regenerates.</div>
+      )}
+
+      {slides.length > 0 && <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 14, marginTop: 10 }}>
+        <button onClick={() => { setI(Math.max(0, idx - 1)); setSel(null); }} disabled={idx === 0} style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.white, width: 30, height: 28, cursor: "pointer", opacity: idx === 0 ? 0.4 : 1 }}>◀</button>
+        <span style={{ fontSize: 12, color: B.mutedMid }}>{Math.min(idx + 1, slides.length)} / {slides.length}</span>
+        <button onClick={() => { setI(Math.min(slides.length - 1, idx + 1)); setSel(null); }} disabled={idx >= slides.length - 1} style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.white, width: 30, height: 28, cursor: "pointer", opacity: idx >= slides.length - 1 ? 0.4 : 1 }}>▶</button>
       </div>}
+
+      {/* Editing toolbar: add elements + per-element properties */}
+      {canEdit && edit && cur && !isLegacy && (
+        <div style={{ marginTop: 12, borderTop: `1px solid ${B.border}`, paddingTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+            <span style={{ fontSize: 11, color: B.muted, fontWeight: 700, marginRight: 2 }}>Add:</span>
+            {[["text", "🔤 Text"], ["box", "▭ Box"], ["ellipse", "⬭ Shape"], ["line", "／ Line"], ["image", "🖼️ Frame"]].map(([t, l]) => <button key={t} onClick={() => addEl(t)} style={pill(false)}>{l}</button>)}
+          </div>
+          {selEl ? (
+            <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 10, padding: 10, display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+              <span style={{ fontSize: 11, color: T.hi, fontWeight: 700 }}>{({ text: "🔤 Text", box: "▭ Box", ellipse: "⬭ Shape", line: "／ Line", image: "🖼️ Frame" })[selEl.type]}</span>
+              {selEl.type === "text" && <>
+                <button onClick={() => { setSel(selEl.id); setEditingText(true); }} style={pill(false)}>✎ Edit text</button>
+                <button onClick={() => updEl(selEl.id, { html: `<b>${(selEl.html || "").replace(/<\/?b>/g, "")}</b>` })} style={pill(false)}>B</button>
+                <button onClick={() => updEl(selEl.id, { size: Math.max(12, (selEl.size || 28) - 4) })} style={pill(false)}>A−</button>
+                <button onClick={() => updEl(selEl.id, { size: Math.min(96, (selEl.size || 28) + 4) })} style={pill(false)}>A+</button>
+                {["left", "center", "right"].map(a => <button key={a} onClick={() => updEl(selEl.id, { align: a })} style={pill(selEl.align === a)}>{a === "left" ? "⬅" : a === "right" ? "➡" : "⬛"}</button>)}
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, color: B.mutedMid }}>Color<input type="color" value={selEl.color || "#ffffff"} onChange={ev => updEl(selEl.id, { color: ev.target.value })} style={{ width: 26, height: 24, border: "none", background: "none", cursor: "pointer", padding: 0 }} /></label>
+              </>}
+              {(selEl.type === "box" || selEl.type === "ellipse") && <>
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, color: B.mutedMid }}>Fill<input type="color" onChange={ev => updEl(selEl.id, { fill: ev.target.value })} style={{ width: 26, height: 24, border: "none", background: "none", cursor: "pointer", padding: 0 }} /></label>
+                <button onClick={() => updEl(selEl.id, { fill: "transparent" })} style={pill(false)}>No fill</button>
+              </>}
+              {selEl.type === "line" && <label style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, color: B.mutedMid }}>Color<input type="color" value={selEl.color || T.p} onChange={ev => updEl(selEl.id, { color: ev.target.value })} style={{ width: 26, height: 24, border: "none", background: "none", cursor: "pointer", padding: 0 }} /></label>}
+              {selEl.type === "image" && <>
+                <button onClick={() => { const u = window.prompt("Image / SVG URL (or upload in the Library first, then paste its link):", selEl.url || ""); if (u != null) updEl(selEl.id, { url: u.trim() }); }} style={pill(false)}>🔗 Set URL</button>
+                <button onClick={() => updEl(selEl.id, { fit: selEl.fit === "cover" ? "contain" : "cover" })} style={pill(false)}>Fit: {selEl.fit || "contain"}</button>
+                <button onClick={() => updEl(selEl.id, { frame: !selEl.frame })} style={pill(selEl.frame)}>Frame</button>
+              </>}
+              <span style={{ flex: 1 }} />
+              <button onClick={() => zMove(selEl.id, "front")} title="Bring to front" style={pill(false)}>⤒</button>
+              <button onClick={() => zMove(selEl.id, "back")} title="Send to back" style={pill(false)}>⤓</button>
+              <button onClick={() => delEl(selEl.id)} style={{ ...pill(false), color: "#F87171", borderColor: "rgba(248,113,113,0.3)" }}>🗑</button>
+            </div>
+          ) : <div style={{ fontSize: 11.5, color: B.muted }}>Tap an element to edit it · double-click text to type · drag to move · drag the ⇕ handle to resize the slide.</div>}
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <span style={{ fontSize: 11, color: B.muted }}>Background</span>
+            <input type="color" onChange={ev => setSlide({ bg: ev.target.value })} style={{ width: 28, height: 26, border: "none", background: "none", cursor: "pointer", padding: 0 }} />
+            <button onClick={() => setSlide({ bg: defaultSlideBg(T) })} style={pill(false)}>Themed gradient</button>
+          </div>
+        </div>
+      )}
+
+      {/* AI + slide management */}
+      {canEdit && (
+        <div style={{ marginTop: 12, borderTop: `1px solid ${B.border}`, paddingTop: 12 }}>
+          <textarea value={draft} onChange={e => setDraft(e.target.value)} placeholder={cur?.els?.length ? 'Tell the AI what to change… e.g. "make this more beautiful" or "add a subtitle under the title"' : 'Describe the slide… e.g. "Title slide: The Water Cycle, big bold title + 3 labelled stages"'} rows={2} style={{ width: "100%", background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, fontFamily: "inherit", fontSize: 12.5, padding: "8px 11px", resize: "vertical", boxSizing: "border-box" }} />
+          <div style={{ display: "flex", gap: 7, marginTop: 8, flexWrap: "wrap" }}>
+            {slides.length === 0 && <button onClick={addSlide} style={pBtn(T)}>＋ First slide</button>}
+            {slides.length > 0 && !isLegacy && <button onClick={() => ai("regen")} disabled={!!busy} title="Redesign the whole slide from your prompt" style={{ ...pBtn(T), opacity: busy ? 0.6 : 1 }}>{busy === "regen" ? "Designing…" : "↻ Regenerate"}</button>}
+            {slides.length > 0 && !isLegacy && (cur?.els?.length > 0) && <button onClick={() => ai("iter")} disabled={!!busy || !draft.trim()} title="Keep everything; change only what you describe" style={{ background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 9, color: T.hi, padding: "9px 14px", cursor: "pointer", fontSize: 13, fontFamily: "inherit", fontWeight: 700, opacity: (busy || !draft.trim()) ? 0.6 : 1 }}>{busy === "iter" ? "Iterating…" : "✎ Iterate (surgical)"}</button>}
+            {slides.length > 0 && <button onClick={addSlide} style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, padding: "9px 13px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit" }}>＋ Add slide</button>}
+            {slides.length > 0 && <button onClick={delSlide} style={{ background: "none", border: "1px solid rgba(248,113,113,0.3)", borderRadius: 9, color: "#F87171", padding: "9px 13px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit" }}>Delete slide</button>}
+          </div>
+          <div style={{ fontSize: 11, color: B.muted, marginTop: 7 }}>Regenerate redesigns the whole slide · Iterate changes only what you ask · students just watch.</div>
+        </div>
+      )}
     </div>
   );
 }
@@ -3936,12 +4168,17 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
     onUpdate({ data: { ...school, semesters: school.semesters.filter((_, i) => i !== si) } });
   }
   const setSemField = (si, field, v) => onUpdate({ data: { ...school, semesters: school.semesters.map((s, i) => i === si ? { ...s, [field]: v } : s) } });
-  // Custom-lesson insert: append to a chosen part with a fresh unique number (keeps progress + unlock order intact).
+  // Custom-lesson insert: drop it at the END of the chosen part, then renumber the whole
+  // curriculum by position so parts stay contiguous (the new lesson becomes the next number
+  // IN THAT PART, not a stray "lesson 12") and progress is remapped to the new numbers.
   function addCustomLessonToSemester(si, lessonObj) {
-    let max = 0; (school.semesters || []).forEach(s => (s.lessons || []).forEach(l => { if ((l.number || 0) > max) max = l.number; }));
-    const full = { number: max + 1, open: false, ...lessonObj };
-    onUpdate({ data: { ...school, semesters: (school.semesters || []).map((s, i) => i === si ? { ...s, lessons: [...(s.lessons || []), full] } : s) } });
-    showToast(`✓ Added "${full.title}" to ${school.semesters[si]?.title || "this part"}`);
+    const sems = (school.semesters || []).map(s => ({ ...s, lessons: [...(s.lessons || [])] }));
+    if (!sems[si]) return;
+    sems[si].lessons.push({ ...lessonObj, open: false });
+    const map = renumberSemesters(sems); // mutates sems; map: old number → new number
+    const newProg = {}; Object.keys(progress || {}).forEach(k => { const nk = map[k]; if (nk) newProg[nk] = progress[k]; });
+    onUpdate({ data: { ...school, semesters: sems }, progress: newProg });
+    showToast(`✓ Added "${lessonObj.title}" to ${sems[si].title || "this part"}`);
   }
   // Decorative/content bricks BETWEEN parts (rendered after a semester's lessons).
   const setSemBricks = (si, fn) => onUpdate({ data: { ...school, semesters: (school.semesters || []).map((s, i) => i === si ? { ...s, interlude: fn(s.interlude || []) } : s) } });
