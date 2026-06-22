@@ -2705,13 +2705,21 @@ function snapAxis(pos, size) {
 function snapSize(start, size) { const edge = start + size; for (const line of SNAP_LINES) if (Math.abs(edge - line) < 2.4) return line - start; return Math.round(size / 2.5) * 2.5; }
 function ShowroomEl({ e, T, selected, editMode, snap, onSelect, onChange, onEditText, editingText }) {
   const lineH = e.type === "line";
+  const editRef = useRef(null);
+  // When entering text-edit, focus the field and place the caret at the end.
+  useEffect(() => {
+    if (editingText && editRef.current) {
+      const el = editRef.current; el.focus();
+      try { const r = document.createRange(); r.selectNodeContents(el); r.collapse(false); const s = window.getSelection(); s.removeAllRanges(); s.addRange(r); } catch { }
+    }
+  }, [editingText]);
   const base = { position: "absolute", left: e.x + "%", top: e.y + "%", width: e.w + "%", height: lineH ? (e.thickness || 3) : e.h + "%", transform: e.rot ? `rotate(${e.rot}deg)` : undefined, boxSizing: "border-box", userSelect: editingText ? "text" : "none", touchAction: editMode && !editingText ? "none" : "auto" };
   const ring = selected && editMode ? { outline: `2px solid ${T.hi}`, outlineOffset: 2 } : {};
   let inner;
   if (e.type === "text") {
     const ts = { width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: e.align === "left" ? "flex-start" : e.align === "right" ? "flex-end" : "center", textAlign: e.align || "center", fontSize: (e.size || 28), color: e.color || "#fff", fontWeight: e.weight || 700, lineHeight: 1.25, overflowWrap: "anywhere", padding: 4 };
     inner = editingText
-      ? <div contentEditable suppressContentEditableWarning onBlur={ev => onEditText(ev.currentTarget.innerHTML)} style={{ ...ts, outline: "none", cursor: "text" }} dangerouslySetInnerHTML={{ __html: e.html || "" }} />
+      ? <div ref={editRef} contentEditable suppressContentEditableWarning onBlur={ev => onEditText(ev.currentTarget.innerHTML)} style={{ ...ts, outline: "none", cursor: "text" }} dangerouslySetInnerHTML={{ __html: e.html || "" }} />
       : <div style={ts} dangerouslySetInnerHTML={{ __html: e.html || "<span style='opacity:.5'>Text</span>" }} />;
   } else if (e.type === "box" || e.type === "ellipse") {
     inner = <div style={{ width: "100%", height: "100%", background: e.fill || "transparent", border: e.border || "none", borderRadius: e.type === "ellipse" ? "50%" : (e.radius ?? 12) }} />;
@@ -2724,8 +2732,10 @@ function ShowroomEl({ e, T, selected, editMode, snap, onSelect, onChange, onEdit
   }
   // Drag to move (edit mode, not while editing text).
   const onDown = (ev) => {
-    if (!editMode || editingText) return;
-    onSelect(); ev.stopPropagation();
+    if (!editMode) return;
+    ev.stopPropagation();        // never let the canvas's deselect handler fire when touching an element
+    if (editingText) return;     // …but allow caret placement / selection inside the contentEditable
+    onSelect();
     if (ev.target.dataset.handle) return; // resize handled separately
     const node = ev.currentTarget; try { node.setPointerCapture(ev.pointerId); } catch { }
     const canvas = node.parentElement.getBoundingClientRect();
@@ -2794,7 +2804,23 @@ function ShowroomBlock({ data = {}, T, school, canEdit, onEditData, disabled }) 
     setEls([...(cur.els || []), e]); setSel(e.id);
   };
   const delEl = (id) => { setEls((cur.els || []).filter(e => e.id !== id)); setSel(null); };
+  const rotEl = (id, by) => updEl(id, { rot: (((cur.els || []).find(e => e.id === id)?.rot || 0) + by) % 360 });
   const zMove = (id, dir) => { const arr = [...(cur.els || [])]; const k = arr.findIndex(e => e.id === id); if (k < 0) return; const e = arr.splice(k, 1)[0]; if (dir === "front") arr.push(e); else arr.unshift(e); setEls(arr); };
+  // Delete / Backspace removes the selected element (but never while typing in a text element).
+  // A ref keeps the handler acting on the freshest selection/els (no stale-closure data loss).
+  const delState = useRef({});
+  delState.current = { canEdit, edit, sel, editingText, delEl };
+  useEffect(() => {
+    const onKey = (ev) => {
+      const s = delState.current;
+      if (!s.canEdit || !s.edit || !s.sel || s.editingText) return;
+      const t = ev.target, tag = (t.tagName || "").toLowerCase();
+      if (t.isContentEditable || tag === "input" || tag === "textarea") return;
+      if (ev.key === "Delete" || ev.key === "Backspace") { ev.preventDefault(); s.delEl(s.sel); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   async function ai(kind) {
     const p = draft.trim(); if ((!p && kind !== "regen") || busy) return;
     setBusy(kind);
@@ -2821,8 +2847,13 @@ function ShowroomBlock({ data = {}, T, school, canEdit, onEditData, disabled }) 
   const delSlide = () => { const next = slides.filter((_, j) => j !== idx); save(next, Math.max(0, idx - 1)); };
   const resizeCanvas = (ev) => {
     ev.preventDefault(); const node = ev.currentTarget; try { node.setPointerCapture(ev.pointerId); } catch { }
-    const sy = ev.clientY, oh = cur?.h || 360;
-    const move = (m) => setSlide({ h: Math.max(180, Math.min(1200, oh + (m.clientY - sy))) });
+    const sy = ev.clientY, oh = cur?.h || 360, origEls = (cur?.els || []).map(e => ({ ...e }));
+    // Resize the WORK AREA, not the content: rescale each element's vertical %s so their on-screen
+    // pixel position/size stay put as the frame grows or shrinks (x/w are % of width — unchanged).
+    const move = (m) => {
+      const nh = Math.max(180, Math.min(1400, oh + (m.clientY - sy))); const k = oh / nh;
+      setSlide({ h: nh, els: origEls.map(e => ({ ...e, y: +(e.y * k).toFixed(2), h: +(e.h * k).toFixed(2) })) });
+    };
     const up = () => { node.removeEventListener("pointermove", move); node.removeEventListener("pointerup", up); node.removeEventListener("pointercancel", up); };
     node.addEventListener("pointermove", move); node.addEventListener("pointerup", up); node.addEventListener("pointercancel", up);
   };
@@ -2902,12 +2933,15 @@ function ShowroomBlock({ data = {}, T, school, canEdit, onEditData, disabled }) 
                 <button onClick={() => updEl(selEl.id, { fit: selEl.fit === "cover" ? "contain" : "cover" })} style={pill(false)}>Fit: {selEl.fit || "contain"}</button>
                 <button onClick={() => updEl(selEl.id, { frame: !selEl.frame })} style={pill(selEl.frame)}>Frame</button>
               </>}
+              <button onClick={() => rotEl(selEl.id, -15)} title="Rotate left 15°" style={pill(false)}>⟲</button>
+              <button onClick={() => rotEl(selEl.id, 15)} title="Rotate right 15°" style={pill(false)}>⟳</button>
+              {selEl.rot ? <button onClick={() => updEl(selEl.id, { rot: 0 })} title="Reset rotation" style={pill(false)}>{Math.round(((selEl.rot % 360) + 360) % 360)}°</button> : null}
               <span style={{ flex: 1 }} />
               <button onClick={() => zMove(selEl.id, "front")} title="Bring to front" style={pill(false)}>⤒</button>
               <button onClick={() => zMove(selEl.id, "back")} title="Send to back" style={pill(false)}>⤓</button>
-              <button onClick={() => delEl(selEl.id)} style={{ ...pill(false), color: "#F87171", borderColor: "rgba(248,113,113,0.3)" }}>🗑</button>
+              <button onClick={() => delEl(selEl.id)} title="Delete (or press Delete)" style={{ ...pill(false), color: "#F87171", borderColor: "rgba(248,113,113,0.3)" }}>🗑</button>
             </div>
-          ) : <div style={{ fontSize: 11.5, color: B.muted }}>Tap an element to edit it · double-click text to type · drag to move · drag the ⇕ handle to resize the slide.</div>}
+          ) : <div style={{ fontSize: 11.5, color: B.muted }}>Tap an element to edit it · double-click text to type · drag to move · select & press Delete to remove · drag the ⇕ handle to resize the work area.</div>}
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <span style={{ fontSize: 11, color: B.muted }}>Frame background</span>
             <input type="color" onChange={ev => setSlide({ bg: ev.target.value })} title="Pick a colour" style={{ width: 28, height: 26, border: "none", background: "none", cursor: "pointer", padding: 0 }} />
