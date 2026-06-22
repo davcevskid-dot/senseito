@@ -67,6 +67,11 @@ async function apiJSON(system, messages, maxTokens = 4000, model) {
 }
 
 const stripFence = (s) => String(s || "").replace(/^```[a-z]*\n?/i, "").replace(/```\s*$/, "").trim();
+// True when every <style>/<script> in the fragment is closed — a cheap truncation detector
+// (a cut-off <style> or <script> ruins an otherwise-fine visual).
+const htmlComplete = (c) =>
+  ((c.match(/<style\b/gi) || []).length === (c.match(/<\/style\s*>/gi) || []).length) &&
+  ((c.match(/<script\b/gi) || []).length === (c.match(/<\/script\s*>/gi) || []).length);
 // Generate an HTML fragment with a plan-free, self-correcting loop: generate → check → repair.
 // Drops any leading self-talk/prose before the first real tag; retries with a firm note if the
 // result fails `ok`; falls back to `fallback` (e.g. the previous working code) rather than ship junk.
@@ -2604,8 +2609,8 @@ OUTPUT CONTRACT: return ONLY runnable HTML — your FIRST character must be "<".
   const user = current
     ? `Here is the CURRENT slide HTML:\n${current}\n\nApply ONLY this change, keeping the rest working: ${prompt}. Return the COMPLETE updated fragment (HTML only, start with "<").`
     : `Design this slide now: ${prompt}\nSchool context: ${subject}\n(Output the HTML only — start with "<".)`;
-  const ok = (c) => /<\s*(svg|div|canvas|section|main|style|h1|h2)\b/i.test(c) && c.length > 80;
-  return genCodeWithRepair({ system: sys, user, model: "sonnet", tokens: 3200, ok, repair: "Your previous reply was prose, not code. Output ONLY the HTML fragment, starting with '<'.", fallback: current || "" });
+  const ok = (c) => /<\s*(svg|div|canvas|section|main|style|h1|h2)\b/i.test(c) && c.length > 80 && htmlComplete(c);
+  return genCodeWithRepair({ system: sys, user, model: "sonnet", tokens: 5000, ok, repair: "Your previous reply was prose or got cut off. Output ONLY the COMPLETE HTML fragment, starting with '<', every <style>/<script> closed.", fallback: current || "" });
 }
 function normalizeSlideEl(e) {
   return {
@@ -2649,11 +2654,11 @@ OUTPUT CONTRACT: return ONLY runnable HTML. Your FIRST character must be "<". Do
   const user = current
     ? `Here is the CURRENT signature HTML:\n${current}\n\nKeep it working and apply ONLY this change, preserving the rest: ${idea}. Return the COMPLETE updated fragment (HTML only, start with "<").`
     : `Build the signature visual now. Subject: ${subject}\nSignature idea: ${idea}\n(Output the HTML only — start with "<".)`;
-  // Must be real markup, not the model narrating its plan ("I should create a visual…").
-  const ok = (c) => /<\s*(svg|div|canvas|section|main|figure|h1|h2|p|span|style|ul)\b/i.test(c) && c.length > 60;
+  // Must be real, COMPLETE markup — not the model narrating its plan, and not truncated mid-tag.
+  const ok = (c) => /<\s*(svg|div|canvas|section|main|figure|h1|h2|p|span|style|ul)\b/i.test(c) && c.length > 60 && htmlComplete(c);
   return genCodeWithRepair({
-    system: sys, user, model: "sonnet", tokens: 2600, ok,
-    repair: "Your previous reply was prose/explanation, not code. Output ONLY the HTML fragment, starting with '<'. No description.",
+    system: sys, user, model: "sonnet", tokens: 4000, ok,
+    repair: "Your previous reply was prose/explanation or got cut off. Output ONLY the COMPLETE HTML fragment, starting with '<', with every <style>/<script> properly closed. No description.",
     fallback: current || "",
   });
 }
