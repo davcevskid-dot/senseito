@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useMemo, Component } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useMemo, Component } from "react";
 
 // ═════════════════════════════════════════════════════════════
 // SENSEITO — Build any school you can imagine.
@@ -205,6 +205,9 @@ const GLOBAL_CSS = `
   @keyframes gridDrift{to{background-position:0 -44px}}
   @keyframes meshShift{0%,100%{background-position:0% 50%}50%{background-position:100% 50%}}
   @keyframes floatUp{to{transform:translateY(-112vh)}}
+  @keyframes sxGlow{0%,100%{box-shadow:0 0 0 2px var(--sx-ring,#7C3AED),0 0 22px 4px var(--sx-ring,#7C3AED)}50%{box-shadow:0 0 0 3px var(--sx-ring,#7C3AED),0 0 38px 9px var(--sx-ring,#7C3AED)}}
+  @keyframes sxFadeMask{from{opacity:0}to{opacity:1}}
+  @keyframes sxRise{from{opacity:0;transform:translateY(16px) scale(0.985)}to{opacity:1;transform:none}}
   *{box-sizing:border-box;margin:0;padding:0}
   html,body{max-width:100%;overflow-x:hidden}
   img,iframe,video,svg{max-width:100%}
@@ -214,6 +217,16 @@ const GLOBAL_CSS = `
   ::-webkit-scrollbar-thumb{background:rgba(124,58,237,0.28);border-radius:4px}
   ::-webkit-scrollbar-track{background:transparent}
   button:active{transform:scale(0.98)}
+  .sx-stagger>*{animation:sxRise .5s cubic-bezier(.22,.61,.36,1) both}
+  .sx-stagger>*:nth-child(1){animation-delay:.03s}
+  .sx-stagger>*:nth-child(2){animation-delay:.09s}
+  .sx-stagger>*:nth-child(3){animation-delay:.15s}
+  .sx-stagger>*:nth-child(4){animation-delay:.21s}
+  .sx-stagger>*:nth-child(5){animation-delay:.27s}
+  .sx-stagger>*:nth-child(6){animation-delay:.33s}
+  .sx-stagger>*:nth-child(7){animation-delay:.39s}
+  .sx-stagger>*:nth-child(n+8){animation-delay:.45s}
+  @media(prefers-reduced-motion:reduce){.sx-stagger>*{animation:none}}
   .dashGrid{display:grid;gap:14px}
   .dashGrid>*{min-width:0}
   .dashGrid pre,.dashGrid code,.dashGrid textarea,.dashGrid img,.dashGrid iframe{max-width:100%}
@@ -4548,7 +4561,287 @@ function ArcadeRun({ school, T, progress, xp, onEnter, onEdit, readOnly }) {
     </div>
   );
 }
-function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, publicBase, token, onSetSlug, onIterate, iterating = false, iterProg = { pct: 0, label: "" } }) {
+// ─────────────────────────────────────────────────────────────
+// THE "WOW" REVEAL + CREATOR GUIDE
+// Shown once when a school finishes generating (the reveal), plus a
+// persistent, re-openable interactive guide with its OWN AI — distinct
+// from the school mentor, the lesson mentor and the build chat.
+// ─────────────────────────────────────────────────────────────
+
+// Snapshot of what was just built — used to make the reveal feel earned.
+function schoolWowStats(school) {
+  const sems = school.semesters || [];
+  const lessons = sems.flatMap(s => s.lessons || []);
+  const dashBricks = (getSections(school) || []).filter(s => s.kind === "dashboard").reduce((a, s) => a + (s.blocks?.length || 0), 0);
+  const activities = lessons.reduce((a, l) => a + (l.blocks?.length || 0), 0) + dashBricks;
+  return {
+    lessons: lessons.length,
+    parts: sems.length,
+    activities,
+    concepts: (school.concepts || []).length,
+    sections: (getSections(school) || []).length,
+    mentor: school.mentor?.name || "your mentor",
+    duration: school.duration || "",
+    path: pathLabel(school.learningPath),
+  };
+}
+
+// The mentor stepping forward to greet the CREATOR who just built the school.
+const REVEAL_GREETING_SYS = (school) => `You are ${school.mentor?.name || "the mentor"}, the AI mentor at the heart of "${school.name}". ${school.mentor?.systemVoice || ""}
+The creator has just generated this school and is seeing it for the first time. Step forward and greet THEM (the creator, not a student) in your own voice — warm, real, one short paragraph. Say who you are and, in one line, what you'll help their students reach. Max 42 words. Plain text only: no markdown, no quotation marks, no emoji unless it is genuinely your voice.`;
+
+// The Creator Guide AI — a product guide for USING Senseito's builder. NOT the
+// school mentor, NOT a lesson teacher, NOT the build chat. It only explains how
+// to design / edit / publish THIS school, anchored to whatever step is highlighted.
+const GUIDE_SYS = (school, step) => `You are the Senseito Creator Guide — a friendly, sharp product guide that teaches a CREATOR how to use the Senseito school builder.
+You are NOT ${school.mentor?.name || "the school's mentor"} (that AI teaches students), NOT a lesson teacher, and NOT the build chat. You ONLY explain how to use Senseito to design, edit and publish the school "${school.name}".
+Right now the creator is looking at: ${step ? `"${step.title}" — ${step.body}` : "their school overview"}.
+Answer their follow-up about using this part of the builder. Be concrete: tell them exactly where to click, or the kind of sentence to type into the build chat on the left (e.g. "type: add a community section"). Keep replies under 70 words, warm and plain — no markdown headers. If they ask something unrelated to building their school, gently bring them back.`;
+
+function StatChip({ icon, value, label, T, delay }) {
+  if (!value && value !== 0) return null;
+  return (
+    <div style={{ flex: "1 1 84px", minWidth: 84, background: B.surface2, border: `1px solid ${T.ba}`, borderRadius: 14, padding: "13px 10px", textAlign: "center", animation: "popIn 0.5s both", animationDelay: `${delay}s` }}>
+      <div style={{ fontSize: 17, marginBottom: 4 }}>{icon}</div>
+      <div style={{ fontSize: 21, fontWeight: 800, color: B.white, fontFamily: "'Space Grotesk',sans-serif", letterSpacing: -0.5, lineHeight: 1 }}>{value}</div>
+      <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: B.muted, marginTop: 5 }}>{label}</div>
+    </div>
+  );
+}
+
+// THE REVEAL — a calm, proud unveiling (no confetti): proof → mentor → what's next.
+function SchoolReveal({ school, T, onClose, onTour }) {
+  const st = schoolWowStats(school);
+  const fallback = school.mentor?.sampleLine
+    ? `I'm ${st.mentor}. ${school.mentor.sampleLine}`
+    : `I'm ${st.mentor} — I'll be the one walking your students through ${school.name}, one step at a time.`;
+  const [greeting, setGreeting] = useState(fallback);
+  const [greetReady, setGreetReady] = useState(false);
+  const src = (school.sourcePrompt || "").trim();
+  useEffect(() => {
+    let dead = false;
+    (async () => {
+      try {
+        const r = await api(REVEAL_GREETING_SYS(school), [{ role: "user", content: "(The creator arrives and sees the finished school. Greet them.)" }], 220, "sonnet");
+        if (!dead && r && r.trim()) { setGreeting(r.trim()); setGreetReady(true); }
+      } catch { /* keep the instant fallback */ }
+    })();
+    return () => { dead = true; };
+  }, []); // eslint-disable-line
+  const tips = [
+    ["🪄", <>Type in the <b style={{ color: T.hi }}>build chat on the left</b> to change anything — “add a community tab”, “warmer tone”.</>],
+    ["✏️", <>Click any text — the name, tagline, a lesson — to <b style={{ color: T.hi }}>edit it in place</b>.</>],
+    ["🌐", <><b style={{ color: T.hi }}>Publish</b> when you're ready for a public link, custom URL and live student analytics.</>],
+  ];
+  const stats = [
+    st.lessons ? ["📚", st.lessons, st.lessons === 1 ? "Lesson" : "Lessons"] : null,
+    st.activities ? ["⚡", st.activities, "Activities"] : null,
+    st.concepts ? ["🧠", st.concepts, "Concepts"] : null,
+    st.parts > 1 ? ["🗂️", st.parts, "Parts"] : (st.sections ? ["🧭", st.sections, "Sections"] : null),
+    st.duration ? ["⏳", st.duration, "Duration"] : null,
+  ].filter(Boolean).slice(0, 5);
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 600, background: "rgba(4,4,10,0.74)", backdropFilter: "blur(7px)", display: "flex", alignItems: "flex-start", justifyContent: "center", overflowY: "auto", padding: "max(24px,5vh) 16px 40px", animation: "sxFadeMask 0.35s ease" }} onClick={onClose}>
+      <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 560, background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 22, overflow: "hidden", boxShadow: `0 30px 90px rgba(0,0,0,0.6), 0 0 0 1px ${T.ps}`, animation: "sxRise 0.5s cubic-bezier(.22,.61,.36,1) both" }}>
+        {/* Header band — themed, understated pride */}
+        <div style={{ padding: "26px 26px 22px", background: T.heroGrad || T.gr, borderBottom: `1px solid ${B.border}`, textAlign: "center", position: "relative" }}>
+          <button onClick={onClose} title="Skip" style={{ position: "absolute", top: 12, right: 12, background: "rgba(0,0,0,0.25)", border: "none", borderRadius: 8, color: "#fff", width: 28, height: 28, cursor: "pointer", fontSize: 14 }}>✕</button>
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}><SenseitoMark size={44} /></div>
+          <div style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: 2.5, color: T.hi, marginBottom: 7 }}>Your school is ready</div>
+          <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: "clamp(22px,5vw,30px)", fontWeight: 800, color: B.white, letterSpacing: -0.8, lineHeight: 1.1 }}>{school.emoji || "🏫"} {school.name}</div>
+          {school.tagline && <div style={{ fontSize: 13.5, color: B.mutedMid, marginTop: 8, fontStyle: "italic" }}>{flattenText(school.tagline)}</div>}
+        </div>
+
+        <div style={{ padding: "20px 22px 24px", display: "flex", flexDirection: "column", gap: 18 }}>
+          {/* Personalization — what they asked → what was built */}
+          {src && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, animation: "sxRise 0.5s 0.05s both" }}>
+              <div style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 12, padding: "11px 14px" }}>
+                <div style={{ fontSize: 9.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.4, color: B.muted, marginBottom: 4 }}>You asked for</div>
+                <div style={{ fontSize: 13, color: B.mutedMid, fontStyle: "italic", lineHeight: 1.5 }}>“{src.length > 160 ? src.slice(0, 160) + "…" : src}”</div>
+              </div>
+              <div style={{ textAlign: "center", fontSize: 16, color: T.p }}>↓</div>
+              <div style={{ fontSize: 12.5, color: B.white, textAlign: "center", lineHeight: 1.5 }}>Senseito designed a complete, interactive school — <b style={{ color: T.hi }}>structure, mentor, activities and soul</b>.</div>
+            </div>
+          )}
+
+          {/* Stats */}
+          {stats.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {stats.map(([ic, v, l], i) => <StatChip key={l} icon={ic} value={v} label={l} T={T} delay={0.12 + i * 0.08} />)}
+            </div>
+          )}
+
+          {/* Mentor introduction */}
+          <div style={{ display: "flex", gap: 13, background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 16, padding: 15, animation: "sxRise 0.5s 0.2s both" }}>
+            <div style={{ width: 46, height: 46, borderRadius: "50%", background: T.grad, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, fontWeight: 800, color: "#fff", flexShrink: 0, boxShadow: `0 6px 20px ${T.pg}` }}>{(st.mentor[0] || "🎓").toUpperCase()}</div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.4, color: T.hi, marginBottom: 2 }}>Meet your mentor</div>
+              <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 16, fontWeight: 700, color: B.white, marginBottom: 5 }}>{st.mentor}</div>
+              <div style={{ fontSize: 13, color: B.mutedMid, lineHeight: 1.6, opacity: greetReady ? 1 : 0.72, transition: "opacity 0.4s" }}>{greeting}</div>
+            </div>
+          </div>
+
+          {/* What's next — customize nudges */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, animation: "sxRise 0.5s 0.28s both" }}>
+            <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.4, color: B.muted }}>Make it yours</div>
+            {tips.map(([ic, txt], i) => (
+              <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start", fontSize: 12.5, color: B.mutedMid, lineHeight: 1.55 }}>
+                <span style={{ fontSize: 14, flexShrink: 0 }}>{ic}</span><span>{txt}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* CTAs */}
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 2 }}>
+            <button onClick={onClose} style={{ flex: "2 1 200px", background: T.grad, border: "none", borderRadius: 12, color: "#fff", padding: "13px", cursor: "pointer", fontSize: 14, fontWeight: 800, fontFamily: "inherit", boxShadow: `0 8px 26px ${T.pg}` }}>Explore your school →</button>
+            <button onClick={onTour} style={{ flex: "1 1 150px", background: B.surface2, border: `1px solid ${T.ba}`, borderRadius: 12, color: T.hi, padding: "13px", cursor: "pointer", fontSize: 13.5, fontWeight: 700, fontFamily: "inherit" }}>🧭 Take the quick tour</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// The steps the guide walks through — each anchors to a [data-guide] element.
+const GUIDE_STEPS = [
+  { key: "chat", icon: "🪄", title: "Your magic wand", body: "This is the build chat — your direct line to Senseito. Type any change in plain English (“make it 8 lessons”, “add a community tab”, “warmer tone”) and the whole school rebuilds. No menus to hunt through." },
+  { key: "hero", icon: "✏️", title: "Everything is editable", body: "Click any text here — the name, tagline, description — to edit it inline. If there's a cover image, hover it to set the focal point." },
+  { key: "soul", icon: "✨", title: "Your school's soul", body: "This signature centerpiece is generated uniquely for your school. It's the first thing that makes a visitor feel something — ask the build chat to reimagine it any time." },
+  { key: "tabs", icon: "🧭", title: "Sections", body: "Each tab is a section — Lessons, Mentor, Tools, dashboards, community. Drag to reorder, double-click to rename, and press ＋ to add a new one." },
+  { key: "publish", icon: "🌐", title: "Go live", body: "Publish gives you a shareable public link, a claimable custom URL, and live signup + student analytics right on this page." },
+];
+
+// THE CREATOR GUIDE — spotlight walkthrough + its own contextual AI chat.
+function CreatorGuide({ school, T, onClose }) {
+  const steps = GUIDE_STEPS;
+  const [i, setI] = useState(0);
+  const [rect, setRect] = useState(null);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [msgs, setMsgs] = useState([]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const step = steps[i];
+  const bottom = useRef(null);
+
+  // Locate the highlighted element, scroll it into view, and measure it.
+  useLayoutEffect(() => {
+    let raf;
+    const find = () => {
+      const el = document.querySelector(`[data-guide="${step.key}"]`);
+      if (!el) { setRect(null); return null; }
+      const r = el.getBoundingClientRect();
+      const offscreen = r.width === 0 || r.bottom < 8 || r.top > window.innerHeight - 8 || r.right < 8 || r.left > window.innerWidth - 8;
+      setRect(offscreen ? null : { top: r.top, left: r.left, width: r.width, height: r.height });
+      return el;
+    };
+    const el = document.querySelector(`[data-guide="${step.key}"]`);
+    if (el) { el.scrollIntoView({ behavior: "smooth", block: "center" }); raf = requestAnimationFrame(() => setTimeout(find, 260)); }
+    else { setRect(null); }
+    const onMove = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(find); };
+    window.addEventListener("resize", onMove); window.addEventListener("scroll", onMove, true);
+    return () => { cancelAnimationFrame(raf); window.removeEventListener("resize", onMove); window.removeEventListener("scroll", onMove, true); };
+  }, [i, step.key]);
+
+  useEffect(() => { bottom.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs, loading, chatOpen]);
+
+  async function ask() {
+    const t = input.trim(); if (!t || loading) return; setInput("");
+    const next = [...msgs, { role: "user", content: t }]; setMsgs(next); setLoading(true);
+    try { const r = await api(GUIDE_SYS(school, step), toApiMessages(next), 600, "sonnet"); setMsgs([...next, { role: "assistant", content: r }]); }
+    catch (e) { setMsgs([...next, { role: "assistant", content: "Hmm, I couldn't reach my notes just now — try again? (" + e.message + ")" }]); }
+    setLoading(false);
+  }
+
+  const last = i === steps.length - 1;
+  // Tooltip placement: below the target if there's room, else above; centered when no target.
+  const pad = 14, ttW = Math.min(380, (typeof window !== "undefined" ? window.innerWidth : 380) - 24);
+  let ttStyle;
+  if (rect) {
+    const below = rect.top + rect.height + 320 < window.innerHeight || rect.top < 180;
+    const top = below ? rect.top + rect.height + 12 : Math.max(12, rect.top - 12);
+    let left = rect.left + rect.width / 2 - ttW / 2;
+    left = Math.max(12, Math.min(left, window.innerWidth - ttW - 12));
+    ttStyle = { position: "fixed", left, [below ? "top" : "bottom"]: below ? top : window.innerHeight - rect.top + 12, width: ttW, zIndex: 612 };
+  } else {
+    ttStyle = { position: "fixed", left: "50%", top: "50%", transform: "translate(-50%,-50%)", width: ttW, zIndex: 612 };
+  }
+
+  return (
+    <>
+      {/* Dimmer + cutout. Four panels around the target leave it lit; click backdrop = next. */}
+      <div style={{ position: "fixed", inset: 0, zIndex: 610, animation: "sxFadeMask 0.3s ease" }} onClick={() => (last ? onClose() : setI(i + 1))}>
+        {rect ? (
+          <>
+            <div style={{ position: "fixed", left: 0, top: 0, right: 0, height: Math.max(0, rect.top - pad), background: "rgba(4,4,10,0.66)" }} />
+            <div style={{ position: "fixed", left: 0, top: rect.top + rect.height + pad, right: 0, bottom: 0, background: "rgba(4,4,10,0.66)" }} />
+            <div style={{ position: "fixed", left: 0, top: Math.max(0, rect.top - pad), width: Math.max(0, rect.left - pad), height: rect.height + pad * 2, background: "rgba(4,4,10,0.66)" }} />
+            <div style={{ position: "fixed", left: rect.left + rect.width + pad, top: Math.max(0, rect.top - pad), right: 0, height: rect.height + pad * 2, background: "rgba(4,4,10,0.66)" }} />
+            {/* Glowing ring on the target */}
+            <div style={{ position: "fixed", left: rect.left - pad, top: rect.top - pad, width: rect.width + pad * 2, height: rect.height + pad * 2, borderRadius: 14, pointerEvents: "none", animation: "sxGlow 1.8s ease-in-out infinite", "--sx-ring": T.p }} />
+          </>
+        ) : (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(4,4,10,0.72)" }} />
+        )}
+      </div>
+
+      {/* Tooltip card */}
+      <div style={ttStyle} onClick={e => e.stopPropagation()}>
+        <div style={{ background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 16, padding: 16, boxShadow: "0 24px 70px rgba(0,0,0,0.6)", animation: "sxRise 0.32s ease both" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 9 }}>
+            <div style={{ width: 30, height: 30, borderRadius: 9, background: T.ps, border: `1px solid ${T.ba}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, flexShrink: 0 }}>{step.icon}</div>
+            <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 15, fontWeight: 700, color: B.white, flex: 1 }}>{step.title}</div>
+            <button onClick={onClose} title="Close guide" style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 16 }}>✕</button>
+          </div>
+          <div style={{ fontSize: 13, color: B.mutedMid, lineHeight: 1.62 }}>{step.body}</div>
+
+          {/* Ask-the-guide — the part most walkthroughs lack: a live AI you can question */}
+          <button onClick={() => setChatOpen(o => !o)} style={{ marginTop: 11, width: "100%", background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 10, color: T.hi, padding: "8px 11px", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span>💬 Ask the Guide about this</span><span style={{ color: B.muted }}>{chatOpen ? "▾" : "▸"}</span>
+          </button>
+          {chatOpen && (
+            <div style={{ marginTop: 9, border: `1px solid ${B.border}`, borderRadius: 12, overflow: "hidden", background: B.surface2 }}>
+              <div style={{ maxHeight: 200, overflowY: "auto", padding: "10px 11px", display: "flex", flexDirection: "column", gap: 9 }}>
+                {msgs.length === 0 && <div style={{ fontSize: 12, color: B.muted, lineHeight: 1.5 }}>I'm your <b style={{ color: T.hi }}>Creator Guide</b> — ask me anything about using Senseito here. e.g. “How do I add a payment wall?” or “Can I change the mentor's voice?”</div>}
+                {msgs.map((m, k) => (
+                  <div key={k} style={{ display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start" }}>
+                    <div style={{ maxWidth: "88%", background: m.role === "user" ? T.ps : B.surface3, border: `1px solid ${m.role === "user" ? T.ba : B.border}`, borderRadius: m.role === "user" ? "11px 4px 11px 11px" : "4px 11px 11px 11px", padding: "7px 10px", fontSize: 12.5, lineHeight: 1.55, color: B.white }}>{m.role === "user" ? m.content : <Markdown text={m.content} />}</div>
+                  </div>
+                ))}
+                {loading && <div style={{ display: "flex", gap: 4, paddingLeft: 2 }}>{[0, 1, 2].map(k => <div key={k} style={{ width: 6, height: 6, borderRadius: "50%", background: T.p, animation: `pulse 1s ${k * 0.2}s infinite` }} />)}</div>}
+                <div ref={bottom} />
+              </div>
+              <div style={{ display: "flex", gap: 7, padding: "8px 9px", borderTop: `1px solid ${B.border}` }}>
+                <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); ask(); } }} placeholder="Ask the Guide…" style={{ flex: 1, background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, fontFamily: "inherit", fontSize: 12.5, padding: "7px 10px" }} />
+                <button onClick={ask} disabled={loading || !input.trim()} style={{ background: T.p, border: "none", borderRadius: 9, padding: "7px 11px", color: "#fff", fontSize: 13, fontWeight: 700, cursor: "pointer", opacity: (loading || !input.trim()) ? 0.5 : 1 }}>↑</button>
+              </div>
+            </div>
+          )}
+
+          {/* Footer nav */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 12 }}>
+            <div style={{ display: "flex", gap: 5, marginRight: "auto" }}>
+              {steps.map((_, k) => <div key={k} style={{ width: k === i ? 16 : 6, height: 6, borderRadius: 3, background: k === i ? T.p : B.borderMid, transition: "width 0.2s" }} />)}
+            </div>
+            {i > 0 && <button onClick={() => setI(i - 1)} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.mutedMid, padding: "7px 13px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 700 }}>Back</button>}
+            <button onClick={() => (last ? onClose() : setI(i + 1))} style={{ background: T.grad, border: "none", borderRadius: 9, color: "#fff", padding: "7px 16px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 800 }}>{last ? "Done ✓" : "Next →"}</button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// Persistent re-open handle for the Creator Guide (top-right corner).
+function GuideButton({ T, onClick, pulse }) {
+  return (
+    <button onClick={onClick} title="Creator Guide — how to use Senseito" style={{ position: "fixed", top: 12, right: 60, zIndex: 130, display: "inline-flex", alignItems: "center", gap: 7, background: B.surface2, border: `1px solid ${T.ba}`, borderRadius: 100, color: T.hi, padding: "7px 13px", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", boxShadow: pulse ? `0 0 0 0 ${T.pg}` : "0 4px 16px rgba(0,0,0,0.3)", animation: pulse ? "sxGlow 2.2s ease-in-out infinite" : "none", "--sx-ring": T.ba }}>
+      <span style={{ fontSize: 14 }}>🧭</span> Guide
+    </button>
+  );
+}
+
+function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, publicBase, token, onSetSlug, onIterate, iterating = false, iterProg = { pct: 0, label: "" }, justBuilt = false, onRevealSeen }) {
   const school = rec.data;
   const T = themeFor(school);
   const sk = skinCfg(school.skin, T);
@@ -4672,6 +4965,11 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const [buildingTool, setBuildingTool] = useState(null);
   const [toast, setToast] = useState(null);
   const toastTimer = useRef(null);
+  // WOW: one-time reveal on a freshly generated school + re-openable Creator Guide.
+  const [reveal, setReveal] = useState(justBuilt && !readOnly);
+  const [guideOpen, setGuideOpen] = useState(false);
+  const [guidePulse, setGuidePulse] = useState(() => { try { return !localStorage.getItem("senseito_guideSeen"); } catch { return true; } });
+  const openGuide = () => { setGuideOpen(true); setGuidePulse(false); try { localStorage.setItem("senseito_guideSeen", "1"); } catch { } };
 
   const progress = rec.progress || {};
   const xp = rec.xp || 0;
@@ -4886,6 +5184,9 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
     <div style={{ position: "relative", fontFamily: fontStack(school) }}>
       <SchoolEffects effect={school.effect} T={T} />
       <Toast toast={toast} />
+      {!readOnly && reveal && <SchoolReveal school={school} T={T} onClose={() => { setReveal(false); onRevealSeen?.(); }} onTour={() => { setReveal(false); onRevealSeen?.(); openGuide(); }} />}
+      {!readOnly && <GuideButton T={T} pulse={guidePulse} onClick={openGuide} />}
+      {!readOnly && guideOpen && <CreatorGuide school={school} T={T} onClose={() => setGuideOpen(false)} />}
       {activeLesson && <LessonView school={classes ? { ...school, mentor: classMentor(school, lessonClassId(school, activeLesson.number)) } : school} lesson={activeLesson} T={T} onClose={() => {
           const finished = activeLesson; setActiveLesson(null);
           // Arcade: a continuous run — when you clear a lesson, roll straight into the next one.
@@ -4913,7 +5214,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
         {!readOnly && (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 0 14px", flexWrap: "wrap", gap: 8 }}>
             <div style={{ fontSize: 12, color: B.muted }}>💬 Type in the left chat to change anything</div>
-            <button onClick={() => onPublish(rec)} disabled={publishing} style={{ background: rec.published ? "rgba(74,222,128,0.1)" : "linear-gradient(135deg,#059669,#047857)", border: rec.published ? "1px solid rgba(74,222,128,0.35)" : "none", borderRadius: 8, color: rec.published ? "#4ADE80" : "white", padding: "6px 13px", cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit" }}>
+            <button data-guide="publish" onClick={() => onPublish(rec)} disabled={publishing} style={{ background: rec.published ? "rgba(74,222,128,0.1)" : "linear-gradient(135deg,#059669,#047857)", border: rec.published ? "1px solid rgba(74,222,128,0.35)" : "none", borderRadius: 8, color: rec.published ? "#4ADE80" : "white", padding: "6px 13px", cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit" }}>
               {publishing ? "Publishing…" : rec.published ? "✓ Published — copy link" : "🌐 Publish"}
             </button>
           </div>
@@ -5001,7 +5302,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
             </div>
           )}
           {/* Banner — varies by the school's visual skin */}
-          <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: sk.radius, overflow: "hidden", animation: "fadeUp 0.5s ease" }}>
+          <div data-guide="hero" style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: sk.radius, overflow: "hidden", animation: "fadeUp 0.5s ease" }}>
             {school.cover && <div style={{ position: "relative" }}>
               <img src={school.cover} alt="" style={{ width: "100%", height: 170, objectFit: "cover", objectPosition: school.coverPos || "center", display: "block" }} />
               {!readOnly && <div style={{ position: "absolute", top: 8, right: 8, display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 3, background: "rgba(0,0,0,0.45)", borderRadius: 8, padding: 4 }} title="Set the cover's focal point">
@@ -5032,7 +5333,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
           </div>
 
           {/* The school's signature centerpiece — its unique "soul" */}
-          {(school.soul?.code || !readOnly) && <SignaturePanel school={school} T={T} canEdit={!readOnly} onUpdate={onUpdate} />}
+          {(school.soul?.code || !readOnly) && <div data-guide="soul"><SignaturePanel school={school} T={T} canEdit={!readOnly} onUpdate={onUpdate} /></div>}
 
           {/* Body bricks — freestanding content between the hero and the sections (shows on every tab) */}
           {((school.bodyBricks || []).length > 0 || !readOnly) && (
@@ -5061,7 +5362,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
           {/* Tabs + section content — two-column when navStyle is "sidebar" */}
           <div style={{ display: "flex", flexDirection: sidebar ? "row" : "column", gap: sidebar ? 16 : dens, alignItems: "flex-start" }}>
           <div style={{ position: "sticky", top: 10, zIndex: 80, ...(sidebar ? { width: 200, flexShrink: 0 } : { width: "100%" }) }}>
-            <div style={nv.bar}>
+            <div data-guide="tabs" style={nv.bar}>
               {TABS.map(([k, l], ti) => (
                 <button key={k} draggable={!readOnly}
                   onDragStart={() => { dragIdx.current = ti; }}
@@ -5110,7 +5411,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
               );
             })()}
           </div>
-          <div style={{ flex: 1, minWidth: 0, width: "100%", display: "flex", flexDirection: "column", gap: dens, ...(SECTIONS.find(s => s.id === activeTab)?.sticky ? { position: "sticky", top: 64, alignSelf: "flex-start", maxHeight: "calc(100vh - 80px)", overflowY: "auto" } : {}) }}>
+          <div key={activeTab} className="sx-stagger" style={{ flex: 1, minWidth: 0, width: "100%", display: "flex", flexDirection: "column", gap: dens, ...(SECTIONS.find(s => s.id === activeTab)?.sticky ? { position: "sticky", top: 64, alignSelf: "flex-start", maxHeight: "calc(100vh - 80px)", overflowY: "auto" } : {}) }}>
           {activeTab === "lessons" && (<>
             {(school.transformation || !readOnly) && (
               <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: "16px 22px" }}>
@@ -5269,6 +5570,7 @@ function Home({ onCreated }) {
       await soulP;
       autoFixSchool(content); // deterministic self-review so the one-shot feels finished
       const built = composeSchool(content, dna);
+      built.sourcePrompt = (prompt || source || "").trim().slice(0, 400); // for the reveal's "you asked for →" beat
       setProg(p => ({ ...p, pct: 100, label: "Your school is ready! ✨" })); // completion beat
       await new Promise(r => setTimeout(r, 900)); // let the "ready" moment land before opening
       onCreated(built);
@@ -5655,7 +5957,7 @@ function ProjectChat({ rec, iterating, history, onSend, onIterate, onBack, onThe
         {iterating && <div style={{ display: "flex", gap: 4, paddingLeft: 4 }}>{[0, 1, 2].map(i => <div key={i} style={{ width: 6, height: 6, borderRadius: "50%", background: T.p, animation: `pulse 1s ${i * 0.2}s infinite` }} />)}</div>}
         <div ref={bottom} />
       </div>
-      <div style={{ padding: "10px 12px", borderTop: `1px solid ${B.border}`, display: "flex", gap: 8, alignItems: "flex-end" }}>
+      <div data-guide="chat" style={{ padding: "10px 12px", borderTop: `1px solid ${B.border}`, display: "flex", gap: 8, alignItems: "flex-end" }}>
         <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} placeholder={iterating ? "Working…" : "Ask or describe a change…"} disabled={iterating} rows={2} style={{ flex: 1, background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 10, color: B.white, fontFamily: "inherit", fontSize: 13, lineHeight: 1.5, padding: "8px 11px", resize: "none" }} />
         <button onClick={send} disabled={iterating || !input.trim()} style={{ background: T.p, border: "none", borderRadius: 10, padding: "9px 13px", color: "white", fontFamily: "inherit", fontSize: 15, fontWeight: 700, cursor: "pointer", flexShrink: 0, opacity: (iterating || !input.trim()) ? 0.5 : 1 }}>↑</button>
       </div>
@@ -5682,6 +5984,7 @@ export default function Senseito() {
   const [syncState, setSyncState] = useState("idle");
   const [accountOpen, setAccountOpen] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [justBuiltId, setJustBuiltId] = useState(null); // triggers the one-time "wow" reveal
   const saveTimer = useRef(null);
   const lsTimer = useRef(null);
   const savedRef = useRef({}); // id -> last-saved rec reference (for single-row saves)
@@ -5775,7 +6078,7 @@ export default function Senseito() {
 
   function createSchool(composed) {
     const rec = { id: uid(), data: composed, tools: [], toolStates: {}, progress: {}, xp: 0, revision: 0, mentorChat: [], advisorChat: [], published: false, published_slug: null, createdAt: Date.now(), _owner: session?.user?.id || null };
-    setSchools(s => [rec, ...s]); setView(rec.id);
+    setSchools(s => [rec, ...s]); setView(rec.id); setJustBuiltId(rec.id);
   }
   function updateSchool(id, patch) { setSchools(s => s.map(r => r.id === id ? { ...r, ...patch } : r)); }
   function renameSchool(id, currentName) {
@@ -6052,7 +6355,7 @@ export default function Senseito() {
           <Boundary resetKey={view}>
             {view === "home" || !active
               ? <Home onCreated={createSchool} />
-              : <SchoolPage key={active.id} rec={active} onUpdate={(patch) => updateSchool(active.id, patch)} onPublish={publishSchool} publishing={publishing} publicBase={publicBase} token={session?.token} onSetSlug={setCustomSlug} onIterate={applyIterate} iterating={iterating} iterProg={iterProg} />}
+              : <SchoolPage key={active.id} rec={active} onUpdate={(patch) => updateSchool(active.id, patch)} onPublish={publishSchool} publishing={publishing} publicBase={publicBase} token={session?.token} onSetSlug={setCustomSlug} onIterate={applyIterate} iterating={iterating} iterProg={iterProg} justBuilt={active.id === justBuiltId} onRevealSeen={() => setJustBuiltId(null)} />}
           </Boundary>
         </div>
       </div>
