@@ -66,6 +66,24 @@ async function apiJSON(system, messages, maxTokens = 4000, model) {
   return j;
 }
 
+const stripFence = (s) => String(s || "").replace(/^```[a-z]*\n?/i, "").replace(/```\s*$/, "").trim();
+// Generate an HTML fragment with a plan-free, self-correcting loop: generate → check → repair.
+// Drops any leading self-talk/prose before the first real tag; retries with a firm note if the
+// result fails `ok`; falls back to `fallback` (e.g. the previous working code) rather than ship junk.
+async function genCodeWithRepair({ system, user, model = "sonnet", tokens = 4000, ok, repair = "", fallback = "" }) {
+  let best = "";
+  for (let attempt = 0; attempt < 3; attempt++) {
+    let out;
+    try { out = stripFence(await api(attempt === 0 ? system : `${system}\n\n${repair}`, [{ role: "user", content: user }], tokens, model)); }
+    catch { continue; }
+    // Cut any leading explanation/plan before the first HTML tag (the model "thinking out loud").
+    const m = out.match(/<\s*[a-zA-Z!]/); if (m && m.index > 0) out = out.slice(m.index).trim();
+    if (ok(out)) return out;
+    if (out.length > best.length) best = out;
+  }
+  return (fallback && !ok(best)) ? fallback : best;
+}
+
 function toApiMessages(msgs) {
   const m = msgs.filter(x => x.role === "user" || x.role === "assistant").map(x => ({ role: x.role, content: x.content }));
   if (!m.length || m[0].role !== "user") m.unshift({ role: "user", content: "(The student enters. Begin.)" });
@@ -1806,7 +1824,7 @@ function BlockShell({ type, sub, passed, children, foot }) {
 // Mentor "generative widget": renders AI-authored SVG/HTML in a locked-down
 // sandboxed iframe (allow-scripts ONLY — no same-origin, so it can't touch the
 // app, cookies or storage). Auto-sizes via a postMessage from inside.
-function MentorWidget({ code, T, height }) {
+function MentorWidget({ code, T, height, fill, interactive = true }) {
   const ref = useRef(null);
   const [h, setH] = useState(160);
   useEffect(() => {
@@ -1829,7 +1847,9 @@ function MentorWidget({ code, T, height }) {
   // Shim them with an in-memory store so such games just work. Loaded BEFORE the game body.
   const shim = `<script>(function(){function mk(){var m={};return{getItem:function(k){return Object.prototype.hasOwnProperty.call(m,k)?m[k]:null},setItem:function(k,v){m[k]=String(v)},removeItem:function(k){delete m[k]},clear:function(){m={}},key:function(i){return Object.keys(m)[i]||null},get length(){return Object.keys(m).length}}}try{window.localStorage.getItem('__t')}catch(e){try{Object.defineProperty(window,'localStorage',{value:mk(),configurable:true})}catch(_){} }try{window.sessionStorage.getItem('__t')}catch(e){try{Object.defineProperty(window,'sessionStorage',{value:mk(),configurable:true})}catch(_){} }})();<\/script>`;
   const srcDoc = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${shim}<style>html,body{margin:0;padding:0;background:transparent;color:#e7e9f5;font-family:system-ui,-apple-system,sans-serif;font-size:14px}*{box-sizing:border-box}:root{--p:${accent};--a:${accent2}}button{font-family:inherit}</style></head><body>${safe}<script>function _r(){try{parent.postMessage({__mw:1,h:document.documentElement.scrollHeight},'*')}catch(e){}}window.addEventListener('load',_r);try{new ResizeObserver(_r).observe(document.body)}catch(e){}setTimeout(_r,120);setTimeout(_r,600);setTimeout(_r,1500)<\/script></body></html>`;
-  return <iframe ref={ref} title="mentor visual" sandbox="allow-scripts allow-pointer-lock allow-forms allow-modals" srcDoc={srcDoc} style={{ width: "100%", height: height || h, border: `1px solid ${B.border}`, borderRadius: 10, background: B.surface, display: "block", marginTop: 8 }} />;
+  const fillStyle = { position: "absolute", inset: 0, width: "100%", height: "100%", border: "none", borderRadius: "inherit", background: "transparent", display: "block", pointerEvents: interactive ? "auto" : "none" };
+  const boxStyle = { width: "100%", height: height || h, border: `1px solid ${B.border}`, borderRadius: 10, background: B.surface, display: "block", marginTop: 8 };
+  return <iframe ref={ref} title="mentor visual" sandbox="allow-scripts allow-pointer-lock allow-forms allow-modals" srcDoc={srcDoc} style={fill ? fillStyle : boxStyle} />;
 }
 // Curated visual primitives the mentor fills with simple JSON (```viz). App-
 // rendered → consistent, on-brand, cheap, and safe (no code execution).
@@ -2562,7 +2582,19 @@ function StatGridBlock({ data = {}, T, school, bus }) {
 // script can never leak into them. Elements: text / box / ellipse / line / image.
 const _sid = () => Math.random().toString(36).slice(2, 9);
 const _clamp = (v, lo = 0, hi = 100) => Math.max(lo, Math.min(hi, Number(v) || 0));
-function defaultSlideBg(T) { return `linear-gradient(135deg, ${hexA(T.p, 0.22)}, ${hexA(T.a, 0.10)}), #0b0d1a`; }
+function defaultSlideBg(T) { return "#0e1018"; } // neutral, seamless — the scene/creator adds colour
+// A rich, alive AI-designed slide scene (freeform HTML) — the "magic" visual layer behind editable elements.
+async function genShowroomScene(school, prompt, current) {
+  const T = themeFor(school);
+  const subject = `${school.name} — ${flattenText(school.description) || school.tagline || ""}`.slice(0, 300);
+  const sys = `You design ONE beautiful, premium PRESENTATION SLIDE as a self-contained HTML fragment (inline <style> + optional gentle <script> animation, vanilla JS). Make it visually rich and ALIVE — tasteful motion, depth, on-theme — and it must FILL its frame (html,body{height:100%} and a full-bleed root). HARD RULES: NO external URLs/images/fonts/libraries (sandboxed offline; wrap risky APIs in try/catch); the slide paints its own full background; light text (#e7e9f5); use ${T.p} and ${T.a} as accents; large, readable, centred content.
+OUTPUT CONTRACT: return ONLY runnable HTML — your FIRST character must be "<". No prose/plan, no markdown fences, no <html>/<head>/<body> wrappers, and NEVER any postMessage/resize script.`;
+  const user = current
+    ? `Here is the CURRENT slide HTML:\n${current}\n\nApply ONLY this change, keeping the rest working: ${prompt}. Return the COMPLETE updated fragment (HTML only, start with "<").`
+    : `Design this slide now: ${prompt}\nSchool context: ${subject}\n(Output the HTML only — start with "<".)`;
+  const ok = (c) => /<\s*(svg|div|canvas|section|main|style|h1|h2)\b/i.test(c) && c.length > 80;
+  return genCodeWithRepair({ system: sys, user, model: "sonnet", tokens: 3200, ok, repair: "Your previous reply was prose, not code. Output ONLY the HTML fragment, starting with '<'.", fallback: current || "" });
+}
 function normalizeSlideEl(e) {
   return {
     id: e.id || _sid(), type: ["text", "box", "ellipse", "line", "image"].includes(e.type) ? e.type : "text",
@@ -2600,12 +2632,18 @@ async function genSignature(school, prompt, current) {
   const T = themeFor(school);
   const subject = `${school.name} — ${flattenText(school.description) || school.tagline || ""}`.slice(0, 320);
   const idea = prompt || school.soul?.signature || `a unique visual centerpiece that instantly captures the essence of ${school.name}`;
-  const sys = `You craft ONE bespoke, premium "signature" centerpiece that gives a learning school its SOUL — a self-contained HTML fragment (inline <style> + optional <script> for gentle animation/light interaction, vanilla JS only). It can be LITERALLY ANYTHING that makes this school feel one-of-a-kind and unmistakably about its subject: an animated hero scene, a tiny interactive diagram, a themed crest/emblem, a living illustration, an evocative data-viz, a parallax band — whatever fits THIS topic best. Surprise and delight; never generic. HARD RULES: NO external URLs/images/fonts/libraries (runs sandboxed offline; if a sandboxed API throws, wrap in try/catch); transparent background; light text (#e7e9f5); use ${T.p} and ${T.a} as accent colors; responsive; tasteful (elegant, not cluttered). Return ONLY the HTML fragment — no markdown fences, no <html>/<head>/<body> wrappers, and NEVER any postMessage/resize script.`;
+  const sys = `You craft ONE bespoke, premium "signature" centerpiece that gives a learning school its SOUL — a self-contained HTML fragment (inline <style> + optional <script> for gentle animation/light interaction, vanilla JS only). It can be LITERALLY ANYTHING that makes this school feel one-of-a-kind and unmistakably about its subject: an animated hero scene, a tiny interactive diagram, a themed crest/emblem, a living illustration, an evocative data-viz, a parallax band — whatever fits THIS topic best. Surprise and delight; never generic. HARD RULES: NO external URLs/images/fonts/libraries (runs sandboxed offline; if a sandboxed API throws, wrap in try/catch); transparent background; light text (#e7e9f5); use ${T.p} and ${T.a} as accent colors; responsive; tasteful (elegant, not cluttered).
+OUTPUT CONTRACT: return ONLY runnable HTML. Your FIRST character must be "<". Do NOT describe your plan, do NOT explain, do NOT write any prose — output the markup itself. No markdown fences, no <html>/<head>/<body> wrappers, and NEVER any postMessage/resize script.`;
   const user = current
-    ? `Here is the CURRENT signature HTML:\n${current}\n\nKeep it working and apply ONLY this change, preserving the rest: ${idea}. Return the COMPLETE updated fragment.`
-    : `Subject: ${subject}\nSignature idea: ${idea}`;
-  const code = await api(sys, [{ role: "user", content: user }], 2600, "sonnet");
-  return String(code).replace(/^```[a-z]*\n?/i, "").replace(/```\s*$/, "").trim();
+    ? `Here is the CURRENT signature HTML:\n${current}\n\nKeep it working and apply ONLY this change, preserving the rest: ${idea}. Return the COMPLETE updated fragment (HTML only, start with "<").`
+    : `Build the signature visual now. Subject: ${subject}\nSignature idea: ${idea}\n(Output the HTML only — start with "<".)`;
+  // Must be real markup, not the model narrating its plan ("I should create a visual…").
+  const ok = (c) => /<\s*(svg|div|canvas|section|main|figure|h1|h2|p|span|style|ul)\b/i.test(c) && c.length > 60;
+  return genCodeWithRepair({
+    system: sys, user, model: "sonnet", tokens: 2600, ok,
+    repair: "Your previous reply was prose/explanation, not code. Output ONLY the HTML fragment, starting with '<'. No description.",
+    fallback: current || "",
+  });
 }
 function SignaturePanel({ school, T, canEdit, onUpdate }) {
   const soul = school.soul || null;
@@ -2744,19 +2782,18 @@ function ShowroomBlock({ data = {}, T, school, canEdit, onEditData, disabled }) 
     const p = draft.trim(); if ((!p && kind !== "regen") || busy) return;
     setBusy(kind);
     try {
-      const j = await genShowroomSlideJSON(school, p || cur?.prompt || "a beautiful title slide", kind === "iter" ? cur : null);
-      const ns = normalizeSlide(j, T, { prompt: p || cur?.prompt || "", h: cur?.h || 360 });
-      save(slides.map((s, k) => k === idx ? ns : s)); setSel(null); setEdit(true);
+      const scene = await genShowroomScene(school, p || cur?.prompt || "a beautiful, alive title slide for this school", kind === "iter" ? (cur?.scene || "") : null);
+      const next = { ...(cur || {}), prompt: p || cur?.prompt || "", scene, h: cur?.h || 360, els: cur?.els || [], bg: cur?.bg || "" };
+      save(slides.map((s, k) => k === idx ? next : s)); setSel(null);
     } catch { } setBusy(false);
   }
-  // One-click "make this beautiful" — polishes the current slide's design while keeping every element.
+  // One-click "make this beautiful" — enhances the slide's generated visual while keeping the message.
   async function beautify() {
-    if (busy || !(cur?.els?.length)) return;
+    if (busy || !(cur?.scene || cur?.els?.length)) return;
     setBusy("beautify");
     try {
-      const j = await genShowroomSlideJSON(school, "Make this slide noticeably more beautiful and premium: refine the layout, spacing, alignment, colour harmony, typography and visual hierarchy, and add subtle tasteful polish. KEEP every existing element and all its text/meaning — improve styling and positioning only; do not remove or rewrite content.", cur);
-      const ns = normalizeSlide(j, T, { prompt: cur?.prompt || "", h: cur?.h || 360 });
-      save(slides.map((s, k) => k === idx ? ns : s)); setSel(null);
+      const scene = await genShowroomScene(school, "Make this slide noticeably more beautiful and premium: richer visuals, refined layout, colour harmony, typography, depth and tasteful motion. KEEP the message and any text content.", cur?.scene || "");
+      save(slides.map((s, k) => k === idx ? { ...cur, scene } : s));
     } catch { } setBusy(false);
   }
   const addSlide = () => { const next = [...slides, { prompt: "", bg: defaultSlideBg(T), h: 360, els: [] }]; save(next, next.length - 1); setDraft(""); setEdit(true); setSel(null); };
@@ -2775,7 +2812,7 @@ function ShowroomBlock({ data = {}, T, school, canEdit, onEditData, disabled }) 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: B.white }}>🎬 {data.title || "Showroom"}</div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          {canEdit && !isLegacy && (cur?.els?.length > 0) && <button onClick={beautify} disabled={!!busy} title="One tap — let the AI make this slide more beautiful (keeps all your content)" style={{ background: T.grad, border: "none", borderRadius: 8, color: "#fff", padding: "6px 12px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 700, boxShadow: `0 3px 12px ${T.pg}`, opacity: busy ? 0.6 : 1 }}>{busy === "beautify" ? <><Spinner color="#fff" />Beautifying…</> : "✨ Make beautiful"}</button>}
+          {canEdit && !isLegacy && (cur?.scene || cur?.els?.length > 0) && <button onClick={beautify} disabled={!!busy} title="One tap — let the AI make this slide more beautiful (keeps your content)" style={{ background: T.grad, border: "none", borderRadius: 8, color: "#fff", padding: "6px 12px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 700, boxShadow: `0 3px 12px ${T.pg}`, opacity: busy ? 0.6 : 1 }}>{busy === "beautify" ? <><Spinner color="#fff" />Beautifying…</> : "✨ Make beautiful"}</button>}
           {canEdit && edit && !isLegacy && <button onClick={() => setSnap(s => !s)} title={snap ? "Magnetic aligner ON — snaps to guides; click for free-form" : "Free-form — click to turn the magnetic aligner on"} style={pill(snap)}>{snap ? "🧲 Aligner on" : "🧲 Aligner off"}</button>}
           {canEdit && cur && !isLegacy && <button onClick={() => { setEdit(!edit); setEditingText(false); setSel(null); }} style={pill(edit)}>{edit ? "✓ Done editing" : "✎ Edit slide"}</button>}
         </div>
@@ -2791,6 +2828,8 @@ function ShowroomBlock({ data = {}, T, school, canEdit, onEditData, disabled }) 
       ) : cur && (
         <div style={{ position: "relative" }}>
           <div onPointerDown={() => { setSel(null); setEditingText(false); }} style={{ position: "relative", width: "100%", height: cur.h || 360, background: cur.bg || defaultSlideBg(T), borderRadius: 12, overflow: "hidden", border: `1px solid ${B.border}` }}>
+            {/* The AI-designed scene fills the frame; non-interactive while editing so overlays stay draggable */}
+            {cur.scene && <MentorWidget code={cur.scene} T={T} fill interactive={!edit} />}
             {/* Alignment guides (centre + thirds) shown while the magnetic aligner is on */}
             {edit && snap && [25, 50, 75].map(v => <div key={"v" + v} style={{ position: "absolute", left: `${v}%`, top: 0, bottom: 0, width: 1, background: v === 50 ? hexA(T.hi, 0.5) : hexA(T.hi, 0.18), pointerEvents: "none" }} />)}
             {edit && snap && [25, 50, 75].map(v => <div key={"h" + v} style={{ position: "absolute", top: `${v}%`, left: 0, right: 0, height: 1, background: v === 50 ? hexA(T.hi, 0.5) : hexA(T.hi, 0.18), pointerEvents: "none" }} />)}
@@ -2800,7 +2839,7 @@ function ShowroomBlock({ data = {}, T, school, canEdit, onEditData, disabled }) 
                 onChange={(patch) => updEl(e.id, patch)}
                 onEditText={(html) => { if (html === undefined) { setSel(e.id); setEditingText(true); } else { updEl(e.id, { html }); setEditingText(false); } }} />
             ))}
-            {(cur.els || []).length === 0 && <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: hexA("#ffffff", 0.5), fontSize: 13 }}>{canEdit ? "Empty slide — add elements or generate with AI." : ""}</div>}
+            {!cur.scene && (cur.els || []).length === 0 && <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: hexA("#ffffff", 0.5), fontSize: 13 }}>{canEdit ? "Write a prompt below and Generate a beautiful slide — then add text & shapes on top." : ""}</div>}
           </div>
           {edit && <div data-handle="1" onPointerDown={resizeCanvas} title="Drag to resize the slide" style={{ height: 16, marginTop: 2, display: "flex", alignItems: "center", justifyContent: "center", cursor: "ns-resize", color: B.muted, fontSize: 11, touchAction: "none" }}>⇕ drag to resize</div>}
         </div>
@@ -2847,10 +2886,13 @@ function ShowroomBlock({ data = {}, T, school, canEdit, onEditData, disabled }) 
             </div>
           ) : <div style={{ fontSize: 11.5, color: B.muted }}>Tap an element to edit it · double-click text to type · drag to move · drag the ⇕ handle to resize the slide.</div>}
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <span style={{ fontSize: 11, color: B.muted }}>Background</span>
-            <input type="color" onChange={ev => setSlide({ bg: ev.target.value })} style={{ width: 28, height: 26, border: "none", background: "none", cursor: "pointer", padding: 0 }} />
-            <button onClick={() => setSlide({ bg: defaultSlideBg(T) })} style={pill(false)}>Themed gradient</button>
+            <span style={{ fontSize: 11, color: B.muted }}>Frame background</span>
+            <input type="color" onChange={ev => setSlide({ bg: ev.target.value })} title="Pick a colour" style={{ width: 28, height: 26, border: "none", background: "none", cursor: "pointer", padding: 0 }} />
+            <button onClick={() => setSlide({ bg: "#0e1018" })} style={pill(false)}>Neutral</button>
+            <button onClick={() => setSlide({ bg: "#ffffff" })} style={pill(false)}>⬜ White</button>
+            <button onClick={() => setSlide({ bg: `linear-gradient(135deg, ${hexA(T.p, 0.22)}, ${hexA(T.a, 0.10)}), #0b0d1a` })} style={pill(false)}>Themed</button>
           </div>
+          <div style={{ fontSize: 11, color: B.muted }}>The frame background only shows where the generated visual is transparent.</div>
         </div>
       )}
 
@@ -2889,22 +2931,16 @@ COMPLETENESS IS THE #1 RULE — the game MUST work end to end:
 STYLE: NO external URLs/images/fonts/libraries (runs sandboxed offline); transparent page background; light text (#e7e9f5); accents ${T.p} and ${T.a}; responsive; ~380-480px tall.
 OUTPUT: ONLY the HTML fragment — no markdown fences, no <html>/<head>/<body> wrappers, and NEVER any postMessage/resize script.`;
   const user = current
-    ? `Here is the CURRENT game HTML:\n${current}\n\nKeep it fully working end-to-end and apply ONLY this change: ${prompt}. Return the COMPLETE updated fragment.`
+    ? `Here is the CURRENT game HTML (it WORKS — do not break it):\n${current}\n\nApply ONLY this change: ${prompt}. Re-verify the whole game still plays end-to-end, then return the COMPLETE updated fragment.`
     : `Make a complete, fully playable game for: ${prompt || "practising this school's key ideas"}\nSubject context: ${subject}`;
-  // Games need real logic → use the stronger model + a generous budget so the code is never truncated.
-  let code = await api(sys, [{ role: "user", content: user }], 8000, "sonnet");
-  code = String(code).replace(/^```[a-z]*\n?/i, "").replace(/```\s*$/, "").trim();
-  // Completeness guard: a real game must have a <script> AND wired interactivity. If it came back
-  // static (markup only), ask once more, firmly, for the full working version.
-  const interactive = /<script[\s\S]*?(addEventListener|onclick|window\.)/i.test(code);
-  if (!interactive) {
-    try {
-      const retry = await api(sys + `\n\nYour previous attempt was NOT interactive (no working <script>/handlers). Return the COMPLETE, fully working game with all JS wired so every button responds.`, [{ role: "user", content: user }], 8000, "sonnet");
-      const rc = String(retry).replace(/^```[a-z]*\n?/i, "").replace(/```\s*$/, "").trim();
-      if (/<script[\s\S]*?(addEventListener|onclick|window\.)/i.test(rc)) code = rc;
-    } catch { /* keep first attempt */ }
-  }
-  return code;
+  // A real game must have a <script> with wired interactivity (a button that does nothing = broken).
+  // Verify it; repair if needed; and when enhancing, fall back to the working version rather than ship a broken one.
+  const ok = (c) => /<script[\s\S]*?(addEventListener|onclick|window\.)/i.test(c) && c.length > 200;
+  return genCodeWithRepair({
+    system: sys, user, model: "sonnet", tokens: 8000, ok,
+    repair: "Your previous attempt was NOT a complete working game (missing a wired <script>, or a button did nothing). Return the FULL, fully playable game with every control wired (addEventListener, or window-global functions for inline onclick).",
+    fallback: current || "",
+  });
 }
 // The Enhance Wizard: the AI proposes targeted follow-up questions, then a surgical upgrade.
 async function genGameWizardQuestions(school, code) {
