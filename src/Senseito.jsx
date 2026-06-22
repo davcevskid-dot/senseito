@@ -2622,25 +2622,18 @@ function normalizeSlideEl(e) {
     url: e.url || "", fit: e.fit, frame: !!e.frame, rot: Number(e.rot) || 0,
   };
 }
-function normalizeSlide(j, T, keep = {}) {
-  const els = Array.isArray(j?.els) ? j.els.map(normalizeSlideEl) : [];
-  return { ...keep, bg: j?.bg || keep.bg || defaultSlideBg(T), h: keep.h || 360, els };
-}
-async function genShowroomSlideJSON(school, prompt, current) {
+// Polish the user's overlay elements (positions, sizing, colour, typography) to look more beautiful
+// and aligned — keeping each element's type and text. Returns improved els (or the originals).
+async function genPolishEls(school, els) {
+  if (!Array.isArray(els) || !els.length) return els;
   const T = themeFor(school);
-  const schema = `Return JSON {"bg": string, "els": Element[]}.
-"bg" = a CSS background for the whole slide — dark & premium, ideally a linear-gradient using accents ${T.p} and ${T.a}.
-Each Element: { "type", "x","y","w","h" (PERCENT of slide, 0-100, keep an inner margin, never overflow the edges), plus type fields }
-- text: "html" (short, punchy; may use <b> <i> <br>), "size" (px 16-72), "color" (hex, light), "align" ("left"|"center"|"right"), "weight" (400-800)
-- box / ellipse: "fill" (css color, may be semi-transparent), "border" (css, e.g. "1px solid rgba(255,255,255,0.25)"), "radius" (px)
-- line: "color" (hex), "thickness" (px 1-8)
-- image: "url" (ALWAYS ""), "fit" ("cover"|"contain"), "radius" (px), "frame" (bool — a bordered mat where the creator drops a visual)
-Compose 3-6 elements into ONE beautiful, balanced, readable slide (light text on dark). Leave image url empty so the creator adds their own visuals.`;
-  const sys = `You are a world-class presentation designer building ONE slide for "${school.name}". ${schema}`;
-  const user = current
-    ? `Here is the CURRENT slide JSON:\n${JSON.stringify({ bg: current.bg, els: current.els })}\n\nApply ONLY this change and return the FULL updated JSON, preserving every element and property you were NOT asked to change (same "id"s, positions, text, styles): ${prompt}`
-    : `Design this slide: ${prompt}`;
-  return apiJSON(sys, [{ role: "user", content: user }], 2000);
+  const sys = `You are a presentation designer refining overlay elements on a slide for "${school.name}". Improve their beauty: better positions/sizes (x,y,w,h as PERCENT 0-100, keep inside the frame), tasteful colour using accents ${T.p}/${T.a}, readable typography, clean alignment. KEEP each element's "id", "type" and its text/"html"/"url" exactly. Return JSON {"els": Element[]} with the SAME elements, only restyled/repositioned.`;
+  try {
+    const j = await apiJSON(sys, [{ role: "user", content: `Elements:\n${JSON.stringify(els)}` }], 1600, "sonnet");
+    const out = Array.isArray(j?.els) ? j.els : null;
+    if (out && out.length) return out.map(normalizeSlideEl);
+  } catch { /* keep originals */ }
+  return els;
 }
 
 // The school's "soul": a bespoke signature centerpiece, generated as a self-contained themed
@@ -2775,6 +2768,8 @@ function ShowroomBlock({ data = {}, T, school, canEdit, onEditData, disabled }) 
   const [sel, setSel] = useState(null);
   const [editingText, setEditingText] = useState(false);
   const [snap, setSnap] = useState(true); // magnetic aligner (toggle off for free-form)
+  const imgFileRef = useRef(null);
+  const [uploadingImg, setUploadingImg] = useState(false);
   const idx = Math.min(i, Math.max(0, slides.length - 1));
   const cur = slides[idx];
   const save = (next, goTo) => { onEditData?.({ ...data, slides: next }); if (goTo != null) setI(goTo); };
@@ -2782,6 +2777,11 @@ function ShowroomBlock({ data = {}, T, school, canEdit, onEditData, disabled }) 
   const setEls = (els) => setSlide({ els });
   const selEl = (cur?.els || []).find(e => e.id === sel);
   const updEl = (id, patch) => setEls((cur.els || []).map(e => e.id === id ? { ...e, ...patch } : e));
+  async function onPickImg(ev) {
+    const f = ev.target.files?.[0]; ev.target.value = ""; if (!f || !sel) return;
+    if (f.size > 52428800) return; setUploadingImg(true);
+    try { const url = await uploadToLibrary(f); updEl(sel, { url }); } catch { } setUploadingImg(false);
+  }
   const addEl = (type) => {
     const presets = {
       text: { x: 14, y: 38, w: 72, h: 18, html: "New text", size: 30, color: "#fff", align: "center", weight: 700 },
@@ -2809,8 +2809,12 @@ function ShowroomBlock({ data = {}, T, school, canEdit, onEditData, disabled }) 
     if (busy || !(cur?.scene || cur?.els?.length)) return;
     setBusy("beautify");
     try {
-      const scene = await genShowroomScene(school, "Make this slide noticeably more beautiful and premium: richer visuals, refined layout, colour harmony, typography, depth and tasteful motion. KEEP the message and any text content.", cur?.scene || "");
-      save(slides.map((s, k) => k === idx ? { ...cur, scene } : s));
+      // Enhance the generated visual AND reflow/restyle the creator's overlays — in parallel.
+      const [scene, els] = await Promise.all([
+        cur?.scene ? genShowroomScene(school, "Make this slide noticeably more beautiful and premium: richer visuals, refined layout, colour harmony, typography, depth and tasteful motion. KEEP the message and any text content.", cur.scene) : Promise.resolve(cur?.scene || ""),
+        (cur?.els?.length) ? genPolishEls(school, cur.els) : Promise.resolve(cur?.els || []),
+      ]);
+      save(slides.map((s, k) => k === idx ? { ...cur, scene, els } : s)); setSel(null);
     } catch { } setBusy(false);
   }
   const addSlide = () => { const next = [...slides, { prompt: "", bg: defaultSlideBg(T), h: 360, els: [] }]; save(next, next.length - 1); setDraft(""); setEdit(true); setSel(null); };
@@ -2892,7 +2896,9 @@ function ShowroomBlock({ data = {}, T, school, canEdit, onEditData, disabled }) 
               </>}
               {selEl.type === "line" && <label style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, color: B.mutedMid }}>Color<input type="color" value={selEl.color || T.p} onChange={ev => updEl(selEl.id, { color: ev.target.value })} style={{ width: 26, height: 24, border: "none", background: "none", cursor: "pointer", padding: 0 }} /></label>}
               {selEl.type === "image" && <>
-                <button onClick={() => { const u = window.prompt("Image / SVG URL (or upload in the Library first, then paste its link):", selEl.url || ""); if (u != null) updEl(selEl.id, { url: u.trim() }); }} style={pill(false)}>🔗 Set URL</button>
+                <input ref={imgFileRef} type="file" accept="image/*" onChange={onPickImg} style={{ display: "none" }} />
+                <button onClick={() => imgFileRef.current?.click()} disabled={uploadingImg} style={pill(false)}>{uploadingImg ? <><Spinner color={B.mutedMid} />Uploading…</> : "📎 Upload"}</button>
+                <button onClick={() => { const u = window.prompt("Image / SVG URL:", selEl.url || ""); if (u != null) updEl(selEl.id, { url: u.trim() }); }} style={pill(false)}>🔗 URL</button>
                 <button onClick={() => updEl(selEl.id, { fit: selEl.fit === "cover" ? "contain" : "cover" })} style={pill(false)}>Fit: {selEl.fit || "contain"}</button>
                 <button onClick={() => updEl(selEl.id, { frame: !selEl.frame })} style={pill(selEl.frame)}>Frame</button>
               </>}
