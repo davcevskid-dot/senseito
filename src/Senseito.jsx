@@ -71,7 +71,6 @@ const stripFence = (s) => String(s || "").replace(/^```[a-z]*\n?/i, "").replace(
 // Drops any leading self-talk/prose before the first real tag; retries with a firm note if the
 // result fails `ok`; falls back to `fallback` (e.g. the previous working code) rather than ship junk.
 async function genCodeWithRepair({ system, user, model = "sonnet", tokens = 4000, ok, repair = "", fallback = "" }) {
-  let best = "";
   for (let attempt = 0; attempt < 3; attempt++) {
     let out;
     try { out = stripFence(await api(attempt === 0 ? system : `${system}\n\n${repair}`, [{ role: "user", content: user }], tokens, model)); }
@@ -79,9 +78,9 @@ async function genCodeWithRepair({ system, user, model = "sonnet", tokens = 4000
     // Cut any leading explanation/plan before the first HTML tag (the model "thinking out loud").
     const m = out.match(/<\s*[a-zA-Z!]/); if (m && m.index > 0) out = out.slice(m.index).trim();
     if (ok(out)) return out;
-    if (out.length > best.length) best = out;
   }
-  return (fallback && !ok(best)) ? fallback : best;
+  // Never ship output that failed the check — return the fallback (previous working code, or "" = nothing).
+  return fallback;
 }
 
 function toApiMessages(msgs) {
@@ -1856,7 +1855,10 @@ function MentorWidget({ code, T, height, fill, interactive = true }) {
   // which silently crashes games that touch storage on start ("click Start, nothing happens").
   // Shim them with an in-memory store so such games just work. Loaded BEFORE the game body.
   const shim = `<script>(function(){function mk(){var m={};return{getItem:function(k){return Object.prototype.hasOwnProperty.call(m,k)?m[k]:null},setItem:function(k,v){m[k]=String(v)},removeItem:function(k){delete m[k]},clear:function(){m={}},key:function(i){return Object.keys(m)[i]||null},get length(){return Object.keys(m).length}}}try{window.localStorage.getItem('__t')}catch(e){try{Object.defineProperty(window,'localStorage',{value:mk(),configurable:true})}catch(_){} }try{window.sessionStorage.getItem('__t')}catch(e){try{Object.defineProperty(window,'sessionStorage',{value:mk(),configurable:true})}catch(_){} }})();<\/script>`;
-  const srcDoc = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${shim}<style>html,body{margin:0;padding:0;background:transparent;color:#e7e9f5;font-family:system-ui,-apple-system,sans-serif;font-size:14px}*{box-sizing:border-box}:root{--p:${accent};--a:${accent2}}button{font-family:inherit}</style></head><body>${safe}<script>function _r(){try{parent.postMessage({__mw:1,h:document.documentElement.scrollHeight},'*')}catch(e){}}window.addEventListener('load',_r);try{new ResizeObserver(_r).observe(document.body)}catch(e){}setTimeout(_r,120);setTimeout(_r,600);setTimeout(_r,1500)<\/script></body></html>`;
+  // In fill mode the iframe fills a fixed frame — give html/body full height so full-bleed scenes
+  // (height:100% / inset:0) actually fill instead of collapsing to a tiny strip at the top.
+  const fillCss = fill ? "html,body{height:100%}body{display:flex}body>*{flex:1;min-height:100%}" : "";
+  const srcDoc = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">${shim}<style>html,body{margin:0;padding:0;background:transparent;color:#e7e9f5;font-family:system-ui,-apple-system,sans-serif;font-size:14px}*{box-sizing:border-box}${fillCss}:root{--p:${accent};--a:${accent2}}button{font-family:inherit}</style></head><body>${safe}<script>function _r(){try{parent.postMessage({__mw:1,h:document.documentElement.scrollHeight},'*')}catch(e){}}window.addEventListener('load',_r);try{new ResizeObserver(_r).observe(document.body)}catch(e){}setTimeout(_r,120);setTimeout(_r,600);setTimeout(_r,1500)<\/script></body></html>`;
   const fillStyle = { position: "absolute", inset: 0, width: "100%", height: "100%", border: "none", borderRadius: "inherit", background: "transparent", display: "block", pointerEvents: interactive ? "auto" : "none" };
   const boxStyle = { width: "100%", height: height || h, border: `1px solid ${B.border}`, borderRadius: 10, background: B.surface, display: "block", marginTop: 8 };
   return <iframe ref={ref} title="mentor visual" sandbox="allow-scripts allow-pointer-lock allow-forms allow-modals" srcDoc={srcDoc} style={fill ? fillStyle : boxStyle} />;
@@ -2943,12 +2945,21 @@ OUTPUT: ONLY the HTML fragment — no markdown fences, no <html>/<head>/<body> w
   const user = current
     ? `Here is the CURRENT game HTML (it WORKS — do not break it):\n${current}\n\nApply ONLY this change: ${prompt}. Re-verify the whole game still plays end-to-end, then return the COMPLETE updated fragment.`
     : `Make a complete, fully playable game for: ${prompt || "practising this school's key ideas"}\nSubject context: ${subject}`;
-  // A real game must have a <script> with wired interactivity (a button that does nothing = broken).
-  // Verify it; repair if needed; and when enhancing, fall back to the working version rather than ship a broken one.
-  const ok = (c) => /<script[\s\S]*?(addEventListener|onclick|window\.)/i.test(c) && c.length > 200;
+  // A real game must (a) have a CLOSED <script> (a truncated one = syntax error = dead Start button),
+  // (b) be wired, and (c) be roughly brace-balanced (catches mid-script truncation). Otherwise we
+  // repair, and when enhancing we fall back to the previous WORKING game rather than ship a broken one.
+  const ok = (c) => {
+    if (!/<script[\s\S]*?<\/script\s*>/i.test(c)) return false;          // script must be closed
+    if (!/(addEventListener|onclick\s*=|window\.\w+\s*=)/i.test(c)) return false; // wired
+    const open = (c.match(/\{/g) || []).length, close = (c.match(/\}/g) || []).length;
+    if (Math.abs(open - close) > 2) return false;                        // likely truncated
+    const po = (c.match(/\(/g) || []).length, pc = (c.match(/\)/g) || []).length;
+    if (Math.abs(po - pc) > 3) return false;
+    return c.length > 240;
+  };
   return genCodeWithRepair({
-    system: sys, user, model: "sonnet", tokens: 8000, ok,
-    repair: "Your previous attempt was NOT a complete working game (missing a wired <script>, or a button did nothing). Return the FULL, fully playable game with every control wired (addEventListener, or window-global functions for inline onclick).",
+    system: sys, user, model: "sonnet", tokens: 14000, ok,
+    repair: "Your previous attempt was incomplete (truncated or unwired <script>, or a button that does nothing). Return the FULL, fully playable game, ending with a properly closed </script>; every control wired (addEventListener, or window-global functions for inline onclick). Keep it tight enough to finish completely.",
     fallback: current || "",
   });
 }
