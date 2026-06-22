@@ -1280,10 +1280,10 @@ function BuildProgress({ pct = 0, label = "", facts = [], title = "Building your
       const elapsed = (Date.now() - start.current) / 1000;
       const trickle = 95 * (1 - Math.exp(-elapsed / 40)); // creeps toward 95 over ~2 min
       setDisp(d => {
-        // Honest bar: never run more than a small lead ahead of the REAL pct, so it
-        // can't pretend to be ~85% while the long architect call is still pending
-        // (which made the whole school pop in at once). It eases up as real work lands.
-        const ceiling = pct >= 100 ? 100 : pct + 12;
+        // Honest bar: never run far ahead of the REAL pct (so it can't pretend to be ~85%
+        // while the architect call is still pending). During the long per-semester authoring
+        // it's allowed a bigger lead so it keeps visibly creeping instead of stalling at 30%.
+        const ceiling = pct >= 100 ? 100 : pct + (preview ? 22 : 10);
         let target = Math.max(pct, Math.min(trickle, ceiling));
         if (target < d) target = d;             // never go backwards
         if (d >= ceiling && pct < 100) return d; // hold at the ceiling until real pct moves
@@ -1300,7 +1300,10 @@ function BuildProgress({ pct = 0, label = "", facts = [], title = "Building your
   // Time-based reveal: the moment the plan lands, the school visibly assembles itself
   // (name → tagline → mentor → nav tabs → lessons) over ~2.6s instead of popping in at once.
   const rev = preview && previewSince.current ? Math.min(1, (Date.now() - previewSince.current) / 2600) : 0;
-  const eta = pct >= 100 ? "Done!" : shown < 35 ? "about a minute or two" : shown < 75 ? "under a minute" : "almost there";
+  // ETA estimated from elapsed time vs how far the honest bar has actually moved.
+  const elapsedS = (Date.now() - start.current) / 1000;
+  const etaSecs = (shown > 6 && shown < 99) ? Math.round(elapsedS * (100 - shown) / shown) : null;
+  const eta = pct >= 100 ? "Done!" : etaSecs == null ? "estimating…" : etaSecs > 90 ? `about ${Math.round(etaSecs / 60)} min left` : etaSecs > 25 ? "under a minute left" : "almost there…";
   const PHASES = [
     { upTo: 14, lines: ["Reading your vision…", "Finding the soul of your school…", "Imagining the perfect mentor…"] },
     { upTo: 30, lines: ["Designing the curriculum…", "Mapping the key concepts…", "Shaping the learning journey…", "Choosing the right activities…"] },
@@ -1325,7 +1328,8 @@ function BuildProgress({ pct = 0, label = "", facts = [], title = "Building your
           </div>
         </div>
         <div style={{ height: 9, borderRadius: 6, background: B.surface2, overflow: "hidden", border: `1px solid ${B.border}` }}>
-          <div style={{ height: "100%", width: `${shown}%`, borderRadius: 6, background: `linear-gradient(90deg,${ac1},${ac2})`, transition: "width 0.3s ease" }} />
+          {/* The bar itself stays on Senseito's brand colours; only the PREVIEW below is themed. */}
+          <div style={{ height: "100%", width: `${shown}%`, borderRadius: 6, background: "linear-gradient(90deg,#7C3AED,#06B6D4)", transition: "width 0.3s ease" }} />
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: B.muted, marginTop: 7 }}>
           <span>{shown}%</span><span>{eta}</span>
@@ -1349,7 +1353,7 @@ function BuildProgress({ pct = 0, label = "", facts = [], title = "Building your
                 <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 16, fontWeight: 700, color: B.white, ...stg(0) }}>{preview.emoji || "🎓"} {preview.name}</div>
                 {preview.tagline && <div style={{ fontSize: 12, color: ac1, marginTop: 2, fontStyle: "italic", ...stg(0.15) }}>{preview.tagline}</div>}
                 {mentorName && <div style={{ fontSize: 12, color: B.mutedMid, marginTop: 4, ...stg(0.3) }}>Mentor: {mentorName}</div>}
-                {secs.length > 0 && <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginTop: 9 }}>{secs.map((s, i) => <span key={i} style={{ fontSize: 11, color: ac1, background: hexA(ac1, 0.12), border: `1px solid ${hexA(ac1, 0.3)}`, borderRadius: 100, padding: "2px 9px", ...stg(0.2 + i * 0.06) }}>{s}</span>)}</div>}
+                {/* (sections are shown once, in the morphing nav window below — no redundant pills here) */}
               </div>
               {/* The school's nav morphing into reality — ghost outlines fill into real, themed tabs */}
               {morph > 0 && (
@@ -1379,6 +1383,12 @@ function BuildProgress({ pct = 0, label = "", facts = [], title = "Building your
                 ); })}
                 {lessons.length > 9 && <div style={{ fontSize: 11.5, color: B.muted, textAlign: "center", marginTop: 2 }}>+ {lessons.length - 9} more</div>}
               </div>
+              {/* A signature visual is being painted in parallel — show it forming, then "ready". */}
+              {shown > 48 && <div style={{ marginTop: 10, position: "relative", overflow: "hidden", borderRadius: 10, border: `1px solid ${hexA(ac1, 0.3)}`, background: B.surface2, padding: "10px 13px", display: "flex", alignItems: "center", gap: 9, animation: "fadeUp 0.5s ease" }}>
+                {!allDone && <div style={{ position: "absolute", inset: 0, background: `linear-gradient(110deg,transparent 35%,${hexA(ac1, 0.10)} 50%,transparent 65%)`, backgroundSize: "200% 100%", animation: "shimmer 1.6s linear infinite" }} />}
+                <span style={{ fontSize: 13, position: "relative" }}>{allDone ? "✨" : "🎨"}</span>
+                <span style={{ fontSize: 12.5, color: B.white, position: "relative" }}>{allDone ? "Signature visual ready" : "Painting its signature visual…"}</span>
+              </div>}
             </div>
           );
         })() : (() => {
