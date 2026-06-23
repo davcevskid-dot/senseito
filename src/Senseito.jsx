@@ -2818,6 +2818,36 @@ OUTPUT CONTRACT: return ONLY the COMPLETE corrected HTML fragment. First charact
   });
 }
 
+// A bespoke PROGRESS metaphor, generated per school. The code uses the literal
+// token __VAL__ for the percent; the host substitutes the real number and renders
+// it sandboxed. Falls back to "" (→ the plain bar) if generation doesn't land.
+async function genProgressSkin(school) {
+  const T = themeFor(school);
+  const subject = `${school.name} — ${flattenText(school.description) || school.tagline || ""}`.slice(0, 220);
+  const sys = `You design ONE small, self-contained PROGRESS visual for a learning school — a bespoke metaphor for "percent complete" that fits the SUBJECT. It receives the current percent as the literal token __VAL__ (an integer 0-100) which you MUST use in the markup so the visual fills/grows to represent it (e.g. style="width:__VAL__%", or a tiny script reading a number). Choose a metaphor that fits the subject: a shoelace tightening (tying shoes), a rocket climbing toward a planet (space), a plant growing (gardening), a jar/glass filling (nutrition/habits), a path being walked, a bar of light. Elegant and compact — it renders inside a ~320x72px transparent frame. Animate smoothly to the value on load.
+HARD RULES: NO external URLs/images/fonts/libraries (sandboxed offline); transparent background; light text #e7e9f5; use ${T.p} and ${T.a} as accents; the filled portion MUST reflect __VAL__.
+OUTPUT CONTRACT: return ONLY runnable HTML (inline <style> + optional vanilla <script>). First character "<". No prose, no markdown fences, no <html>/<head>/<body>, no postMessage/resize scripts.`;
+  const user = `Subject: ${subject}\nBuild the progress visual now — remember to use __VAL__ for the percent. Output HTML only, start with "<".`;
+  const ok = (c) => /__VAL__/.test(c) && /<\s*(svg|div|canvas|section|style)\b/i.test(c) && c.length > 50 && htmlComplete(c);
+  return genCodeWithRepair({ system: sys, user, model: "sonnet", tokens: 2200, ok, repair: "Output ONLY the COMPLETE HTML fragment, using __VAL__ for the percent, starting with '<', every <style>/<script> closed. No prose.", fallback: "" });
+}
+// What XP/points are called for this school (coins, energy, sparks, insight…). Cheap, reliable.
+async function genCurrency(school) {
+  try {
+    const out = await apiJSON(`Name what "XP / points" should be called in a learning school, themed to its subject. Return ONLY JSON {"word":"<1 word, e.g. Energy, Sparks, Coins, Insight, Reps>","icon":"<single emoji>"}. Tasteful, on-theme.`, [{ role: "user", content: `${school.name} — ${flattenText(school.description) || ""}`.slice(0, 200) }], 120, "haiku");
+    if (out && out.word) return { word: String(out.word).slice(0, 16), icon: String(out.icon || "").slice(0, 4) };
+  } catch { }
+  return null;
+}
+const currencyOf = (school) => school?.currency?.word ? school.currency : { word: "XP", icon: "" };
+const curLabel = (school) => { const c = currencyOf(school); return `${c.icon ? c.icon + " " : ""}${c.word}`; };
+
+// Renders a generated progress skin (re-substitutes __VAL__ on each change). Sandboxed, non-interactive.
+function ProgressSkin({ code, pct, T }) {
+  const filled = String(code || "").split("__VAL__").join(String(Math.round(pct)));
+  return <div style={{ position: "relative", width: "100%", maxWidth: 320, height: 72, marginLeft: "auto" }}><MentorWidget code={filled} T={T} fill interactive={false} /></div>;
+}
+
 function SignaturePanel({ school, T, canEdit, onUpdate }) {
   const soul = school.soul || null;
   const [busy, setBusy] = useState(false); // "regen" | "iter" | false
@@ -5581,9 +5611,11 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
                   <div key={l}><div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, color: B.muted, marginBottom: 2 }}>{l}</div><div style={{ fontSize: 14, fontWeight: 700, color: B.white }}>{v}</div></div>
                 ))}
               </div>
-              <div style={{ textAlign: "right" }}>
-                <div style={{ fontSize: 12, color: B.muted, marginBottom: 5 }}>{passedCount}/{total} lessons{school.gamification ? ` · ${xp} XP` : ""}</div>
-                <div style={{ width: 130, height: 5, background: B.surface3, borderRadius: 3, overflow: "hidden" }}><div style={{ width: `${pct}%`, height: "100%", background: T.p, borderRadius: 3, transition: "width 0.5s ease" }} /></div>
+              <div style={{ textAlign: "right", minWidth: school.progressSkin?.code ? 260 : undefined }}>
+                <div style={{ fontSize: 12, color: B.muted, marginBottom: 5 }}>{passedCount}/{total} lessons{school.gamification ? ` · ${xp} ${curLabel(school)}` : ""}</div>
+                {school.progressSkin?.code
+                  ? <ProgressSkin code={school.progressSkin.code} pct={pct} T={T} />
+                  : <div style={{ width: 130, height: 5, background: B.surface3, borderRadius: 3, overflow: "hidden", marginLeft: "auto" }}><div style={{ width: `${pct}%`, height: "100%", background: T.p, borderRadius: 3, transition: "width 0.5s ease" }} /></div>}
               </div>
             </div>
           </div>
@@ -5822,8 +5854,11 @@ function Home({ onCreated }) {
       setProg({ pct: 30, label: `Writing the lessons for “${content.name}”…`, facts, preview: content });
       // Give the school its "soul" — a bespoke signature centerpiece — in parallel with lesson authoring.
       const soulP = genSignature(content).then(code => { content.soul = { ...(content.soul || {}), code }; }).catch(() => { });
+      // Bespoke "X factor" touches — a progress metaphor + a themed name for XP — generated in parallel.
+      const skinP = genProgressSkin(content).then(code => { if (code) content.progressSkin = { code }; }).catch(() => { });
+      const curP = genCurrency(content).then(c => { if (c) content.currency = c; }).catch(() => { });
       await fillSchoolBlocks(content, { dna, onProgress: (d, t) => setProg(p => ({ ...p, pct: 30 + Math.round((d / t) * 64), label: `Authoring activities… (${d}/${t} done)` })) });
-      await soulP;
+      await Promise.all([soulP, skinP, curP]);
       autoFixSchool(content); // deterministic self-review so the one-shot feels finished
       const built = composeSchool(content, dna);
       built.sourcePrompt = (prompt || source || "").trim().slice(0, 400); // for the reveal's "you asked for →" beat
