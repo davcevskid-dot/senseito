@@ -2842,7 +2842,7 @@ function ShowroomEl({ e, T, selected, editMode, snap, onSelect, onChange, onEdit
     inner = <div style={{ width: "100%", height: "100%", background: e.color || T.p, borderRadius: 4 }} />;
   } else if (e.type === "image") {
     inner = e.url
-      ? <img src={e.url} alt="" style={{ width: "100%", height: "100%", objectFit: e.fit || "contain", borderRadius: e.radius ?? 10, border: e.frame ? `2px solid ${hexA(T.p, 0.6)}` : "none", background: e.frame ? hexA(T.p, 0.08) : "transparent", padding: e.frame ? 6 : 0, boxSizing: "border-box" }} />
+      ? <img src={e.url} alt="" draggable={false} style={{ width: "100%", height: "100%", objectFit: e.fit || "contain", borderRadius: e.radius ?? 10, border: e.frame ? `2px solid ${hexA(T.p, 0.6)}` : "none", background: e.frame ? hexA(T.p, 0.08) : "transparent", padding: e.frame ? 6 : 0, boxSizing: "border-box", pointerEvents: editMode ? "none" : "auto", WebkitUserDrag: "none", userSelect: "none" }} />
       : <div style={{ width: "100%", height: "100%", border: `2px dashed ${hexA(T.p, 0.5)}`, borderRadius: e.radius ?? 10, display: "flex", alignItems: "center", justifyContent: "center", color: hexA(T.p, 0.8), fontSize: 12, background: hexA(T.p, 0.06), textAlign: "center", padding: 6 }}>🖼️ {editMode ? "Add image URL →" : "Visual"}</div>;
   }
   // Drag to move (edit mode, not while editing text).
@@ -2852,6 +2852,7 @@ function ShowroomEl({ e, T, selected, editMode, snap, onSelect, onChange, onEdit
     if (editingText) return;     // …but allow caret placement / selection inside the contentEditable
     onSelect();
     if (ev.target.dataset.handle) return; // resize handled separately
+    ev.preventDefault(); // stop the browser's native image/element drag stealing the gesture
     const node = ev.currentTarget; try { node.setPointerCapture(ev.pointerId); } catch { }
     const canvas = node.parentElement.getBoundingClientRect();
     const sx = ev.clientX, sy = ev.clientY, ox = e.x, oy = e.y;
@@ -6393,23 +6394,34 @@ export default function Senseito() {
     const name = window.prompt("Rename school:", currentName);
     if (name && name.trim()) setSchools(s => s.map(r => r.id === id ? { ...r, data: { ...r.data, name: name.trim() } } : r));
   }
-  function deleteSchool(id, name) {
+  const cloudRow = (rec) => ({ id: rec.id, user_id: session.user.id, data: rec.data, tools: rec.tools || [], tool_states: rec.toolStates || {}, progress: rec.progress || {}, xp: rec.xp || 0, revision: rec.revision || 0, mentor_chat: rec.mentorChat || [], advisor_chat: rec.advisorChat || [], published: !!rec.published, published_slug: rec.published_slug || null, updated_at: new Date().toISOString() });
+  async function deleteSchool(id, name) {
     const rec = schools.find(r => r.id === id);
     if (!rec) return;
+    if (!window.confirm(`Delete "${name}" forever?\n\nThis permanently removes it${rec.published ? " and its public page" : ""} from your account and the cloud. You'll have a few seconds to undo.`)) return;
     setSchools(s => s.filter(r => r.id !== id)); if (view === id) setView("home");
-    // Defer the cloud delete so it can be undone for a few seconds.
+    // Delete from the cloud RIGHT AWAY so it can never resurrect on the next load.
+    // (The old deferred timer was clobbered when deleting a second school, leaving
+    // the first one alive in Supabase — that's why deleted schools came back.)
+    if (session && (!rec._owner || rec._owner === session.user.id)) {
+      try { await supaFetch(`/rest/v1/schools?id=eq.${id}`, { method: "DELETE", token: session.token }); }
+      catch (e) { console.warn("Cloud delete failed:", e.message); showAToast("⚠ Couldn't delete from cloud — try again", "err"); }
+    }
+    delete savedRef.current[id];
+    // Brief client-side undo that fully re-creates it (locally + cloud).
     if (undo?.timer) clearTimeout(undo.timer);
-    const timer = setTimeout(async () => {
-      if (session) { try { await supaFetch(`/rest/v1/schools?id=eq.${id}`, { method: "DELETE", token: session.token }); } catch { } }
-      delete savedRef.current[id];
-      setUndo(u => (u && u.id === id ? null : u));
-    }, 6000);
+    const timer = setTimeout(() => setUndo(u => (u && u.id === id ? null : u)), 6000);
     setUndo({ id, name, timer, restore: rec });
   }
   function undoDelete() {
     if (!undo) return;
     clearTimeout(undo.timer);
-    setSchools(s => [undo.restore, ...s.filter(r => r.id !== undo.id)]);
+    const rec = undo.restore;
+    setSchools(s => [rec, ...s.filter(r => r.id !== undo.id)]);
+    if (session && (!rec._owner || rec._owner === session.user.id)) {
+      supaFetch(`/rest/v1/schools?on_conflict=id`, { method: "POST", token: session.token, body: [cloudRow(rec)], headers: { Prefer: "resolution=merge-duplicates" } }).catch(() => { });
+      delete savedRef.current[rec.id]; // let autosave re-track it from scratch
+    }
     setUndo(null);
   }
 
