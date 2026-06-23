@@ -861,6 +861,8 @@ DECIDE which of three modes this message is:
 - "effect": an ambient animated background effect for the whole school — one of ${EFFECT_KEYS.join(", ")}. Use when the user asks for atmosphere/vibes ("add an aurora effect", "make it feel cosmic/starry" → starfield, "add a glow", "floating embers/sparks" → embers, "subtle grid", "flowing gradient" → mesh). Set "effect": "none" to remove it.
 - "navStyle": "pills" | "topbar" | "chunky" | "minimal" | "soft" | "sidebar" — override the section navigation style independently of the theme. "sidebar" = a left vertical nav with content beside it (two-column).
 - "navGrad": a CSS gradient string for the navigation/sidebar background, e.g. "linear-gradient(180deg,#ef4444,#3b82f6)". Use for "make the sidebar a red→blue gradient". "" to clear.
+- "currency": { "word":"<what the points/XP are called, e.g. Energy, Coins, Sparks, Insight>", "icon":"<single emoji>" }. Use for "rename XP to …", "call points coins", "make XP energy". Set "currency": null to reset to "XP".
+- "progressSkin": "<a short description of a bespoke PROGRESS-bar metaphor that fits the subject, e.g. 'a shoelace that tightens', 'a rocket climbing toward a planet', 'a plant that grows', 'a jar filling up'>", OR "default" to restore the plain bar. Use whenever they ask to change the progress bar / completion meter / how progress looks.
 IMPORTANT: "brand" is ONLY a company logo + nav links bar. A picture/illustration the user wants INSIDE the page body is NOT brand and NOT a cover — it's a content image: handle that as an "action" ("add an image brick of … to the dashboard/lesson"), not a design field.
 - "hero": { "emoji":false, "tagline":false, "description":false, "off":true } — set a key false to hide that piece; "off":true = minimal title-only header. (For "just a chat, no title/description" set hero.off true.)
 - "overlay": { "type":"mentorFab", "greeting":"<short>" } to add a floating chat bubble, or null to remove.
@@ -2877,13 +2879,14 @@ OUTPUT CONTRACT: return ONLY the COMPLETE corrected HTML fragment. First charact
 // A bespoke PROGRESS metaphor, generated per school. The code uses the literal
 // token __VAL__ for the percent; the host substitutes the real number and renders
 // it sandboxed. Falls back to "" (→ the plain bar) if generation doesn't land.
-async function genProgressSkin(school) {
+async function genProgressSkin(school, instruction) {
   const T = themeFor(school);
   const subject = `${school.name} — ${flattenText(school.description) || school.tagline || ""}`.slice(0, 220);
+  const wish = instruction ? `\nThe creator specifically wants: ${instruction}. Honor that metaphor.` : "";
   const sys = `You design ONE small, self-contained PROGRESS visual for a learning school — a bespoke metaphor for "percent complete" that fits the SUBJECT. It receives the current percent as the literal token __VAL__ (an integer 0-100) which you MUST use in the markup so the visual fills/grows to represent it (e.g. style="width:__VAL__%", or a tiny script reading a number). Choose a metaphor that fits the subject: a shoelace tightening (tying shoes), a rocket climbing toward a planet (space), a plant growing (gardening), a jar/glass filling (nutrition/habits), a path being walked, a bar of light. Elegant and compact — it renders inside a ~320x72px transparent frame. Animate smoothly to the value on load.
 HARD RULES: NO external URLs/images/fonts/libraries (sandboxed offline); transparent background; light text #e7e9f5; use ${T.p} and ${T.a} as accents; the filled portion MUST reflect __VAL__.
 OUTPUT CONTRACT: return ONLY runnable HTML (inline <style> + optional vanilla <script>). First character "<". No prose, no markdown fences, no <html>/<head>/<body>, no postMessage/resize scripts.`;
-  const user = `Subject: ${subject}\nBuild the progress visual now — remember to use __VAL__ for the percent. Output HTML only, start with "<".`;
+  const user = `Subject: ${subject}${wish}\nBuild the progress visual now — remember to use __VAL__ for the percent. Output HTML only, start with "<".`;
   const ok = (c) => /__VAL__/.test(c) && /<\s*(svg|div|canvas|section|style)\b/i.test(c) && c.length > 50 && htmlComplete(c);
   return genCodeWithRepair({ system: sys, user, model: "sonnet", tokens: 2200, ok, repair: "Output ONLY the COMPLETE HTML fragment, using __VAL__ for the percent, starting with '<', every <style>/<script> closed. No prose.", fallback: "" });
 }
@@ -6872,6 +6875,7 @@ export default function Senseito() {
     if ("hero" in d) patch.hero = d.hero === null ? undefined : { ...(cur.hero || {}), ...(d.hero || {}) };
     if ("brand" in d) patch.brand = d.brand === null ? undefined : { ...(cur.brand || {}), ...(d.brand || {}) };
     if ("overlay" in d) patch.overlay = d.overlay;
+    if ("currency" in d) patch.currency = (d.currency && d.currency.word) ? { word: String(d.currency.word).slice(0, 16), icon: String(d.currency.icon || "").slice(0, 4) } : undefined;
     if (!Object.keys(patch).length) return false;
     pushVersion(rec.id, cur); // snapshot for Undo
     updateSchool(rec.id, { data: { ...cur, ...patch } });
@@ -6904,6 +6908,16 @@ export default function Senseito() {
       const d = out.design && typeof out.design === "object" ? out.design : null;
       if (d) {
         if (applyDesign(rec, d)) { pushMsg({ role: "assistant", content: "✓ Design updated." }); showAToast("✓ Design updated", "ok"); }
+        // Progress-bar metaphor — regenerate (or reset) the bespoke skin on demand.
+        if ("progressSkin" in d && d.progressSkin) {
+          const mergeData = (extra) => setSchools(s => s.map(r => r.id === rec.id ? { ...r, data: { ...r.data, ...extra } } : r));
+          if (/^(default|none|plain|reset|normal)$/i.test(String(d.progressSkin).trim())) {
+            mergeData({ progressSkin: undefined }); showAToast("✓ Progress bar reset", "ok");
+          } else {
+            setIterProg({ pct: 40, label: "Designing your progress visual…" });
+            try { const code = await genProgressSkin(rec.data, String(d.progressSkin)); if (code) { mergeData({ progressSkin: { code } }); showAToast("✓ New progress visual", "ok"); } else showAToast("Couldn't build that — kept the current bar", "err"); } catch { }
+          }
+        }
         if (d.layout && LAYOUTS[d.layout]) {
           const r = await coreEdit(rec, `Re-arrange this school into the "${d.layout}" layout (${LAYOUTS[d.layout].kinds.join(" + ")}), preserving all existing lesson and dashboard content.`);
           showAToast(r.ok ? "✓ Layout updated" : `✕ ${r.msg}`, r.ok ? "ok" : "err");
