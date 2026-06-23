@@ -906,12 +906,7 @@ const MENTOR_GARDEN_NOTE = `MINDSET GARDEN: this school has a Garden where limit
 
 function mentorSys(school, lesson, bus, opts = {}) {
   const dna = school.knowledgeDNA ? `\nKNOWLEDGE DNA (your source material — teach from this, use its vocabulary):\n${String(school.knowledgeDNA).slice(0, 4000)}\n` : "";
-  const modeNote = {
-    mentoronly: "PASS RULE: This lesson is a PURE CONVERSATION — there are no activities. Teach the whole concept through dialogue: explain a little, then probe with questions, and only approve when the student has genuinely demonstrated understanding in their own words. You are the only gate.",
-    mentor: "PASS RULE: YOU are the gate. Finishing the activities is not enough — the student must demonstrate real understanding to you, in their own words, before they pass. Evaluate strictly against the pass criteria; only approve when genuinely earned.",
-    activities: "PASS RULE: First ease the student into the lesson in 2-3 sentences, then assign ONE concrete mission. When you assign it, put it on its OWN final line EXACTLY as: MISSION: <one sentence: exactly what to do and what to report back to you>. The student completes the activities and then reports back — approve only if they truly did it.",
-    hybrid: "PASS RULE: The student passes by doing most of the activities AND convincing you they understand. Evaluate their grasp once they've put in the work.",
-  }[opts.mode] || "PASS RULE: Evaluate the student strictly against the pass criteria; approve only when earned.";
+  const modeNote = passNote(opts.np || normPass(lesson.passLogic, (lesson.blocks || []).length, lesson.mentorGuidance !== false));
   const status = opts.activityStatus ? `\nLEARNER'S ACTIVITY STATUS: ${opts.activityStatus}` : "";
   return `You are ${school.mentor.name}, an AI mentor inside the "${school.name}" school on Senseito.
 ${school.mentor.systemVoice}
@@ -1597,7 +1592,7 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, canEdit, onUpda
   const [blocks, setBlocks] = useState(() => (lesson.blocks || []).map((b, i) => (blockOverrides && blockOverrides[i]) || b));
   // Mentor-personalized activity (student-safe: persists to THIS learner's copy, not the shared school).
   function personalizeBlock(i, nb) { setBlocks(bs => bs.map((b, j) => j === i ? nb : b)); onOverrideBlock?.(i, nb); }
-  const [tab, setTab] = useState(lesson.mentorGuidance === false ? "activities" : "mentor"); // the guided conversation leads; activities are secondary
+  const [tab, setTab] = useState(() => normPass(lesson.passLogic, (lesson.blocks || []).length, lesson.mentorGuidance !== false).mode === "mentor" ? "mentor" : "activities");
   const [outputs, setOutputs] = useState(outputsProp || {}); // restored so completion survives close/reopen
   useEffect(() => { onOutputs?.(outputs); }, [outputs]); // persist activity completion (mentor + gating read this)
   const [redo, setRedo] = useState({}); // per-index: temporarily reopen a completed activity
@@ -1612,29 +1607,27 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, canEdit, onUpda
   useEffect(() => { if (onChat) onChat(msgs); }, [msgs]); // persist the lesson conversation
   function replaceLessonBlock(i, nb) { setBlocks(bs => bs.map((b, j) => j === i ? nb : b)); onUpdateBlock?.(i, nb); }
 
-  // Pass logic — three canonical modes for locked-lesson schools:
-  //  mentor    : the mentor decides (activities are supplementary).
-  //  activities: mentor briefs + assigns a MISSION; activities unlock in sequence; mentor approves the mission.
-  //  hybrid    : ≥70% of activities done AND the mentor approves.
+  // Pass logic — three canonical modes (see normPass):
+  //  mentor     : the mentor is the gate; it emits PASS: when earned (it enforces any activity %/mission).
+  //  activities : self-paced; pass on completing the chosen % of activities (no mentor gate).
+  //  manual     : the student marks it done.
   const pl = lesson.passLogic || {};
   const showMentor = lesson.mentorGuidance !== false; // custom lessons can opt out of the mentor
-  const baseMode = ["mentoronly", "mentor", "activities", "hybrid", "manual", "proof"].includes(pl.mode) ? pl.mode : "activities";
-  // No activities at all → behave as mentor-only (unless explicitly manual).
   // Students never see or get gated on empty/unfilled bricks; creators see them as "generate" cards.
   const acts = (canEdit || school?.minimal) ? blocks : blocks.filter(b => !isThinBlock(b));
-  const mode = !showMentor ? (acts.length ? "activities" : "manual") // no mentor → activities self-gate (or manual)
-    : (acts.length === 0 && baseMode !== "manual") ? "mentoronly" : baseMode;
-  const total = mode === "mentoronly" ? 0 : acts.length;
+  const np = normPass(pl, acts.length, showMentor);
+  const total = acts.length;
   const passedBlocks = acts.filter((_, i) => outputs[i]?.passed).length;
+  const ratio = total ? passedBlocks / total : 1;
   const allActivitiesDone = total > 0 && passedBlocks === total;
-  const briefed = msgs.some(m => m.role === "user"); // mode "activities": activities open after the mentor briefs
+  const briefed = msgs.some(m => m.role === "user"); // mentor+mission: activities open after the mentor briefs
   const mission = [...msgs].reverse().find(m => m.role === "mission")?.content || null;
+  const showMentorTab = showMentor && np.mode === "mentor";
+  const showActsTab = total > 0 || np.mode === "activities" || np.mode === "manual";
   let passed;
-  if (mode === "mentoronly" || mode === "mentor") passed = chatPassed;
-  else if (mode === "manual") passed = manualDone;
-  else if (mode === "hybrid") passed = total > 0 && (passedBlocks / total) >= 0.7 && chatPassed;
-  else if (mode === "proof") passed = acts.some((b, i) => (b.type === "image_gate" || b.type === "video_gate") && outputs[i]?.passed);
-  else passed = allActivitiesDone && (mission ? chatPassed : true); // "activities"
+  if (np.mode === "manual") passed = manualDone;
+  else if (np.mode === "activities") passed = total > 0 ? ratio >= (np.activityPct / 100) : manualDone;
+  else passed = chatPassed; // mentor approves (the activity % / mission are enforced BY the mentor, no double-gate)
 
   // Record the pass the moment it happens (unlocks the next lesson + saves progress),
   // so the student advances even if they close with ✕ instead of clicking Complete.
@@ -1649,7 +1642,7 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, canEdit, onUpda
     setMsgs(m => [...m, { role: "user", content: userMsg }]); setLoading(true);
     try {
       const activityStatus = total ? `${passedBlocks}/${total} activities done —${acts.map((b, i) => ` (${i + 1}) ${outputs[i]?.passed ? "✓" : "✗"} ${b.data?.title || BLOCK_META[b.type]?.label || b.type}`).join(",")}` : "this lesson has no activities";
-      let reply = await api(mentorSys(school, lesson, bus, { mode, activityStatus }), toApiMessages(convo), 2000);
+      let reply = await api(mentorSys(school, lesson, bus, { np, activityStatus }), toApiMessages(convo), 2000);
       // Capture any limiting belief the mentor flagged (WEED:) into the Garden, strip it from view.
       const wd = reply.match(/WEED:\s*(.+)/i);
       if (wd) { onIngest?.({ title: lesson?.title, lessonId: lesson?.number }, { type: "mindset", weed: wd[1].trim() }); reply = reply.replace(/\n?\s*WEED:\s*.+/i, "").trim(); }
@@ -1669,32 +1662,45 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, canEdit, onUpda
           })();
         }
       }
-      // Mode "activities": capture an assigned MISSION and pin it (stored as a 'mission' message).
+      // The mentor's explicit verdict — when it judges the bar met, it ends with "PASS: <reason>".
+      // This is the PRIMARY gate for mentor mode (so its approval and the actual pass are the same act —
+      // no more "the mentor said go on but the lesson never passed").
+      const pmatch = reply.match(/(^|\n)\s*PASS:\s*(.+)\s*$/i);
+      const mentorPassed = !!pmatch && np.mode === "mentor";
+      if (pmatch) reply = reply.replace(/(^|\n)\s*PASS:\s*.+\s*$/i, "").trim();
+      // Mentor + mission: capture an assigned MISSION and pin it (stored as a 'mission' message).
       const mm = reply.match(/MISSION:\s*([\s\S]+)/i);
-      if (mode === "activities" && mm && !mission) {
+      if (np.mode === "mentor" && np.mission && mm && !mission) {
         const mtext = mm[1].trim().split("\n")[0];
         const display = reply.replace(/MISSION:\s*[\s\S]+/i, "").trim();
         setMsgs(m => [...m, { role: "assistant", content: display || "Here's your mission — check the Activities tab." }, { role: "mission", content: mtext }]);
       } else {
-        setMsgs(m => [...m, { role: "assistant", content: reply }]);
+        setMsgs(m => [...m, { role: "assistant", content: reply || "…" }]);
       }
       if (!missionShown && reply.toLowerCase().includes("mission")) setMissionShown(true);
-      const transcript = [...convo, { role: "assistant", content: reply }];
-      // Only spend an eval call when the student said something substantial (skips chit-chat).
-      if (transcript.filter(m => m.role === "user").length >= 2 && userMsg.length >= 25 && !chatPassed) {
-        const serialized = transcript.map(m => `${m.role === "user" ? "STUDENT" : "MENTOR"}: ${m.content}`).join("\n\n");
-        const verdict = await api(EVAL_SYS(lesson), [{ role: "user", content: serialized }], 80);
-        if (/VERDICT:\s*PASS/i.test(verdict)) {
-          const reason = (verdict.match(/REASON:\s*([\s\S]*)/i)?.[1] || "").trim();
-          setChatPassed(true);
-          setTimeout(() => setMsgs(m => [...m, { role: "system", content: `✅ Lesson complete. ${reason || "You've earned this one."}` }]), 500);
+      if (mentorPassed && !chatPassed) {
+        setChatPassed(true);
+        const reason = pmatch[2].replace(/\s+$/, "").trim();
+        setTimeout(() => setMsgs(m => [...m, { role: "system", content: `✅ Lesson complete. ${reason || "You've earned this one."}` }]), 450);
+      } else if (np.mode === "mentor" && !mentorPassed && !chatPassed) {
+        // Backup: a strict independent examiner, only when the mentor didn't already call it.
+        const transcript = [...convo, { role: "assistant", content: reply }];
+        if (transcript.filter(m => m.role === "user").length >= 2 && userMsg.length >= 25) {
+          const serialized = transcript.map(m => `${m.role === "user" ? "STUDENT" : "MENTOR"}: ${m.content}`).join("\n\n");
+          const verdict = await api(EVAL_SYS(lesson), [{ role: "user", content: serialized }], 80);
+          if (/VERDICT:\s*PASS/i.test(verdict)) {
+            const reason = (verdict.match(/REASON:\s*([\s\S]*)/i)?.[1] || "").trim();
+            setChatPassed(true);
+            setTimeout(() => setMsgs(m => [...m, { role: "system", content: `✅ Lesson complete. ${reason || "You've earned this one."}` }]), 500);
+          }
         }
       }
     } catch (e) { setMsgs(m => [...m, { role: "assistant", content: `Error: ${e.message}` }]); }
     setLoading(false);
   }
 
-  const TABS = [...(showMentor ? [["mentor", "💬 Guided Lesson"]] : []), ...(blocks.length && mode !== "mentoronly" ? [["activities", `🧩 Activities (${blocks.length})`]] : [])];
+  const TABS = [...(showMentorTab ? [["mentor", "💬 Guided Lesson"]] : []), ...(showActsTab && blocks.length ? [["activities", `🧩 Activities (${blocks.length})`]] : [])];
+  const activeTab = TABS.some(([k]) => k === tab) ? tab : (TABS[0]?.[0] || "activities");
 
   return (
     <>
@@ -1718,14 +1724,14 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, canEdit, onUpda
         {TABS.length > 1 && (
           <div style={{ display: "flex", gap: 4, padding: "8px 14px 0", background: B.surface2, borderBottom: `1px solid ${B.border}` }}>
             {TABS.map(([k, l]) => (
-              <button key={k} onClick={() => setTab(k)} style={{ padding: "8px 14px", background: "none", border: "none", borderBottom: `2px solid ${tab === k ? T.p : "transparent"}`, color: tab === k ? B.white : B.muted, fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>{l}</button>
+              <button key={k} onClick={() => setTab(k)} style={{ padding: "8px 14px", background: "none", border: "none", borderBottom: `2px solid ${activeTab === k ? T.p : "transparent"}`, color: activeTab === k ? B.white : B.muted, fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>{l}</button>
             ))}
           </div>
         )}
 
-        {tab === "activities" && (
+        {activeTab === "activities" && (
           <div style={{ flex: 1, overflowY: "auto", padding: "18px 22px", display: "flex", flexDirection: "column", gap: 14 }}>
-            {(mode === "activities" || mode === "hybrid") && !briefed && !canEdit && showMentor ? (
+            {np.mode === "mentor" && np.mission && !briefed && !canEdit && showMentor ? (
               <div style={{ textAlign: "center", padding: "36px 20px" }}>
                 <div style={{ fontSize: 30, marginBottom: 10 }}>🔒</div>
                 <div style={{ fontSize: 14, fontWeight: 700, color: B.white, marginBottom: 6 }}>Talk to your mentor first</div>
@@ -1740,13 +1746,13 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, canEdit, onUpda
                 <span style={{ fontSize: 11, color: B.muted, whiteSpace: "nowrap" }}>{passedBlocks}/{total} done</span>
               </div>}
               <div style={{ fontSize: 11.5, color: T.a, background: T.as_, border: `1px solid ${T.ba}`, borderRadius: 8, padding: "7px 11px" }}>
-                {mode === "mentor" ? "To pass: complete the activities, then report to your mentor for evaluation."
-                  : mode === "hybrid" ? "To pass: complete at least 70% of activities, then your mentor approves."
-                    : mode === "manual" ? "To pass: work through these, then mark complete."
-                      : "To pass: complete every activity in order (and your mentor's mission)."}
+                {np.mode === "manual" ? "To pass: work through these, then mark the lesson complete."
+                  : np.mode === "activities" ? `To pass: complete ${np.activityPct === 50 ? "at least half of" : "all"} the activities${np.sequential ? " (they unlock in order)" : ""}.`
+                    : np.activityPct === 0 ? "To pass: talk it through with your mentor — they approve you when you've got it."
+                      : `To pass: complete ${np.activityPct === 100 ? "the" : np.activityPct + "% of the"} activities${np.mission ? " and your mentor's mission" : ""}, then your mentor approves you.`}
               </div>
               {acts.map((blk, i) => {
-                const locked = !canEdit && i > 0 && !outputs[i - 1]?.passed; // sequential unlock (creators see all)
+                const locked = !canEdit && np.sequential && i > 0 && !outputs[i - 1]?.passed; // sequential unlock (off when creator allows all)
                 if (locked) return <div key={i} style={{ background: B.surface2, border: `1px dashed ${B.borderMid}`, borderRadius: 12, padding: "14px 16px", fontSize: 12.5, color: B.muted, display: "flex", alignItems: "center", gap: 8 }}>🔒 {BLOCK_META[blk.type]?.icon} {BLOCK_META[blk.type]?.label || blk.type} — finish the activity above to unlock</div>;
                 // Already completed (restored from a prior session) → show as done, not a fresh activity.
                 if (outputs[i]?.passed && !redo[i] && !canEdit) return (
@@ -1761,15 +1767,15 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, canEdit, onUpda
                   </BrickFrame>
                 );
               })}
-              {mode === "manual" && !manualDone && <button onClick={() => setManualDone(true)} style={{ ...pBtn(T), alignSelf: "center" }}>✓ Mark lesson complete</button>}
-              {!passed && allActivitiesDone && showMentor && (mode === "mentor" || mode === "hybrid" || (mode === "activities" && mission)) &&
-                <button onClick={() => setTab("mentor")} style={{ ...pBtn(T), alignSelf: "center" }}>✅ Activities done — report to {school.mentor.name} →</button>}
+              {np.mode === "manual" && !manualDone && <button onClick={() => setManualDone(true)} style={{ ...pBtn(T), alignSelf: "center" }}>✓ Mark lesson complete</button>}
+              {!passed && np.mode === "mentor" && showMentor && (np.activityPct === 0 || allActivitiesDone || (np.activityPct < 100 && ratio >= np.activityPct / 100)) &&
+                <button onClick={() => setTab("mentor")} style={{ ...pBtn(T), alignSelf: "center" }}>{mission ? "✅ Done — report to" : "💬 Talk to"} {school.mentor.name} →</button>}
               {passed && <div style={{ textAlign: "center", padding: "12px 14px", background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.25)", borderRadius: 10, fontSize: 13, color: "#4ADE80", fontWeight: 600 }}>✅ Lesson complete — hit "Complete →" above.</div>}
             </>)}
           </div>
         )}
 
-        {tab === "mentor" && (<>
+        {activeTab === "mentor" && (<>
           <div style={{ flex: 1, overflowY: "auto", padding: "18px 22px", display: "flex", flexDirection: "column", gap: 12 }}>
             {msgs.map((m, i) => {
               if (m.role === "system") return <div key={i} style={{ textAlign: "center", padding: "10px 14px", background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.25)", borderRadius: 10, fontSize: 13, color: "#4ADE80", fontWeight: 600 }}>{m.content}</div>;
@@ -4102,12 +4108,10 @@ function CustomLessonWizard({ T, partTitle, onAdd, onClose }) {
   const [concept, setConcept] = useState("");
   const [mission, setMission] = useState("");
   const [pass, setPass] = useState("");
-  const [mentor, setMentor] = useState(true);          // mentor guidance yes/no
   const [single, setSingle] = useState(false);          // "just one activity" vs several
   const [picked, setPicked] = useState([]);             // chosen block types
-  const [mode, setMode] = useState("hybrid");           // pass logic
-  const modes = PASS_MODES.filter(([k]) => (mentor ? ["mentoronly", "mentor", "hybrid", "activities"] : ["activities", "manual", "proof"]).includes(k));
-  useEffect(() => { if (!modes.some(([k]) => k === mode)) setMode(modes[0][0]); }, [mentor]); // eslint-disable-line
+  const [passLogic, setPassLogic] = useState({ mode: "mentor", activityPct: 100, mission: false, sequential: true });
+  const mentor = passLogic.mode === "mentor";           // mentor mode → a guided mentor chat leads the lesson
   const toggle = (t) => setPicked(p => p.includes(t) ? p.filter(x => x !== t) : (single ? [t] : [...p, t]));
   const setSingleMode = (v) => { setSingle(v); if (v) setPicked(p => p.slice(0, 1)); };
   const cats = [...new Set(ALL_BLOCKS.map(t => BLOCK_META[t]?.cat || "Other"))];
@@ -4122,7 +4126,7 @@ function CustomLessonWizard({ T, partTitle, onAdd, onClose }) {
       mission: mission.trim(),
       passCriteria: pass.trim() || (picked.length ? "Complete the activities in this lesson." : "Mark the lesson complete when done."),
       mentorGuidance: mentor,
-      passLogic: { mode },
+      passLogic,
       blocks: picked.map(t => fallbackBlock(t, { title: title.trim() })),
     });
     onClose();
@@ -4144,14 +4148,11 @@ function CustomLessonWizard({ T, partTitle, onAdd, onClose }) {
         <div style={{ flex: 1, overflowY: "auto", padding: "18px 22px", display: "flex", flexDirection: "column", gap: 16 }}>
           <div><div style={lab}>Lesson name</div><input autoFocus value={title} onChange={e => setTitle(e.target.value)} placeholder="e.g. Holding a boundary under pressure" style={fld} /></div>
           <div><div style={lab}>What it teaches <span style={{ textTransform: "none", color: B.muted, fontWeight: 400 }}>(optional)</span></div><textarea value={concept} onChange={e => setConcept(e.target.value)} rows={2} placeholder="One line so the mentor & Overseer understand the lesson." style={fld} /></div>
-          <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
-            <div style={{ flex: 1, minWidth: 150 }}><div style={lab}>Mentor guidance</div><Seg on={mentor} set={setMentor} /><div style={{ fontSize: 11, color: B.muted, marginTop: 6, lineHeight: 1.5 }}>{mentor ? "A guided chat with the mentor leads the lesson." : "No mentor chat — the activities stand alone."}</div></div>
-            <div style={{ flex: 1, minWidth: 150 }}><div style={lab}>Activities</div>
-              <div style={{ display: "flex", gap: 6 }}>
-                {[[false, "Several"], [true, "Just one"]].map(([v, l]) => <button key={l} onClick={() => setSingleMode(v)} style={{ flex: 1, background: single === v ? T.ps : B.surface2, border: `1px solid ${single === v ? T.ba : B.borderMid}`, borderRadius: 9, color: single === v ? T.hi : B.mutedMid, padding: "8px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 700 }}>{l}</button>)}
-              </div>
-              <div style={{ fontSize: 11, color: B.muted, marginTop: 6, lineHeight: 1.5 }}>{single ? "Pick a single activity below." : "Pick as many activities as you like."}</div>
+          <div><div style={lab}>Activities</div>
+            <div style={{ display: "flex", gap: 6, maxWidth: 280 }}>
+              {[[false, "Several"], [true, "Just one"]].map(([v, l]) => <button key={l} onClick={() => setSingleMode(v)} style={{ flex: 1, background: single === v ? T.ps : B.surface2, border: `1px solid ${single === v ? T.ba : B.borderMid}`, borderRadius: 9, color: single === v ? T.hi : B.mutedMid, padding: "8px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 700 }}>{l}</button>)}
             </div>
+            <div style={{ fontSize: 11, color: B.muted, marginTop: 6, lineHeight: 1.5 }}>{single ? "Pick a single activity below." : "Pick as many activities as you like."}</div>
           </div>
           <div>
             <div style={lab}>Choose activities {picked.length > 0 && <span style={{ color: T.hi }}>({picked.length})</span>}</div>
@@ -4169,8 +4170,7 @@ function CustomLessonWizard({ T, partTitle, onAdd, onClose }) {
           <div><div style={lab}>Mission <span style={{ textTransform: "none", color: B.muted, fontWeight: 400 }}>(optional)</span></div><input value={mission} onChange={e => setMission(e.target.value)} placeholder="The one thing the student should do." style={fld} /></div>
           <div>
             <div style={lab}>How to pass this lesson</div>
-            <select value={mode} onChange={e => setMode(e.target.value)} style={{ ...fld, cursor: "pointer" }}>{modes.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
-            <div style={{ fontSize: 11.5, color: B.mutedMid, lineHeight: 1.55, background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 8, padding: "8px 11px", marginTop: 7 }}>{PASS_MODE_DESC[mode]}</div>
+            <PassLogicEditor value={passLogic} hasActs={picked.length > 0} onChange={setPassLogic} />
           </div>
           <div><div style={lab}>Pass criteria <span style={{ textTransform: "none", color: B.muted, fontWeight: 400 }}>(optional)</span></div><textarea value={pass} onChange={e => setPass(e.target.value)} rows={2} placeholder="What the student must SHOW to pass." style={fld} /></div>
         </div>
@@ -4186,22 +4186,73 @@ function CustomLessonWizard({ T, partTitle, onAdd, onClose }) {
 // ─────────────────────────────────────────────────────────────
 // LESSON EDITOR (creator) — rename, lock, pass logic, edit/delete blocks
 // ─────────────────────────────────────────────────────────────
+// Three canonical pass modes. Each carries simple sub-options (see normPass).
 const PASS_MODES = [
-  ["mentoronly", "Mentor only — pure conversation"],
-  ["mentor", "Mentor decides (after activities)"],
-  ["activities", "Activities + mentor's mission"],
-  ["hybrid", "70% of activities + mentor approves"],
-  ["proof", "Photo / video proof"],
+  ["mentor", "Mentor approves"],
+  ["activities", "Activities done"],
   ["manual", "Manual — student marks done"],
 ];
 const PASS_MODE_DESC = {
-  mentoronly: "No activities tab — the mentor guides the whole lesson through conversation and decides when the student has truly understood. Best for discussion, coaching, Socratic or reflective lessons.",
-  mentor: "Students work through the activities, then report to the mentor, who evaluates the conversation and decides if they've genuinely got it.",
-  activities: "The mentor briefs the student and assigns a mission, then they complete the activities in order; the mission passes on the mentor's approval. Best for hands-on practice.",
-  hybrid: "A balance — the student must finish at least 70% of the activities AND convince the mentor. A solid all-rounder.",
-  proof: "The student passes by submitting photo or video proof of real-world work.",
+  mentor: "The mentor is the gate: they guide the lesson and approve the student once they've genuinely got it. Optionally require some activities and/or a hands-on mission.",
+  activities: "Self-paced — the student passes by completing the activities, no mentor approval needed. Pick how many, and whether they unlock in order.",
   manual: "No gate — the student marks the lesson complete themselves (good for optional or reference lessons).",
 };
+const ACT_PCT = [[0, "No activities (chat only)"], [50, "Half (50%)"], [70, "Most (70%)"], [100, "All activities"]];
+
+// Normalize a lesson's passLogic into { mode:"mentor"|"activities"|"manual", activityPct, mission, sequential },
+// migrating every legacy shape so old schools keep working with the simplified model.
+function normPass(pl, hasActs = true, showMentor = true) {
+  pl = pl || {};
+  let { mode, activityPct, mission, sequential } = pl;
+  if (mode === "mentoronly") return { mode: "mentor", activityPct: 0, mission: false, sequential: true };
+  if (mode === "hybrid") return { mode: "mentor", activityPct: 70, mission: false, sequential: true };
+  if (mode === "proof") return { mode: "activities", activityPct: 100, mission: false, sequential: true };
+  // legacy "activities + mentor's mission" had no sub-fields → it's a mentor-approves lesson.
+  if (mode === "activities" && activityPct === undefined && mission === undefined && sequential === undefined)
+    return { mode: "mentor", activityPct: hasActs ? 100 : 0, mission: true, sequential: true };
+  if (!["mentor", "activities", "manual"].includes(mode)) mode = !showMentor ? (hasActs ? "activities" : "manual") : "mentor";
+  if (mode === "mentor") return { mode, activityPct: [0, 50, 70, 100].includes(activityPct) ? activityPct : (hasActs ? 100 : 0), mission: mission !== false, sequential: sequential !== false };
+  if (mode === "activities") return { mode, activityPct: activityPct === 50 ? 50 : 100, mission: false, sequential: sequential !== false };
+  return { mode: "manual", activityPct: 0, mission: false, sequential: true };
+}
+// The mentor's PASS RULE, built from the normalized pass logic.
+function passNote(np) {
+  if (np.mode === "manual") return "PASS RULE: The student marks this lesson done themselves — just teach and support; you don't gate it.";
+  if (np.mode === "activities") return `PASS RULE: ACTIVITIES gate this lesson, not you. Teach and help, but the student passes by completing ${np.activityPct === 50 ? "at least half of" : "all of"} the activities — never claim to pass or fail them yourself.`;
+  const need = np.activityPct === 0
+    ? "There are no required activities — this is a pure conversation; teach the whole thing through dialogue."
+    : `Before you approve, the learner must have completed ${np.activityPct === 100 ? "ALL" : np.activityPct + "% of"} the activities — trust the ACTIVITY STATUS below (✓/✗) over what they claim, and never approve while a required one shows ✗.`;
+  const miss = np.mission ? " First ease them in (2-3 sentences), then assign ONE concrete mission on its OWN final line EXACTLY as: MISSION: <one sentence — what to do and report back>." : "";
+  return `PASS RULE: YOU are the gate. ${need}${miss} The MOMENT the learner has genuinely met the pass criteria${np.mission ? " and done the mission" : ""}, end your reply with a line EXACTLY: PASS: <one short reason it's earned>. Emit PASS only when truly earned — never for mere enthusiasm or "I'll do it" — but when it IS earned, always emit it so they advance.`;
+}
+// Shared pass-criteria control — mode + smart sub-options. Used by the lesson editor & the custom-lesson wizard.
+function PassLogicEditor({ value, hasActs, onChange }) {
+  const np = normPass(value, hasActs);
+  const set = (patch) => onChange({ ...np, ...patch });
+  const sel = { background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.white, fontFamily: "inherit", fontSize: 12.5, padding: "7px 9px", cursor: "pointer" };
+  const chk = { display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: B.mutedMid, cursor: "pointer" };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+      <select value={np.mode} onChange={e => set({ mode: e.target.value })} style={{ ...sel, width: "100%" }}>
+        {PASS_MODES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+      </select>
+      {np.mode === "mentor" && (
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}><span style={{ fontSize: 11.5, color: B.muted }}>Require</span>
+            <select value={np.activityPct} onChange={e => set({ activityPct: +e.target.value })} style={sel}>{ACT_PCT.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></div>
+          <label style={chk}><input type="checkbox" checked={np.mission} onChange={e => set({ mission: e.target.checked })} /> Assign a mission</label>
+        </div>
+      )}
+      {np.mode === "activities" && (
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+          <select value={np.activityPct === 50 ? 50 : 100} onChange={e => set({ activityPct: +e.target.value })} style={sel}><option value={50}>Half (50%) of activities</option><option value={100}>All activities</option></select>
+          <label style={chk}><input type="checkbox" checked={np.sequential} onChange={e => set({ sequential: e.target.checked })} /> Unlock in order</label>
+        </div>
+      )}
+      <div style={{ fontSize: 11.5, color: B.mutedMid, lineHeight: 1.55, background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 8, padding: "8px 11px" }}>{PASS_MODE_DESC[np.mode]}</div>
+    </div>
+  );
+}
 function blockFields(type) {
   return ({
     video_embed: [["url", "Video URL (YouTube / Loom)"], ["title", "Title"]],
@@ -4224,7 +4275,7 @@ function blockFields(type) {
   })[type] || [];
 }
 function LessonEditor({ lesson, T, allowed, onSave, onDelete, onApplyAI, onAuthorBlock, onClose }) {
-  const [d, setD] = useState({ ...lesson, blocks: (lesson.blocks || []).map(b => ({ ...b, data: { ...(b.data || {}) } })), passLogic: lesson.passLogic || { mode: "hybrid" } });
+  const [d, setD] = useState({ ...lesson, blocks: (lesson.blocks || []).map(b => ({ ...b, data: { ...(b.data || {}) } })), passLogic: normPass(lesson.passLogic, (lesson.blocks || []).length, lesson.mentorGuidance !== false) });
   const [addType, setAddType] = useState("");
   const [busyIdx, setBusyIdx] = useState(-1);
   const [adding, setAdding] = useState(false);
@@ -4266,13 +4317,12 @@ function LessonEditor({ lesson, T, allowed, onSave, onDelete, onApplyAI, onAutho
               </div>
             </div>
           </div>
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-            <div style={{ flex: 1, minWidth: 140 }}><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>Type</div>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
+            <div style={{ flex: "0 0 140px", minWidth: 120 }}><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>Type</div>
               <select value={d.type || "Dialogue"} onChange={e => set({ type: e.target.value })} style={{ ...inp.input, cursor: "pointer" }}>{Object.keys(TM).map(t => <option key={t} value={t}>{t}</option>)}</select></div>
-            <div style={{ flex: 1, minWidth: 140 }}><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>How to pass this lesson</div>
-              <select value={d.passLogic?.mode || "hybrid"} onChange={e => set({ passLogic: { ...d.passLogic, mode: e.target.value } })} style={{ ...inp.input, cursor: "pointer" }}>{PASS_MODES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select></div>
+            <div style={{ flex: 1, minWidth: 200 }}><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>How to pass this lesson</div>
+              <PassLogicEditor value={d.passLogic} hasActs={(d.blocks || []).length > 0} onChange={pl => set({ passLogic: pl })} /></div>
           </div>
-          <div style={{ fontSize: 11.5, color: B.mutedMid, lineHeight: 1.55, background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 8, padding: "8px 11px" }}>{PASS_MODE_DESC[d.passLogic?.mode || "hybrid"] || "Choose how a student proves they've completed this lesson."}</div>
           <div><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>Pass criteria (used by mentor / AI evaluation)</div><textarea value={d.passCriteria || ""} onChange={e => set({ passCriteria: e.target.value })} rows={2} style={inp.input} /></div>
 
           <div>
