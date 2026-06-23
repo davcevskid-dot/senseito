@@ -1525,7 +1525,7 @@ function RewardLink({ reward, T, compact }) {
     </a>
   );
 }
-function CelebrationOverlay({ title, xp, badge, T, reward, onClose }) {
+function CelebrationOverlay({ title, xp, badge, T, reward, forks, onChoose, onClose }) {
   const colors = [T.p, T.a, T.hi, "#4ADE80", "#FBBF24", "#F472B6"];
   const pieces = Array.from({ length: 28 }, (_, i) => ({ left: Math.random() * 100, dur: 1.6 + Math.random() * 1.4, delay: Math.random() * 0.5, c: colors[i % colors.length], w: 6 + Math.random() * 6 }));
   return (
@@ -1543,7 +1543,16 @@ function CelebrationOverlay({ title, xp, badge, T, reward, onClose }) {
             <RewardLink reward={reward} T={T} />
           </div>
         )}
-        <button onClick={onClose} style={{ display: "block", width: "100%", background: T.grad, border: "none", borderRadius: 12, color: "white", fontFamily: "inherit", fontSize: 15, fontWeight: 700, padding: "12px", cursor: "pointer", boxShadow: `0 6px 20px ${T.pg}` }}>Continue →</button>
+        {forks && forks.length ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.4, color: B.muted, marginBottom: 2 }}>🌿 Choose your path</div>
+            {forks.map((f, i) => (
+              <button key={i} onClick={() => onChoose?.(f.to)} style={{ display: "block", width: "100%", background: i === 0 ? T.grad : B.surface2, border: i === 0 ? "none" : `1px solid ${T.ba}`, borderRadius: 12, color: i === 0 ? "white" : T.hi, fontFamily: "inherit", fontSize: 14, fontWeight: 700, padding: "12px 14px", cursor: "pointer", textAlign: "left", boxShadow: i === 0 ? `0 6px 20px ${T.pg}` : "none" }}>{f.label || f.toTitle || "Continue"} →</button>
+            ))}
+          </div>
+        ) : (
+          <button onClick={onClose} style={{ display: "block", width: "100%", background: T.grad, border: "none", borderRadius: 12, color: "white", fontFamily: "inherit", fontSize: 15, fontWeight: 700, padding: "12px", cursor: "pointer", boxShadow: `0 6px 20px ${T.pg}` }}>Continue →</button>
+        )}
       </div>
     </div>
   );
@@ -1602,7 +1611,7 @@ function AchievementsGrid({ unlockedIds = [] }) {
   );
 }
 
-function LessonView({ school, lesson, T: Tprop, onClose, onPass, canEdit, onUpdateBlock, chat, onChat, bus, onIngest, outputs: outputsProp, onOutputs, blockOverrides, onOverrideBlock }) {
+function LessonView({ school, lesson, T: Tprop, onClose, onPass, onChooseFork, canEdit, onUpdateBlock, chat, onChat, bus, onIngest, outputs: outputsProp, onOutputs, blockOverrides, onOverrideBlock }) {
   // Per-lesson accent override (lesson.accent) recolors the whole lesson modal.
   const T = (lesson.accent && HEX_RE.test(lesson.accent))
     ? { ...Tprop, p: lesson.accent, pg: hexA(lesson.accent, 0.18), ps: hexA(lesson.accent, 0.09), as_: hexA(lesson.accent, 0.12), ba: hexA(lesson.accent, 0.4), hi: lesson.accent, gr: `linear-gradient(135deg,${hexA(lesson.accent, 0.22)},${hexA(lesson.accent, 0.08)})`, grad: `linear-gradient(135deg,${lesson.accent},${lesson.accent}CC)` }
@@ -1723,7 +1732,10 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, canEdit, onUpda
 
   return (
     <>
-    {celebrate && <CelebrationOverlay title={lesson.title} xp={school.gamification?.xpPerLesson || 0} badge={school.template === "kids" ? "🌟" : "🎉"} T={T} reward={lesson.reward} onClose={() => { setCelebrate(false); onClose(); }} />}
+    {celebrate && (() => {
+      const lf = (lesson.forks || []).map(f => ({ ...f, toTitle: (school.semesters || []).flatMap(s => s.lessons || []).find(l => l.id === f.to)?.title })).filter(f => f.to);
+      return <CelebrationOverlay title={lesson.title} xp={school.gamification?.xpPerLesson || 0} badge={school.template === "kids" ? "🌟" : "🎉"} T={T} reward={lesson.reward} forks={lf.length ? lf : null} onChoose={(to) => { onChooseFork?.(to); setCelebrate(false); onClose(); }} onClose={() => { setCelebrate(false); onClose(); }} />;
+    })()}
     <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(0,0,0,0.82)", backdropFilter: "blur(10px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onClose}>
       <div style={{ background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 20, width: "100%", maxWidth: 680, height: "86vh", maxHeight: 760, display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: `0 0 80px ${T.pg}` }} onClick={e => e.stopPropagation()}>
         {/^https:\/\//i.test(lesson.cover || "") && <img src={lesson.cover} alt="" style={{ width: "100%", height: 130, objectFit: "cover", objectPosition: lesson.coverPos || "center", display: "block", flexShrink: 0 }} />}
@@ -4325,7 +4337,7 @@ function blockFields(type) {
     quiz: [],
   })[type] || [];
 }
-function LessonEditor({ lesson, T, allowed, onSave, onDelete, onApplyAI, onAuthorBlock, onClose }) {
+function LessonEditor({ lesson, T, allowed, lessons = [], onSave, onDelete, onApplyAI, onAuthorBlock, onClose }) {
   const [d, setD] = useState({ ...lesson, blocks: (lesson.blocks || []).map(b => ({ ...b, data: { ...(b.data || {}) } })), passLogic: normPass(lesson.passLogic, (lesson.blocks || []).length, lesson.mentorGuidance !== false) });
   const [addType, setAddType] = useState("");
   const [busyIdx, setBusyIdx] = useState(-1);
@@ -4336,6 +4348,10 @@ function LessonEditor({ lesson, T, allowed, onSave, onDelete, onApplyAI, onAutho
   const media = useContext(MediaAuthCtx); // signed-in creators can pick reward files from their library
   const [pickReward, setPickReward] = useState(false);
   const setReward = (patch) => setD(x => ({ ...x, reward: { ...(x.reward || {}), ...patch } }));
+  const otherLessons = lessons.filter(l => l.id && l.id !== d.id);
+  const addFork = () => setD(x => ({ ...x, forks: [...(x.forks || []), { label: "", to: "" }] }));
+  const setFork = (i, patch) => setD(x => ({ ...x, forks: (x.forks || []).map((f, j) => j === i ? { ...f, ...patch } : f) }));
+  const delFork = (i) => setD(x => ({ ...x, forks: (x.forks || []).filter((_, j) => j !== i) }));
   const lessonCtx = () => ({ title: d.title, concept: d.concept, mission: d.mission, passCriteria: d.passCriteria });
   const changeBlockType = (i, t) => setD(x => ({ ...x, blocks: x.blocks.map((b, j) => j === i ? { type: t, data: {} } : b) }));
   async function rewriteBlock(i) {
@@ -4400,6 +4416,25 @@ function LessonEditor({ lesson, T, allowed, onSave, onDelete, onApplyAI, onAutho
               </div>
             )}
             {pickReward && media && <MediaPicker token={media.token} userId={media.userId} onPick={m => setReward({ file: { url: m.url, name: m.name } })} onClose={() => setPickReward(false)} />}
+          </div>
+
+          {/* Branching — turn this lesson into a fork that sends the student down different paths. */}
+          <div>
+            <div style={{ fontSize: 11, color: B.muted, marginBottom: 3 }}>🌿 Branching <span style={{ color: B.muted, fontWeight: 400 }}>(optional — choose-your-own-adventure)</span></div>
+            <div style={{ fontSize: 11, color: B.muted, marginBottom: 7, lineHeight: 1.5 }}>Offer choices the student picks after passing this lesson — each opens a different next lesson instead of just advancing in order.</div>
+            {(d.forks || []).map((f, i) => (
+              <div key={i} style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
+                <input value={f.label || ""} onChange={e => setFork(i, { label: e.target.value })} placeholder="Choice (e.g. Go deeper)" style={{ ...inp.input, fontSize: 12, flex: 1 }} />
+                <span style={{ color: B.muted, fontSize: 12 }}>→</span>
+                <select value={f.to || ""} onChange={e => setFork(i, { to: e.target.value })} style={{ ...inp.input, fontSize: 12, flex: 1, cursor: "pointer" }}>
+                  <option value="">Go to lesson…</option>
+                  {otherLessons.map(l => <option key={l.id} value={l.id}>{l.title}</option>)}
+                </select>
+                <button onClick={() => delFork(i)} style={{ background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.3)", borderRadius: 7, color: "#F87171", padding: "6px 9px", cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>✕</button>
+              </div>
+            ))}
+            <button onClick={addFork} disabled={otherLessons.length === 0} title={otherLessons.length === 0 ? "Add more lessons first" : ""} style={{ background: B.surface2, border: `1px dashed ${T.ba}`, borderRadius: 9, color: T.hi, padding: "7px 12px", cursor: otherLessons.length ? "pointer" : "not-allowed", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", opacity: otherLessons.length ? 1 : 0.5 }}>＋ Add a choice</button>
+            {(d.forks || []).some(f => f.to) && <div style={{ fontSize: 11, color: T.a, marginTop: 7, lineHeight: 1.5 }}>On completion, the student picks a path — auto-advance is off for this lesson.</div>}
           </div>
 
           <div>
@@ -5321,6 +5356,20 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
 
   function showToast(msg, type = "ok") { setToast({ msg, type }); clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setToast(null), 3500); }
 
+  // Ensure every lesson has a stable id (forks/branching reference lessons by id, not number).
+  useEffect(() => {
+    if ((school.semesters || []).some(s => (s.lessons || []).some(l => !l.id))) {
+      onUpdate({ data: { ...school, semesters: (school.semesters || []).map(s => ({ ...s, lessons: (s.lessons || []).map(l => l.id ? l : { ...l, id: uid() }) })) } });
+    }
+  }, [rec.revision]); // eslint-disable-line
+  // A branching school: at least one lesson offers a choice of where to go next.
+  const isAdventure = (school.semesters || []).some(s => (s.lessons || []).some(l => (l.forks || []).length));
+  function chooseFork(toId) {
+    const target = (school.semesters || []).flatMap(s => s.lessons || []).find(l => l.id === toId);
+    if (!target) return;
+    if (progress[target.number] === "locked" || progress[target.number] === undefined) onUpdate({ progress: { ...progress, [target.number]: "active" } });
+  }
+
   useEffect(() => {
     // Each CLASS is its own parallel track: the first lesson of every class starts active.
     const p = { ...progress }; let changed = false;
@@ -5340,6 +5389,9 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
     if (progress[lessonNumber] === "passed") return; // already passed — don't re-award XP on revisit
     const nextXp = xp + (school.gamification?.xpPerLesson || 100);
     const next = { ...progress, [lessonNumber]: "passed" };
+    // Branching lesson: the student's chosen fork unlocks the path — skip the linear auto-advance.
+    const forked = (school.semesters || []).flatMap(s => s.lessons || []).find(l => l.number === lessonNumber)?.forks?.length;
+    if (forked) { onUpdate({ progress: next, xp: nextXp }); return; }
     // Unlock the next locked lesson WITHIN THE SAME CLASS (classes advance independently).
     const sems = school.semesters || [];
     let cls = "__main"; sems.forEach(s => { if ((s.lessons || []).some(l => l.number === lessonNumber)) cls = s.classId || "__main"; });
@@ -5476,17 +5528,19 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
       {activeLesson && <LessonView school={classes ? { ...school, mentor: classMentor(school, lessonClassId(school, activeLesson.number)) } : school} lesson={activeLesson} T={T} onClose={() => {
           const finished = activeLesson; setActiveLesson(null);
           // Arcade: a continuous run — when you clear a lesson, roll straight into the next one.
-          if (school.progression === "arcade" && finished && progress[finished.number] === "passed") {
+          // (Skip for branching lessons — the student's fork choice decides where they go.)
+          if (school.progression === "arcade" && finished && progress[finished.number] === "passed" && !(finished.forks || []).length) {
             const all = (school.semesters || []).flatMap(s => s.lessons || []);
             const next = all.find(l => l.number !== finished.number && progress[l.number] !== "passed" && (l.open || progress[l.number] === "active"));
             if (next) setTimeout(() => setActiveLesson(next), 350);
           }
-        }} onPass={() => handlePass(activeLesson.number)}
+        }} onPass={() => handlePass(activeLesson.number)} onChooseFork={chooseFork}
         canEdit={!readOnly} onUpdateBlock={(i, nb) => updateLessonBlock(activeLesson.number, i, nb)} bus={bus} onIngest={ingestOutput}
         chat={rec.lessonChats?.[activeLesson.number]} onChat={(msgs) => onUpdate({ lessonChats: { ...(rec.lessonChats || {}), [activeLesson.number]: msgs } })}
         outputs={rec.lessonOutputs?.[activeLesson.number]} onOutputs={(o) => onUpdate({ lessonOutputs: { ...(rec.lessonOutputs || {}), [activeLesson.number]: o } })}
         blockOverrides={rec.lessonBlocks?.[activeLesson.number]} onOverrideBlock={(i, nb) => onUpdate({ lessonBlocks: { ...(rec.lessonBlocks || {}), [activeLesson.number]: { ...(rec.lessonBlocks?.[activeLesson.number] || {}), [i]: nb } } })} />}
       {editingLesson && !readOnly && <LessonEditor lesson={editingLesson} T={T} allowed={allowedBlocksFor(school.learningPath)}
+        lessons={(school.semesters || []).flatMap(s => s.lessons || [])}
         onSave={(draft) => { saveLesson(editingLesson.number, draft); setEditingLesson(null); showToast("✓ Lesson updated"); }}
         onDelete={() => { if (window.confirm("Delete this lesson? This can't be undone.")) { deleteLessonByNumber(editingLesson.number); setEditingLesson(null); showToast("✓ Lesson deleted"); } }}
         onApplyAI={(inst) => applyIteration(inst)} onAuthorBlock={authorBlock}
@@ -5701,6 +5755,9 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
           </div>
           <div key={activeTab} className="sx-stagger" style={{ flex: 1, minWidth: 0, width: "100%", display: "flex", flexDirection: "column", gap: dens, ...(SECTIONS.find(s => s.id === activeTab)?.sticky ? { position: "sticky", top: 64, alignSelf: "flex-start", maxHeight: "calc(100vh - 80px)", overflowY: "auto" } : {}) }}>
           {activeTab === "lessons" && (<>
+            {isAdventure && (
+              <div style={{ background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 12, padding: "10px 15px", fontSize: 12.5, color: T.hi, display: "flex", alignItems: "center", gap: 8 }}>🌿 <span><strong>Choose-your-own-adventure</strong> — your path branches based on the choices you make after certain lessons.</span></div>
+            )}
             {(school.transformation || !readOnly) && (
               <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: "16px 22px" }}>
                 <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.5, color: T.p, marginBottom: 5 }}>Your Transformation</div>
