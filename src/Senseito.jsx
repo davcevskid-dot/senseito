@@ -4723,11 +4723,16 @@ function CreatorGuide({ school, T, onClose }) {
   const [loading, setLoading] = useState(false);
   const step = steps[i];
   const bottom = useRef(null);
+  const ttRef = useRef(null);
+  const [ttH, setTtH] = useState(260);
+  const [vw, setVw] = useState(() => (typeof window !== "undefined" ? window.innerWidth : 1024));
+  const [vh, setVh] = useState(() => (typeof window !== "undefined" ? window.innerHeight : 768));
 
   // Locate the highlighted element, scroll it into view, and measure it.
   useLayoutEffect(() => {
     let raf;
     const find = () => {
+      setVw(window.innerWidth); setVh(window.innerHeight);
       const el = document.querySelector(`[data-guide="${step.key}"]`);
       if (!el) { setRect(null); return null; }
       const r = el.getBoundingClientRect();
@@ -4736,12 +4741,16 @@ function CreatorGuide({ school, T, onClose }) {
       return el;
     };
     const el = document.querySelector(`[data-guide="${step.key}"]`);
-    if (el) { el.scrollIntoView({ behavior: "smooth", block: "center" }); raf = requestAnimationFrame(() => setTimeout(find, 260)); }
-    else { setRect(null); }
+    // Center the target, but bias upward a little so the tooltip below it has room.
+    if (el) { el.scrollIntoView({ behavior: "smooth", block: "center" }); raf = requestAnimationFrame(() => setTimeout(find, 280)); }
+    else { setRect(null); setVw(window.innerWidth); setVh(window.innerHeight); }
     const onMove = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(find); };
     window.addEventListener("resize", onMove); window.addEventListener("scroll", onMove, true);
     return () => { cancelAnimationFrame(raf); window.removeEventListener("resize", onMove); window.removeEventListener("scroll", onMove, true); };
   }, [i, step.key]);
+
+  // Measure the actual tooltip height so placement never runs off-screen.
+  useLayoutEffect(() => { if (ttRef.current) setTtH(ttRef.current.offsetHeight); }, [i, chatOpen, msgs.length, loading, rect, vw]);
 
   useEffect(() => { bottom.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs, loading, chatOpen]);
 
@@ -4754,15 +4763,26 @@ function CreatorGuide({ school, T, onClose }) {
   }
 
   const last = i === steps.length - 1;
-  // Tooltip placement: below the target if there's room, else above; centered when no target.
-  const pad = 14, ttW = Math.min(380, (typeof window !== "undefined" ? window.innerWidth : 380) - 24);
+  // ── Smart, responsive placement ──
+  // Mobile (narrow): a bottom sheet — the ring still highlights the target above it.
+  // Desktop: below the target if it fits, else above, else clamped fully on-screen.
+  const narrow = vw < 640, pad = 14, margin = 12, gap = 14;
+  const ttW = narrow ? vw - margin * 2 : Math.min(380, vw - margin * 2);
+  const maxTT = vh - margin * 2;
   let ttStyle;
-  if (rect) {
-    const below = rect.top + rect.height + 320 < window.innerHeight || rect.top < 180;
-    const top = below ? rect.top + rect.height + 12 : Math.max(12, rect.top - 12);
+  if (narrow) {
+    ttStyle = { position: "fixed", left: margin, width: ttW, bottom: margin, zIndex: 612 };
+  } else if (rect) {
+    const roomBelow = vh - (rect.top + rect.height) - gap;
+    const roomAbove = rect.top - gap;
+    let top;
+    if (roomBelow >= ttH + margin) top = rect.top + rect.height + gap;
+    else if (roomAbove >= ttH + margin) top = rect.top - gap - ttH;
+    else top = (vh - Math.min(ttH, maxTT)) / 2; // neither side fits — vertically center
+    top = Math.max(margin, Math.min(top, vh - Math.min(ttH, maxTT) - margin));
     let left = rect.left + rect.width / 2 - ttW / 2;
-    left = Math.max(12, Math.min(left, window.innerWidth - ttW - 12));
-    ttStyle = { position: "fixed", left, [below ? "top" : "bottom"]: below ? top : window.innerHeight - rect.top + 12, width: ttW, zIndex: 612 };
+    left = Math.max(margin, Math.min(left, vw - ttW - margin));
+    ttStyle = { position: "fixed", left, top, width: ttW, zIndex: 612 };
   } else {
     ttStyle = { position: "fixed", left: "50%", top: "50%", transform: "translate(-50%,-50%)", width: ttW, zIndex: 612 };
   }
@@ -4786,14 +4806,15 @@ function CreatorGuide({ school, T, onClose }) {
       </div>
 
       {/* Tooltip card */}
-      <div style={ttStyle} onClick={e => e.stopPropagation()}>
-        <div style={{ background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 16, padding: 16, boxShadow: "0 24px 70px rgba(0,0,0,0.6)", animation: "sxRise 0.32s ease both" }}>
+      <div ref={ttRef} style={ttStyle} onClick={e => e.stopPropagation()}>
+        <div style={{ background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 16, padding: 16, boxShadow: "0 24px 70px rgba(0,0,0,0.6)", animation: "sxRise 0.32s ease both", maxHeight: narrow ? "78vh" : "92vh", overflowY: "auto" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 9 }}>
             <div style={{ width: 30, height: 30, borderRadius: 9, background: T.ps, border: `1px solid ${T.ba}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, flexShrink: 0 }}>{step.icon}</div>
             <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 15, fontWeight: 700, color: B.white, flex: 1 }}>{step.title}</div>
             <button onClick={onClose} title="Close guide" style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 16 }}>✕</button>
           </div>
           <div style={{ fontSize: 13, color: B.mutedMid, lineHeight: 1.62 }}>{step.body}</div>
+          {narrow && !rect && step.key === "chat" && <div style={{ fontSize: 12, color: T.hi, marginTop: 7 }}>📱 On mobile, tap ☰ at the top to open the build chat.</div>}
 
           {/* Ask-the-guide — the part most walkthroughs lack: a live AI you can question */}
           <button onClick={() => setChatOpen(o => !o)} style={{ marginTop: 11, width: "100%", background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 10, color: T.hi, padding: "8px 11px", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
