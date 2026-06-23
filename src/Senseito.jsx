@@ -1153,6 +1153,7 @@ const SECTION_META = {
   mentor: { title: "Mentor", icon: "🎓" },
   tools: { title: "Tools", icon: "🛠️" },
   dashboard: { title: "Dashboard", icon: "🧭" },
+  gamelab: { title: "Game Lab", icon: "🎮" },
 };
 // Starting layouts the creator can pick (or "auto" = let the AI decide).
 const LAYOUTS = {
@@ -3268,47 +3269,98 @@ function GameWizard({ school, code, T, onApply, onClose }) {
     </div>
   );
 }
-function GameBlock({ data = {}, T, school, canEdit, onEditData }) {
+// Games are now authored ONCE in the Game Lab and referenced by id from game bricks.
+const schoolGames = (school) => Array.isArray(school?.games) ? school.games : [];
+// One game inside the Game Lab — generate / iterate / enhance / rename / resize / delete.
+function GameEditor({ game, school, T, onChange, onDelete }) {
   const [draft, setDraft] = useState("");
-  const [busy, setBusy] = useState(false); // "regen" | "iter" | false
+  const [busy, setBusy] = useState(false);
   const [wizard, setWizard] = useState(false);
-  const h = data.h || 460;
+  const h = game.h || 460;
   async function gen(kind) {
     const p = draft.trim(); if ((!p && kind !== "regen") || busy) return;
     setBusy(kind);
-    try { const code = await genGame(school, p || data.prompt || "a fun quiz that tests this school's key ideas", kind === "iter" ? data.code : null); onEditData?.({ ...data, prompt: p || data.prompt || "", code }); }
+    try { const code = await genGame(school, p || game.prompt || "a fun quiz that tests this school's key ideas", kind === "iter" ? game.code : null); onChange({ ...game, prompt: p || game.prompt || "", code }); setDraft(""); }
     catch { } setBusy(false);
   }
-  async function applyInstruction(instruction) {
-    setBusy("iter");
-    try { const code = await genGame(school, instruction, data.code); onEditData?.({ ...data, code }); } catch { } setBusy(false);
-  }
+  async function applyInstruction(instruction) { setBusy("iter"); try { const code = await genGame(school, instruction, game.code); onChange({ ...game, code }); } catch { } setBusy(false); }
   const resize = (ev) => {
     ev.preventDefault(); const node = ev.currentTarget; try { node.setPointerCapture(ev.pointerId); } catch { }
     const sy = ev.clientY, oh = h;
-    const move = (m) => onEditData?.({ ...data, h: Math.max(240, Math.min(1400, oh + (m.clientY - sy))) });
+    const move = (m) => onChange({ ...game, h: Math.max(240, Math.min(1400, oh + (m.clientY - sy))) });
     const up = () => { node.removeEventListener("pointermove", move); node.removeEventListener("pointerup", up); node.removeEventListener("pointercancel", up); };
     node.addEventListener("pointermove", move); node.addEventListener("pointerup", up); node.addEventListener("pointercancel", up);
   };
   return (
     <div style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 14, padding: 14 }}>
-      <div style={{ fontSize: 13, fontWeight: 700, color: B.white, marginBottom: 10 }}>🎮 {data.title || "Game"}</div>
-      {data.code
-        ? <><MentorWidget code={data.code} T={T} height={h} />
-            {canEdit && <div onPointerDown={resize} title="Drag to resize the game" style={{ height: 16, marginTop: 2, display: "flex", alignItems: "center", justifyContent: "center", cursor: "ns-resize", color: B.muted, fontSize: 11, touchAction: "none" }}>⇕ drag to resize</div>}</>
-        : <div style={{ border: `1px dashed ${B.borderMid}`, borderRadius: 10, padding: "30px 16px", textAlign: "center", color: B.mutedMid, fontSize: 13 }}>{canEdit ? "Describe a game below and generate it." : "Game coming soon."}</div>}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+        <span style={{ fontSize: 15 }}>🎮</span>
+        <EditableText value={game.title || "Untitled game"} onSave={v => onChange({ ...game, title: v })} style={{ fontSize: 14, fontWeight: 700, color: B.white, flex: 1 }} />
+        <button onClick={onDelete} title="Delete game" style={{ background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.3)", borderRadius: 7, color: "#F87171", padding: "4px 9px", cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>🗑 Delete</button>
+      </div>
+      {game.code
+        ? <><MentorWidget code={game.code} T={T} height={h} />
+            <div onPointerDown={resize} title="Drag to resize the game" style={{ height: 16, marginTop: 2, display: "flex", alignItems: "center", justifyContent: "center", cursor: "ns-resize", color: B.muted, fontSize: 11, touchAction: "none" }}>⇕ drag to resize</div></>
+        : <div style={{ border: `1px dashed ${B.borderMid}`, borderRadius: 10, padding: "30px 16px", textAlign: "center", color: B.mutedMid, fontSize: 13 }}>Describe a game below and generate it.</div>}
+      <div style={{ marginTop: 12, borderTop: `1px solid ${B.border}`, paddingTop: 12 }}>
+        <textarea value={draft} onChange={e => setDraft(e.target.value)} placeholder={game.code ? 'Tell the AI what to change… e.g. "make it harder" or "add a timer"' : 'Describe the game… e.g. "A fast quiz on the 5 stages, lose a heart for a wrong answer"'} rows={2} style={{ width: "100%", background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, fontFamily: "inherit", fontSize: 12.5, padding: "8px 11px", resize: "vertical", boxSizing: "border-box" }} />
+        <div style={{ display: "flex", gap: 7, marginTop: 8, flexWrap: "wrap" }}>
+          <button onClick={() => gen("regen")} disabled={!!busy} title="Build/redesign the whole game" style={{ ...pBtn(T), opacity: busy ? 0.6 : 1 }}>{busy === "regen" ? <><Spinner color="#fff" />Building…</> : (game.code ? "↻ Regenerate" : "✨ Generate game")}</button>
+          {game.code && <button onClick={() => gen("iter")} disabled={!!busy || !draft.trim()} title="Keep the game; change only what you describe" style={{ background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 9, color: T.hi, padding: "9px 14px", cursor: "pointer", fontSize: 13, fontFamily: "inherit", fontWeight: 700, opacity: (busy || !draft.trim()) ? 0.6 : 1 }}>{busy === "iter" ? <><Spinner color={T.hi} />Iterating…</> : "✎ Iterate"}</button>}
+          {game.code && <button onClick={() => setWizard(true)} disabled={!!busy} title="AI asks a few questions, then upgrades the game for you" style={{ background: "none", border: `1px solid ${T.ba}`, borderRadius: 9, color: T.hi, padding: "9px 14px", cursor: "pointer", fontSize: 13, fontFamily: "inherit", fontWeight: 700, opacity: busy ? 0.6 : 1 }}>🪄 Enhance (wizard)</button>}
+        </div>
+      </div>
+      {wizard && game.code && <GameWizard school={school} code={game.code} T={T} onApply={applyInstruction} onClose={() => setWizard(false)} />}
+    </div>
+  );
+}
+// THE GAME LAB — build games once here; drop them in anywhere via a game brick.
+function GameLabSection({ school, T, onUpdate, readOnly }) {
+  const games = schoolGames(school);
+  const setGames = (gs) => onUpdate({ data: { ...school, games: gs } });
+  const addGame = () => setGames([...games, { id: uid(), title: `Game ${games.length + 1}`, prompt: "" }]);
+  const updateGame = (id, ng) => setGames(games.map(g => g.id === id ? ng : g));
+  const delGame = (id) => { if (window.confirm("Delete this game? Any brick using it will show 'game removed'.")) setGames(games.filter(g => g.id !== id)); };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {!readOnly && <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: "14px 18px" }}>
+        <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 15, fontWeight: 700, color: B.white, marginBottom: 3 }}>🎮 Game Lab</div>
+        <div style={{ fontSize: 12.5, color: B.mutedMid, lineHeight: 1.6 }}>Build games once here, then drop any of them in anywhere with a Game brick — or set one as a lesson reward.</div>
+      </div>}
+      {games.length === 0 && <div style={{ fontSize: 13, color: B.muted, textAlign: "center", padding: 30, border: `1px dashed ${B.borderMid}`, borderRadius: 12 }}>{readOnly ? "No games yet." : "No games yet — create your first one below."}</div>}
+      {games.map(g => readOnly
+        ? <div key={g.id} style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 14, padding: 14 }}><div style={{ fontSize: 13, fontWeight: 700, color: B.white, marginBottom: 10 }}>🎮 {g.title || "Game"}</div>{g.code ? <MentorWidget code={g.code} T={T} height={g.h || 460} /> : <div style={{ color: B.muted, fontSize: 13, padding: 20, textAlign: "center" }}>Game coming soon.</div>}</div>
+        : <GameEditor key={g.id} game={g} school={school} T={T} onChange={ng => updateGame(g.id, ng)} onDelete={() => delGame(g.id)} />)}
+      {!readOnly && <button onClick={addGame} style={{ background: "none", border: `1px dashed ${T.ba}`, borderRadius: 12, color: T.hi, padding: "11px", cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit" }}>＋ New game</button>}
+    </div>
+  );
+}
+// A game brick now CHOOSES a game built in the Game Lab (legacy inline games still render).
+function GameBlock({ data = {}, T, school, canEdit, onEditData }) {
+  const games = schoolGames(school);
+  const picked = data.gameId ? games.find(g => g.id === data.gameId) : null;
+  const code = picked?.code || data.code; // legacy: bricks that embedded their own game still play
+  const h = picked?.h || data.h || 460;
+  const title = picked?.title || data.title || "Game";
+  return (
+    <div style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 14, padding: 14 }}>
+      <div style={{ fontSize: 13, fontWeight: 700, color: B.white, marginBottom: 10 }}>🎮 {title}</div>
+      {code
+        ? <MentorWidget code={code} T={T} height={h} />
+        : <div style={{ border: `1px dashed ${B.borderMid}`, borderRadius: 10, padding: "30px 16px", textAlign: "center", color: B.mutedMid, fontSize: 13 }}>{canEdit ? "Choose a game below (build games in the Game Lab)." : (data.gameId ? "This game was removed." : "Game coming soon.")}</div>}
       {canEdit && (
-        <div style={{ marginTop: 12, borderTop: `1px solid ${B.border}`, paddingTop: 12 }}>
-          <textarea value={draft} onChange={e => setDraft(e.target.value)} placeholder={data.code ? 'Tell the AI what to change… e.g. "make it harder" or "add a timer"' : 'Describe the game… e.g. "A fast quiz on the 5 stages, lose a heart for a wrong answer"'} rows={2} style={{ width: "100%", background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, fontFamily: "inherit", fontSize: 12.5, padding: "8px 11px", resize: "vertical", boxSizing: "border-box" }} />
-          <div style={{ display: "flex", gap: 7, marginTop: 8, flexWrap: "wrap" }}>
-            <button onClick={() => gen("regen")} disabled={!!busy} title="Build/redesign the whole game" style={{ ...pBtn(T), opacity: busy ? 0.6 : 1 }}>{busy === "regen" ? <><Spinner color="#fff" />Building…</> : (data.code ? "↻ Regenerate" : "✨ Generate game")}</button>
-            {data.code && <button onClick={() => gen("iter")} disabled={!!busy || !draft.trim()} title="Keep the game; change only what you describe" style={{ background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 9, color: T.hi, padding: "9px 14px", cursor: "pointer", fontSize: 13, fontFamily: "inherit", fontWeight: 700, opacity: (busy || !draft.trim()) ? 0.6 : 1 }}>{busy === "iter" ? <><Spinner color={T.hi} />Iterating…</> : "✎ Iterate"}</button>}
-            {data.code && <button onClick={() => setWizard(true)} disabled={!!busy} title="AI asks a few questions, then upgrades the game for you" style={{ background: "none", border: `1px solid ${T.ba}`, borderRadius: 9, color: T.hi, padding: "9px 14px", cursor: "pointer", fontSize: 13, fontFamily: "inherit", fontWeight: 700, opacity: busy ? 0.6 : 1 }}>🪄 Enhance (wizard)</button>}
-          </div>
-          <div style={{ fontSize: 11, color: B.muted, marginTop: 7 }}>Saved once generated · students just play. Regenerate rebuilds it; Iterate changes only what you ask; the wizard guides a bigger upgrade.</div>
+        <div style={{ marginTop: 12, borderTop: `1px solid ${B.border}`, paddingTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
+          {games.length ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 11.5, color: B.muted }}>Show game:</span>
+              <select value={data.gameId || ""} onChange={e => onEditData?.({ ...data, gameId: e.target.value, code: undefined })} style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.white, fontFamily: "inherit", fontSize: 12.5, padding: "7px 9px", cursor: "pointer" }}>
+                <option value="">Choose a game…</option>
+                {games.map(g => <option key={g.id} value={g.id}>{g.title || "Untitled game"}</option>)}
+              </select>
+            </div>
+          ) : <div style={{ fontSize: 11.5, color: B.muted }}>No games yet — add a <b style={{ color: T.hi }}>Game Lab</b> section and build one, then choose it here.</div>}
         </div>
       )}
-      {wizard && data.code && <GameWizard school={school} code={data.code} T={T} onApply={applyInstruction} onClose={() => setWizard(false)} />}
     </div>
   );
 }
@@ -5730,7 +5782,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
                     <button onClick={() => addFeatureSection("library", "library", "Library", "📚")} style={mi}>📚 Library — files & links</button>
                     <button onClick={() => addFeatureSection("events", "events", "Events", "📅")} style={mi}>📅 Events — lives & RSVP</button>
                     <button onClick={() => addFeatureSection("showroom", "showroom", "Showroom", "🎬")} style={mi}>🎬 Showroom — slide deck</button>
-                    <button onClick={() => addFeatureSection("game", "game", "Game", "🎮")} style={mi}>🎮 Game — AI mini-game</button>
+                    {!hasKind("gamelab") && <button onClick={() => addSection("gamelab")} style={mi}>🎮 Game Lab — build & reuse games</button>}
                   </div>
                   {SECTIONS.length > 1 && (() => {
                     const ai = SECTIONS.findIndex(s => s.id === activeTab);
@@ -5846,6 +5898,9 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
           </>)}
           {activeTab === "mentor" && <MentorOffice school={school} T={T} chat={rec.mentorChat || []} onChat={(msgs) => onUpdate({ mentorChat: msgs })} bus={bus} onIngest={ingestOutput} progress={progress} />}
           {activeTab === "tools" && <ToolsSection rec={rec} T={T} onUpdate={onUpdate} buildTool={buildTool} buildingTool={buildingTool} readOnly={readOnly} onReloadIdeas={reloadIdeas} onEditTool={editTool} />}
+          {SECTIONS.filter(s => s.kind === "gamelab").map(sec => activeTab === sec.id
+            ? <GameLabSection key={sec.id} school={school} T={T} onUpdate={onUpdate} readOnly={readOnly} />
+            : null)}
           {SECTIONS.filter(s => s.kind === "dashboard").map(sec => activeTab === sec.id
             ? <DashboardSection key={sec.id} section={sec} rec={rec} T={T} onUpdate={onUpdate} readOnly={readOnly} school={school} onIngest={ingestOutput} />
             : null)}
