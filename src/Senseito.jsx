@@ -1513,7 +1513,19 @@ function Toast({ toast }) {
 // MENTOR LESSON CHAT
 // ─────────────────────────────────────────────────────────────
 // Duolingo-style lesson-complete celebration: confetti burst + a "ready" card.
-function CelebrationOverlay({ title, xp, badge, T, onClose }) {
+// A reward the creator attaches to a lesson: a downloadable file (and/or a note),
+// revealed when the student completes the lesson.
+function hasReward(r) { return !!(r && (r.file?.url || (r.note && r.note.trim()))); }
+function RewardLink({ reward, T, compact }) {
+  if (!reward?.file?.url) return null;
+  const f = reward.file;
+  return (
+    <a href={f.url} target="_blank" rel="noreferrer" download style={{ display: "inline-flex", alignItems: "center", gap: 7, background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 10, color: T.hi, padding: compact ? "5px 11px" : "10px 15px", textDecoration: "none", fontSize: compact ? 11.5 : 13.5, fontWeight: 700, fontFamily: "inherit" }}>
+      ⬇️ {reward.label || `Download ${f.name || "your reward"}`}
+    </a>
+  );
+}
+function CelebrationOverlay({ title, xp, badge, T, reward, onClose }) {
   const colors = [T.p, T.a, T.hi, "#4ADE80", "#FBBF24", "#F472B6"];
   const pieces = Array.from({ length: 28 }, (_, i) => ({ left: Math.random() * 100, dur: 1.6 + Math.random() * 1.4, delay: Math.random() * 0.5, c: colors[i % colors.length], w: 6 + Math.random() * 6 }));
   return (
@@ -1524,6 +1536,13 @@ function CelebrationOverlay({ title, xp, badge, T, onClose }) {
         <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 22, fontWeight: 700, color: B.white, marginBottom: 6 }}>Lesson complete!</div>
         <div style={{ fontSize: 13.5, color: B.mutedMid, lineHeight: 1.5, marginBottom: 16 }}>{title}</div>
         {xp ? <div style={{ display: "inline-block", background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 100, padding: "6px 16px", fontSize: 14, fontWeight: 700, color: T.hi, marginBottom: 18 }}>+{xp} XP</div> : null}
+        {hasReward(reward) && (
+          <div style={{ background: B.surface2, border: `1px solid ${T.ba}`, borderRadius: 14, padding: "14px 16px", marginBottom: 18, textAlign: "center" }}>
+            <div style={{ fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.4, color: T.hi, marginBottom: 7 }}>🎁 Reward unlocked</div>
+            {reward.note && <div style={{ fontSize: 12.5, color: B.mutedMid, lineHeight: 1.5, marginBottom: reward.file?.url ? 10 : 0 }}>{reward.note}</div>}
+            <RewardLink reward={reward} T={T} />
+          </div>
+        )}
         <button onClick={onClose} style={{ display: "block", width: "100%", background: T.grad, border: "none", borderRadius: 12, color: "white", fontFamily: "inherit", fontSize: 15, fontWeight: 700, padding: "12px", cursor: "pointer", boxShadow: `0 6px 20px ${T.pg}` }}>Continue →</button>
       </div>
     </div>
@@ -1704,7 +1723,7 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, canEdit, onUpda
 
   return (
     <>
-    {celebrate && <CelebrationOverlay title={lesson.title} xp={school.gamification?.xpPerLesson || 0} badge={school.template === "kids" ? "🌟" : "🎉"} T={T} onClose={() => { setCelebrate(false); onClose(); }} />}
+    {celebrate && <CelebrationOverlay title={lesson.title} xp={school.gamification?.xpPerLesson || 0} badge={school.template === "kids" ? "🌟" : "🎉"} T={T} reward={lesson.reward} onClose={() => { setCelebrate(false); onClose(); }} />}
     <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(0,0,0,0.82)", backdropFilter: "blur(10px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onClose}>
       <div style={{ background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 20, width: "100%", maxWidth: 680, height: "86vh", maxHeight: 760, display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: `0 0 80px ${T.pg}` }} onClick={e => e.stopPropagation()}>
         {/^https:\/\//i.test(lesson.cover || "") && <img src={lesson.cover} alt="" style={{ width: "100%", height: 130, objectFit: "cover", objectPosition: lesson.coverPos || "center", display: "block", flexShrink: 0 }} />}
@@ -4066,7 +4085,9 @@ function LessonRow({ lesson, idx, T, progress, onEnter, onEdit, onToggleLock, re
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <span style={{ fontSize: 11, color: T.a, display: "flex", alignItems: "center", gap: 4 }}>💬 Guided by {mentorName || "your mentor"}</span>
           {(lesson.blocks || []).length > 0 && <span style={{ display: "flex", gap: 4, alignItems: "center" }}><span style={{ fontSize: 10, color: B.muted }}>·</span>{lesson.blocks.map((b, bi) => <span key={bi} title={BLOCK_META[b.type]?.label || b.type} style={{ fontSize: 13 }}>{BLOCK_META[b.type]?.icon || "🧩"}</span>)}</span>}
+          {hasReward(lesson.reward) && <span title={lesson.reward.label || "Completion reward"} style={{ fontSize: 11, color: T.hi, display: "inline-flex", alignItems: "center", gap: 3 }}>🎁 {state === "passed" ? "Reward" : "Reward on completion"}</span>}
         </div>
+        {state === "passed" && lesson.reward?.file?.url && <div style={{ marginTop: 9 }}><RewardLink reward={lesson.reward} T={T} compact /></div>}
       </div>
       <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "flex-end", gap: 7, padding: "12px 14px 12px 0", flexShrink: 0 }}>
         {!readOnly && (
@@ -4282,6 +4303,9 @@ function LessonEditor({ lesson, T, allowed, onSave, onDelete, onApplyAI, onAutho
   const set = (patch) => setD(x => ({ ...x, ...patch }));
   const setBlockData = (i, k, v) => setD(x => ({ ...x, blocks: x.blocks.map((b, j) => j === i ? { ...b, data: { ...b.data, [k]: v } } : b) }));
   const delBlock = (i) => setD(x => ({ ...x, blocks: x.blocks.filter((_, j) => j !== i) }));
+  const media = useContext(MediaAuthCtx); // signed-in creators can pick reward files from their library
+  const [pickReward, setPickReward] = useState(false);
+  const setReward = (patch) => setD(x => ({ ...x, reward: { ...(x.reward || {}), ...patch } }));
   const lessonCtx = () => ({ title: d.title, concept: d.concept, mission: d.mission, passCriteria: d.passCriteria });
   const changeBlockType = (i, t) => setD(x => ({ ...x, blocks: x.blocks.map((b, j) => j === i ? { type: t, data: {} } : b) }));
   async function rewriteBlock(i) {
@@ -4324,6 +4348,29 @@ function LessonEditor({ lesson, T, allowed, onSave, onDelete, onApplyAI, onAutho
               <PassLogicEditor value={d.passLogic} hasActs={(d.blocks || []).length > 0} onChange={pl => set({ passLogic: pl })} /></div>
           </div>
           <div><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>Pass criteria (used by mentor / AI evaluation)</div><textarea value={d.passCriteria || ""} onChange={e => set({ passCriteria: e.target.value })} rows={2} style={inp.input} /></div>
+
+          {/* Completion reward — a downloadable the student unlocks when they pass this lesson. */}
+          <div>
+            <div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>🎁 Completion reward <span style={{ color: B.muted, fontWeight: 400 }}>(optional — unlocked when the lesson is passed)</span></div>
+            {d.reward?.file?.url ? (
+              <div style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 10, padding: 11, display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: B.white }}>
+                  <span style={{ fontSize: 16 }}>{FILE_ICON(d.reward.file.name, d.reward.file.url)}</span>
+                  <span style={{ flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{d.reward.file.name || d.reward.file.url}</span>
+                  <button onClick={() => set({ reward: undefined })} title="Remove reward" style={{ background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.3)", borderRadius: 7, color: "#F87171", padding: "4px 9px", cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>Remove</button>
+                </div>
+                <input value={d.reward.label || ""} onChange={e => setReward({ label: e.target.value })} placeholder="Button label (e.g. Download the workbook)" style={{ ...inp.input, fontSize: 12 }} />
+                <input value={d.reward.note || ""} onChange={e => setReward({ note: e.target.value })} placeholder="Short note shown with the reward (optional)" style={{ ...inp.input, fontSize: 12 }} />
+              </div>
+            ) : (
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {media && <button onClick={() => setPickReward(true)} style={{ background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 9, color: T.hi, padding: "8px 13px", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>📁 Pick from my media</button>}
+                <button onClick={() => { const u = window.prompt("Direct file URL (https):", ""); if (u && /^https?:\/\//i.test(u.trim())) setReward({ file: { url: u.trim(), name: u.trim().split("/").pop() } }); }} style={{ background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.mutedMid, padding: "8px 13px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit" }}>🔗 Paste a URL</button>
+                {!media && <span style={{ fontSize: 11, color: B.muted, alignSelf: "center" }}>Sign in to attach files from your media library.</span>}
+              </div>
+            )}
+            {pickReward && media && <MediaPicker token={media.token} userId={media.userId} onPick={m => setReward({ file: { url: m.url, name: m.name } })} onClose={() => setPickReward(false)} />}
+          </div>
 
           <div>
             <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: T.p, marginBottom: 8 }}>Activities ({d.blocks.length})</div>
