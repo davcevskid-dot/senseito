@@ -3369,10 +3369,6 @@ function GameLabSection({ school, T, onUpdate, readOnly }) {
   const delGame = (id) => { if (window.confirm("Delete this game? Any brick using it will show 'game removed'.")) setGames(games.filter(g => g.id !== id)); };
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-      {!readOnly && <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: "14px 18px" }}>
-        <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 15, fontWeight: 700, color: B.white, marginBottom: 3 }}>🎮 Game Lab</div>
-        <div style={{ fontSize: 12.5, color: B.mutedMid, lineHeight: 1.6 }}>Build games once here, then drop any of them in anywhere with a Game brick — or set one as a lesson reward.</div>
-      </div>}
       {games.length === 0 && <div style={{ fontSize: 13, color: B.muted, textAlign: "center", padding: 30, border: `1px dashed ${B.borderMid}`, borderRadius: 12 }}>{readOnly ? "No games yet." : "No games yet — create your first one below."}</div>}
       {games.map(g => readOnly
         ? <div key={g.id} style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 14, padding: 14 }}><div style={{ fontSize: 13, fontWeight: 700, color: B.white, marginBottom: 10 }}>🎮 {g.title || "Game"}</div>{g.code ? <MentorWidget code={g.code} T={T} height={g.h || 460} /> : <div style={{ color: B.muted, fontSize: 13, padding: 20, textAlign: "center" }}>Game coming soon.</div>}</div>
@@ -5329,7 +5325,9 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
       try { const rows = await supaFetch(`/rest/v1/enrollments?select=email,name,progress,xp,updated_at&school_id=eq.${rec.id}&order=updated_at.desc`, { token }); setStudents(rows || []); onStats?.((rows || []).length); } catch { }
     })();
   }, [rec.published, rec.id, token]); // eslint-disable-line
-  const SECTIONS = getSections(school);
+  // Game Lab is a creator-only workspace (never a student section); strip any legacy stored ones.
+  const SECTIONS = getSections(school).filter(s => s.kind !== "gamelab");
+  const [gamelabOpen, setGamelabOpen] = useState(false);
   const [tab, setTab] = useState(() => SECTIONS[0]?.id || "mentor");
   const [addSecOpen, setAddSecOpen] = useState(false);
   const [bodyAddOpen, setBodyAddOpen] = useState(false);
@@ -5676,9 +5674,24 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
         {!readOnly && (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 0 14px", flexWrap: "wrap", gap: 8 }}>
             <div style={{ fontSize: 12, color: B.muted }}>💬 Type in the left chat to change anything</div>
-            <button data-guide="publish" onClick={() => onPublish(rec)} disabled={publishing} style={{ background: rec.published ? "rgba(74,222,128,0.1)" : "linear-gradient(135deg,#059669,#047857)", border: rec.published ? "1px solid rgba(74,222,128,0.35)" : "none", borderRadius: 8, color: rec.published ? "#4ADE80" : "white", padding: "6px 13px", cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit" }}>
-              {publishing ? "Publishing…" : rec.published ? "✓ Published — copy link" : "🌐 Publish"}
-            </button>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <button onClick={() => setGamelabOpen(true)} title="Build games here, then drop them into any section with a Game brick" style={{ background: B.surface2, border: `1px solid ${T.ba}`, borderRadius: 8, color: T.hi, padding: "6px 13px", cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit" }}>🎮 Game Lab{(school.games || []).length ? ` (${school.games.length})` : ""}</button>
+              <button data-guide="publish" onClick={() => onPublish(rec)} disabled={publishing} style={{ background: rec.published ? "rgba(74,222,128,0.1)" : "linear-gradient(135deg,#059669,#047857)", border: rec.published ? "1px solid rgba(74,222,128,0.35)" : "none", borderRadius: 8, color: rec.published ? "#4ADE80" : "white", padding: "6px 13px", cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit" }}>
+                {publishing ? "Publishing…" : rec.published ? "✓ Published — copy link" : "🌐 Publish"}
+              </button>
+            </div>
+          </div>
+        )}
+        {!readOnly && gamelabOpen && (
+          <div onClick={() => setGamelabOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 230, background: "rgba(0,0,0,0.82)", backdropFilter: "blur(10px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "max(24px,4vh) 16px 40px", overflowY: "auto" }}>
+            <div onClick={e => e.stopPropagation()} style={{ background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 20, width: "100%", maxWidth: 680, padding: 20, boxShadow: `0 0 80px ${T.pg}` }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+                <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 17, fontWeight: 700, color: B.white }}>🎮 Game Lab <span style={{ fontSize: 12, fontWeight: 400, color: B.muted }}>· creator-only</span></div>
+                <button onClick={() => setGamelabOpen(false)} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "6px 11px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>✕ Close</button>
+              </div>
+              <div style={{ fontSize: 12.5, color: B.mutedMid, lineHeight: 1.6, marginBottom: 14 }}>Build games here. To show one to students, add a section (e.g. a “Game Room” dashboard) and drop in a Game brick that points to it — or set a game as a lesson reward.</div>
+              <GameLabSection school={school} T={T} onUpdate={onUpdate} readOnly={false} />
+            </div>
           </div>
         )}
 
@@ -5852,7 +5865,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
                     <button onClick={() => addFeatureSection("library", "library", "Library", "📚")} style={mi}>📚 Library — files & links</button>
                     <button onClick={() => addFeatureSection("events", "events", "Events", "📅")} style={mi}>📅 Events — lives & RSVP</button>
                     <button onClick={() => addFeatureSection("showroom", "showroom", "Showroom", "🎬")} style={mi}>🎬 Showroom — slide deck</button>
-                    {!hasKind("gamelab") && <button onClick={() => addSection("gamelab")} style={mi}>🎮 Game Lab — build & reuse games</button>}
+                    <button onClick={() => addFeatureSection("game", "gameroom", "Game Room", "🎮")} style={mi}>🎮 Game Room — playable games</button>
                   </div>
                   {SECTIONS.length > 1 && (() => {
                     const ai = SECTIONS.findIndex(s => s.id === activeTab);
@@ -5968,9 +5981,6 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
           </>)}
           {activeTab === "mentor" && <MentorOffice school={school} T={T} chat={rec.mentorChat || []} onChat={(msgs) => onUpdate({ mentorChat: msgs })} bus={bus} onIngest={ingestOutput} progress={progress} />}
           {activeTab === "tools" && <ToolsSection rec={rec} T={T} onUpdate={onUpdate} buildTool={buildTool} buildingTool={buildingTool} readOnly={readOnly} onReloadIdeas={reloadIdeas} onEditTool={editTool} />}
-          {SECTIONS.filter(s => s.kind === "gamelab").map(sec => activeTab === sec.id
-            ? <GameLabSection key={sec.id} school={school} T={T} onUpdate={onUpdate} readOnly={readOnly} />
-            : null)}
           {SECTIONS.filter(s => s.kind === "dashboard").map(sec => activeTab === sec.id
             ? <DashboardSection key={sec.id} section={sec} rec={rec} T={T} onUpdate={onUpdate} readOnly={readOnly} school={school} onIngest={ingestOutput} />
             : null)}
