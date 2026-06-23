@@ -1486,6 +1486,60 @@ function CelebrationOverlay({ title, xp, badge, T, onClose }) {
     </div>
   );
 }
+// ─────────────────────────────────────────────────────────────
+// CREATOR ACHIEVEMENTS — account-level milestones + celebration
+// ─────────────────────────────────────────────────────────────
+const ACHIEVEMENTS = [
+  { id: "first_school",  icon: "🏫",   title: "First School",     desc: "You created your very first school.", hero: true, test: s => s.schools >= 1 },
+  { id: "two_schools",   icon: "📚",   title: "Getting Going",    desc: "Created 2 schools.",                  test: s => s.schools >= 2 },
+  { id: "five_schools",  icon: "🎓",   title: "School Builder",   desc: "Created 5 schools.",                  test: s => s.schools >= 5 },
+  { id: "ten_schools",   icon: "🏛️",   title: "Prolific Creator", desc: "Created 10 schools.",                 test: s => s.schools >= 10 },
+  { id: "first_publish", icon: "🌐",   title: "Live!",            desc: "Published your first school.",        test: s => s.published >= 1 },
+  { id: "first_student", icon: "🧑‍🎓", title: "First Student",    desc: "Your first student enrolled.",        test: s => s.students >= 1 },
+  { id: "ten_students",  icon: "👥",   title: "Full Classroom",   desc: "Reached 10 enrolled students.",        test: s => s.students >= 10 },
+];
+const achStatsOf = (schools, students) => ({ schools: schools.length, published: schools.filter(s => s.published).length, students: students || 0 });
+
+// A celebratory unlock moment (confetti). The first school gets the hero treatment.
+function AchievementOverlay({ ach, onClose }) {
+  const T = { ...THEMES.violet, grad: "linear-gradient(135deg,#7C3AED,#06B6D4)" };
+  const colors = [T.p, T.a, T.hi, "#4ADE80", "#FBBF24", "#F472B6"];
+  const n = ach.hero ? 42 : 24;
+  const pieces = Array.from({ length: n }, (_, i) => ({ left: Math.random() * 100, dur: 1.7 + Math.random() * 1.6, delay: Math.random() * 0.6, c: colors[i % colors.length], w: 6 + Math.random() * 7 }));
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 700, background: "rgba(2,2,8,0.7)", backdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, overflow: "hidden", animation: "sxFadeMask 0.3s ease" }}>
+      {pieces.map((p, i) => <div key={i} style={{ position: "absolute", top: -16, left: `${p.left}%`, width: p.w, height: p.w * 1.6, background: p.c, borderRadius: 2, animation: `confettiFall ${p.dur}s ${p.delay}s linear forwards` }} />)}
+      <div onClick={e => e.stopPropagation()} style={{ position: "relative", background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 24, padding: "34px 30px", textAlign: "center", maxWidth: 380, width: "100%", boxShadow: `0 0 90px ${T.pg}`, animation: "popIn 0.5s cubic-bezier(.2,1.3,.4,1) both" }}>
+        <div style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: 2.5, color: T.hi, marginBottom: 14 }}>🏆 Achievement unlocked</div>
+        <div style={{ width: 92, height: 92, margin: "0 auto 16px", borderRadius: "50%", background: T.grad, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 46, boxShadow: `0 10px 36px ${T.pg}`, animation: "popIn 0.6s 0.1s cubic-bezier(.2,1.3,.4,1) both" }}>{ach.icon}</div>
+        <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 23, fontWeight: 800, color: B.white, letterSpacing: -0.5, marginBottom: 8 }}>{ach.hero ? "Congratulations!" : ach.title}</div>
+        <div style={{ fontSize: 14, color: B.mutedMid, lineHeight: 1.6, marginBottom: 20 }}>{ach.hero ? "Your first school is born. This is the start of something — keep building." : ach.desc}</div>
+        {ach.hero && <div style={{ display: "inline-block", background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 100, padding: "5px 15px", fontSize: 12.5, fontWeight: 700, color: T.hi, marginBottom: 18 }}>{ach.icon} {ach.title}</div>}
+        <button onClick={onClose} style={{ display: "block", width: "100%", background: T.grad, border: "none", borderRadius: 12, color: "white", fontFamily: "inherit", fontSize: 15, fontWeight: 800, padding: "13px", cursor: "pointer", boxShadow: `0 8px 24px ${T.pg}` }}>{ach.hero ? "Let's go →" : "Awesome →"}</button>
+      </div>
+    </div>
+  );
+}
+
+// The badge wall — all achievements, earned ones lit, the rest faded/locked.
+function AchievementsGrid({ unlockedIds = [] }) {
+  const T = { ...THEMES.violet, grad: "linear-gradient(135deg,#7C3AED,#06B6D4)" };
+  const set = new Set(unlockedIds);
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(96px,1fr))", gap: 9 }}>
+      {ACHIEVEMENTS.map(a => {
+        const on = set.has(a.id);
+        return (
+          <div key={a.id} title={a.desc} style={{ background: B.surface2, border: `1px solid ${on ? T.ba : B.border}`, borderRadius: 13, padding: "13px 8px", textAlign: "center", opacity: on ? 1 : 0.5 }}>
+            <div style={{ fontSize: 26, marginBottom: 6, filter: on ? "none" : "grayscale(1)" }}>{on ? a.icon : "🔒"}</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: on ? B.white : B.muted, lineHeight: 1.25 }}>{a.title}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function LessonView({ school, lesson, T: Tprop, onClose, onPass, canEdit, onUpdateBlock, chat, onChat, bus, onIngest, outputs: outputsProp, onOutputs, blockOverrides, onOverrideBlock }) {
   // Per-lesson accent override (lesson.accent) recolors the whole lesson modal.
   const T = (lesson.accent && HEX_RE.test(lesson.accent))
@@ -4862,7 +4916,7 @@ function GuideButton({ T, onClick, pulse }) {
   );
 }
 
-function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, publicBase, token, onSetSlug, onIterate, iterating = false, iterProg = { pct: 0, label: "" }, justBuilt = false, onRevealSeen }) {
+function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, publicBase, token, onSetSlug, onIterate, iterating = false, iterProg = { pct: 0, label: "" }, justBuilt = false, onRevealSeen, onStats }) {
   const school = rec.data;
   const T = themeFor(school);
   const sk = skinCfg(school.skin, T);
@@ -4904,7 +4958,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
     if (readOnly || !rec.published || !token) return;
     (async () => {
       try { const rows = await supaFetch(`/rest/v1/leads?select=email,name,created_at&school_id=eq.${rec.id}&order=created_at.desc`, { token }); setLeads(rows || []); } catch { }
-      try { const rows = await supaFetch(`/rest/v1/enrollments?select=email,name,progress,xp,updated_at&school_id=eq.${rec.id}&order=updated_at.desc`, { token }); setStudents(rows || []); } catch { }
+      try { const rows = await supaFetch(`/rest/v1/enrollments?select=email,name,progress,xp,updated_at&school_id=eq.${rec.id}&order=updated_at.desc`, { token }); setStudents(rows || []); onStats?.((rows || []).length); } catch { }
     })();
   }, [rec.published, rec.id, token]); // eslint-disable-line
   const SECTIONS = getSections(school);
@@ -5743,7 +5797,8 @@ function Home({ onCreated }) {
 // ─────────────────────────────────────────────────────────────
 // ACCOUNT MODAL
 // ─────────────────────────────────────────────────────────────
-function AccountModal({ session, syncState, schoolCount, onSignOut, onClose }) {
+function AccountModal({ session, syncState, schoolCount, achStats, onSignOut, onClose }) {
+  const unlocked = ACHIEVEMENTS.filter(a => a.test(achStats || { schools: schoolCount, published: 0, students: 0 })).map(a => a.id);
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 400, background: "rgba(0,0,0,0.75)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onClose}>
       <div style={{ background: B.surface, border: `1px solid ${B.borderMid}`, borderRadius: 18, width: "100%", maxWidth: 420, padding: 28 }} onClick={e => e.stopPropagation()}>
@@ -5766,6 +5821,8 @@ function AccountModal({ session, syncState, schoolCount, onSignOut, onClose }) {
               </div>
             ))}
           </div>
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, color: B.muted, marginBottom: 9 }}>🏆 Achievements <span style={{ color: B.mutedMid }}>({unlocked.length}/{ACHIEVEMENTS.length})</span></div>
+          <div style={{ marginBottom: 20 }}><AchievementsGrid unlockedIds={unlocked} /></div>
           <button onClick={onSignOut} style={{ width: "100%", padding: "11px", borderRadius: 10, border: "1px solid rgba(248,113,113,0.3)", background: "rgba(248,113,113,0.07)", color: "#F87171", fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Sign out</button>
         </>) : (<>
           <div style={{ fontSize: 13, color: B.mutedMid, lineHeight: 1.7, marginBottom: 18 }}>Sign in with Google to save your schools to the cloud and access them from any device.</div>
@@ -6006,6 +6063,10 @@ export default function Senseito() {
   const [accountOpen, setAccountOpen] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [justBuiltId, setJustBuiltId] = useState(null); // triggers the one-time "wow" reveal
+  const [studentsById, setStudentsById] = useState({}); // per-school enrolled counts (from published analytics)
+  const [achQueue, setAchQueue] = useState([]); // achievements waiting to be celebrated
+  const achSeen = useRef(null); // ids already acknowledged (baseline + celebrated)
+  const achPrevSchools = useRef(null); // detect bulk cloud loads vs. a real +1
   const saveTimer = useRef(null);
   const lsTimer = useRef(null);
   const savedRef = useRef({}); // id -> last-saved rec reference (for single-row saves)
@@ -6096,6 +6157,30 @@ export default function Senseito() {
     lsTimer.current = setTimeout(() => { try { localStorage.setItem("senseito_schools", JSON.stringify(schools)); } catch { } }, 700);
     return () => clearTimeout(lsTimer.current);
   }, [schools]);
+
+  // ── Achievements engine ──
+  // Celebrates a milestone only when it's earned by a real action this session.
+  // First run (and bulk cloud loads) baseline silently so we never spam past wins.
+  const studentTotal = Object.values(studentsById).reduce((a, b) => a + b, 0);
+  const achStats = achStatsOf(schools, studentTotal);
+  useEffect(() => {
+    const stats = achStatsOf(schools, studentTotal);
+    if (achSeen.current === null) {
+      let stored = null; try { stored = JSON.parse(localStorage.getItem("senseito_ach")); } catch { }
+      achSeen.current = Array.isArray(stored) ? stored : null;
+    }
+    const earned = ACHIEVEMENTS.filter(a => a.test(stats)).map(a => a.id);
+    const prev = achPrevSchools.current;
+    achPrevSchools.current = schools.length;
+    const bulk = achSeen.current === null || prev === null || schools.length - prev > 1; // mount / first-load / cloud sync
+    if (bulk) { achSeen.current = earned; try { localStorage.setItem("senseito_ach", JSON.stringify(earned)); } catch { } return; }
+    const newly = ACHIEVEMENTS.filter(a => a.test(stats) && !achSeen.current.includes(a.id));
+    if (newly.length) {
+      achSeen.current = [...achSeen.current, ...newly.map(a => a.id)];
+      try { localStorage.setItem("senseito_ach", JSON.stringify(achSeen.current)); } catch { }
+      setAchQueue(q => [...q, ...newly]);
+    }
+  }, [schools, studentTotal]); // eslint-disable-line
 
   function createSchool(composed) {
     const rec = { id: uid(), data: composed, tools: [], toolStates: {}, progress: {}, xp: 0, revision: 0, mentorChat: [], advisorChat: [], published: false, published_slug: null, createdAt: Date.now(), _owner: session?.user?.id || null };
@@ -6301,7 +6386,9 @@ export default function Senseito() {
         [contenteditable][data-ph]:empty:before{content:attr(data-ph);color:#55556E}
       `}</style>
 
-      {accountOpen && <AccountModal session={session} syncState={syncState} schoolCount={schools.length} onSignOut={() => { setSession(null); setSchools([]); setSyncState("idle"); setAccountOpen(false); }} onClose={() => setAccountOpen(false)} />}
+      {accountOpen && <AccountModal session={session} syncState={syncState} schoolCount={schools.length} achStats={achStats} onSignOut={() => { setSession(null); setSchools([]); setSyncState("idle"); setAccountOpen(false); }} onClose={() => setAccountOpen(false)} />}
+      {/* Achievement celebration — waits politely until any fresh-build reveal is done. */}
+      {achQueue.length > 0 && justBuiltId === null && <AchievementOverlay ach={achQueue[0]} onClose={() => setAchQueue(q => q.slice(1))} />}
 
       <Toast toast={aToast} />
       {undo && (
@@ -6376,7 +6463,7 @@ export default function Senseito() {
           <Boundary resetKey={view}>
             {view === "home" || !active
               ? <Home onCreated={createSchool} />
-              : <SchoolPage key={active.id} rec={active} onUpdate={(patch) => updateSchool(active.id, patch)} onPublish={publishSchool} publishing={publishing} publicBase={publicBase} token={session?.token} onSetSlug={setCustomSlug} onIterate={applyIterate} iterating={iterating} iterProg={iterProg} justBuilt={active.id === justBuiltId} onRevealSeen={() => setJustBuiltId(null)} />}
+              : <SchoolPage key={active.id} rec={active} onUpdate={(patch) => updateSchool(active.id, patch)} onPublish={publishSchool} publishing={publishing} publicBase={publicBase} token={session?.token} onSetSlug={setCustomSlug} onIterate={applyIterate} iterating={iterating} iterProg={iterProg} justBuilt={active.id === justBuiltId} onRevealSeen={() => setJustBuiltId(null)} onStats={(n) => setStudentsById(m => (m[active.id] === n ? m : { ...m, [active.id]: n }))} />}
           </Boundary>
         </div>
       </div>
