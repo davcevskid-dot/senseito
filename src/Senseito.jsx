@@ -36,6 +36,51 @@ async function uploadToLibrary(file) {
   return `${SUPA_URL}/storage/v1/object/public/library/${path}`;
 }
 
+// ── Per-user media library ("Filebase") in the public "media" bucket. ──
+// Objects live under "<userId>/…" and per-user RLS lets only the owner write/list/delete.
+// Public read so the files work inside published schools and blocks.
+const MEDIA_MAX_BYTES = 50 * 1024 * 1024; // 50 MB/file (per-plan quotas come later)
+const mediaPublicUrl = (path) => `${SUPA_URL}/storage/v1/object/public/media/${path.split("/").map(encodeURIComponent).join("/")}`;
+const isImageFile = (m) => /^image\//.test(m.type || "") || /\.(png|jpe?g|gif|webp|svg|avif|bmp)$/i.test(m.name || m.path || "");
+async function uploadMedia(file, token, userId) {
+  if (file.size > MEDIA_MAX_BYTES) throw new Error("File too large (max 50 MB).");
+  const ext = (file.name.match(/\.[a-z0-9]+$/i) || [""])[0].toLowerCase();
+  const stem = file.name.replace(/\.[a-z0-9]+$/i, "").replace(/[^a-z0-9._-]+/gi, "-").slice(0, 48) || "file";
+  const path = `${userId}/${Date.now()}-${Math.random().toString(36).slice(2, 7)}-${stem}${ext}`;
+  const res = await fetch(`${SUPA_URL}/storage/v1/object/media/${path.split("/").map(encodeURIComponent).join("/")}`, {
+    method: "POST",
+    headers: { apikey: SUPA_KEY, Authorization: `Bearer ${token}`, "Content-Type": file.type || "application/octet-stream", "x-upsert": "true" },
+    body: file,
+  });
+  if (!res.ok) { const t = await res.text().catch(() => ""); throw new Error(`Upload ${res.status}${t ? `: ${t.slice(0, 140)}` : ""}`); }
+  return { path, url: mediaPublicUrl(path), name: file.name, type: file.type, size: file.size, created: new Date().toISOString() };
+}
+async function listMedia(token, userId) {
+  const res = await fetch(`${SUPA_URL}/storage/v1/object/list/media`, {
+    method: "POST",
+    headers: { apikey: SUPA_KEY, Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ prefix: `${userId}/`, limit: 200, sortBy: { column: "created_at", order: "desc" } }),
+  });
+  if (!res.ok) throw new Error(`List ${res.status}`);
+  const rows = await res.json();
+  return (Array.isArray(rows) ? rows : []).filter(o => o.name && o.id != null).map(o => {
+    const path = `${userId}/${o.name}`;
+    return { path, url: mediaPublicUrl(path), name: o.name.replace(/^\d+-[a-z0-9]+-/i, ""), type: o.metadata?.mimetype || "", size: o.metadata?.size || 0, created: o.created_at };
+  });
+}
+async function deleteMedia(path, token) {
+  const res = await fetch(`${SUPA_URL}/storage/v1/object/media/${path.split("/").map(encodeURIComponent).join("/")}`, {
+    method: "DELETE", headers: { apikey: SUPA_KEY, Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) { const t = await res.text().catch(() => ""); throw new Error(`Delete ${res.status}${t ? `: ${t.slice(0, 140)}` : ""}`); }
+}
+async function loadProfile(token, userId) {
+  try { const rows = await supaFetch(`/rest/v1/profiles?id=eq.${userId}&select=*`, { token }); return (rows && rows[0]) || null; } catch { return null; }
+}
+async function saveProfile(token, userId, patch) {
+  await supaFetch(`/rest/v1/profiles?on_conflict=id`, { method: "POST", token, body: [{ id: userId, ...patch, updated_at: new Date().toISOString() }], headers: { Prefer: "resolution=merge-duplicates" } });
+}
+
 // ── AI via secure Edge proxy. structured=true → guaranteed JSON object. ──
 // model: "haiku" (default, fast+cheap) | "sonnet" (creative) — proxy falls back safely.
 async function api(system, messages, maxTokens = 4000, model) {
@@ -5797,6 +5842,154 @@ function Home({ onCreated }) {
 // ─────────────────────────────────────────────────────────────
 // ACCOUNT MODAL
 // ─────────────────────────────────────────────────────────────
+const fmtBytes = (n) => n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : n >= 1024 ? `${Math.round(n / 1024)} KB` : `${n || 0} B`;
+
+// Reusable media chooser — used inside blocks (e.g. Showroom) to drop in a
+// file from the creator's library, with inline upload. Pass imagesOnly to filter.
+function MediaPicker({ token, userId, imagesOnly = false, onPick, onClose }) {
+  const T = { ...THEMES.violet, grad: "linear-gradient(135deg,#7C3AED,#06B6D4)" };
+  const [items, setItems] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const fileRef = useRef(null);
+  const refresh = () => listMedia(token, userId).then(setItems).catch(e => { setErr(e.message); setItems([]); });
+  useEffect(() => { refresh(); }, []); // eslint-disable-line
+  async function onFiles(e) {
+    const files = [...(e.target.files || [])]; e.target.value = ""; if (!files.length) return;
+    setBusy(true); setErr("");
+    try { for (const f of files) await uploadMedia(f, token, userId); await refresh(); }
+    catch (er) { setErr(er.message); }
+    setBusy(false);
+  }
+  const shown = (items || []).filter(m => !imagesOnly || isImageFile(m));
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 650, background: "rgba(2,2,8,0.7)", backdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 18, width: "100%", maxWidth: 620, maxHeight: "84vh", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 24px 70px rgba(0,0,0,0.6)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "15px 18px", borderBottom: `1px solid ${B.border}` }}>
+          <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 16, fontWeight: 700, color: B.white }}>🖼️ {imagesOnly ? "Pick an image" : "Pick a file"} <span style={{ fontSize: 12, color: B.muted, fontWeight: 400 }}>from your media</span></div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => fileRef.current?.click()} disabled={busy} style={{ background: T.grad, border: "none", borderRadius: 9, color: "#fff", padding: "7px 13px", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", opacity: busy ? 0.6 : 1 }}>{busy ? "Uploading…" : "⬆ Upload"}</button>
+            <button onClick={onClose} style={{ background: "none", border: `1px solid ${B.border}`, borderRadius: 9, color: B.muted, padding: "7px 11px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>✕</button>
+          </div>
+          <input ref={fileRef} type="file" multiple accept={imagesOnly ? "image/*" : undefined} onChange={onFiles} style={{ display: "none" }} />
+        </div>
+        {err && <div style={{ padding: "8px 18px", fontSize: 12, color: "#F87171" }}>{err}</div>}
+        <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
+          {items === null ? <div style={{ fontSize: 13, color: B.muted, textAlign: "center", padding: 30 }}>Loading your media…</div>
+            : shown.length === 0 ? <div style={{ fontSize: 13, color: B.muted, textAlign: "center", padding: 30, lineHeight: 1.6 }}>No {imagesOnly ? "images" : "files"} yet.<br />Hit <b style={{ color: T.hi }}>⬆ Upload</b> to add some.</div>
+            : <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(120px,1fr))", gap: 10 }}>
+              {shown.map(m => (
+                <button key={m.path} onClick={() => { onPick(m); onClose(); }} title={m.name} style={{ background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 12, padding: 0, cursor: "pointer", overflow: "hidden", textAlign: "left", fontFamily: "inherit" }}>
+                  <div style={{ height: 86, background: B.surface3, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+                    {isImageFile(m) ? <img src={m.url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontSize: 30 }}>{FILE_ICON(m.name, m.url)}</span>}
+                  </div>
+                  <div style={{ padding: "7px 9px" }}><div style={{ fontSize: 11, color: B.white, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{m.name}</div><div style={{ fontSize: 10, color: B.muted }}>{fmtBytes(m.size)}</div></div>
+                </button>
+              ))}
+            </div>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// The creator's Profile — avatar, media library ("Filebase"), achievements.
+function ProfileView({ session, profile, onProfile, achStats, schoolCount, syncState, onBack, onSignOut }) {
+  const T = { ...THEMES.violet, grad: "linear-gradient(135deg,#7C3AED,#06B6D4)" };
+  const userId = session?.user?.id;
+  const [items, setItems] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [avatarBusy, setAvatarBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const fileRef = useRef(null);
+  const avatarRef = useRef(null);
+  const refresh = () => listMedia(session.token, userId).then(setItems).catch(e => { setErr(e.message); setItems([]); });
+  useEffect(() => { if (userId) refresh(); }, [userId]); // eslint-disable-line
+  const used = (items || []).reduce((a, m) => a + (m.size || 0), 0);
+  const unlocked = ACHIEVEMENTS.filter(a => a.test(achStats || { schools: schoolCount, published: 0, students: 0 })).map(a => a.id);
+
+  async function onUpload(e) {
+    const files = [...(e.target.files || [])]; e.target.value = ""; if (!files.length) return;
+    setBusy(true); setErr("");
+    try { for (const f of files) await uploadMedia(f, session.token, userId); await refresh(); }
+    catch (er) { setErr(er.message); }
+    setBusy(false);
+  }
+  async function onAvatar(e) {
+    const f = (e.target.files || [])[0]; e.target.value = ""; if (!f) return;
+    if (!/^image\//.test(f.type)) { setErr("Avatar must be an image."); return; }
+    setAvatarBusy(true); setErr("");
+    try { const m = await uploadMedia(f, session.token, userId); await saveProfile(session.token, userId, { avatar_url: m.url }); onProfile({ ...(profile || {}), avatar_url: m.url }); await refresh(); }
+    catch (er) { setErr(er.message); }
+    setAvatarBusy(false);
+  }
+  async function remove(m) {
+    if (!window.confirm(`Delete "${m.name}"? This can't be undone.`)) return;
+    try { await deleteMedia(m.path, session.token); setItems(its => (its || []).filter(x => x.path !== m.path)); }
+    catch (er) { setErr(er.message); }
+  }
+  const initial = (session?.user?.email || "?")[0].toUpperCase();
+
+  return (
+    <div style={{ maxWidth: 860, margin: "0 auto", padding: "22px 20px 80px" }}>
+      <button onClick={onBack} style={{ background: "none", border: "none", color: B.muted, fontSize: 12.5, cursor: "pointer", fontFamily: "inherit", marginBottom: 16 }}>← Back</button>
+
+      {/* Identity */}
+      <div style={{ display: "flex", gap: 18, alignItems: "center", flexWrap: "wrap", background: B.surface, border: `1px solid ${B.border}`, borderRadius: 18, padding: 20, marginBottom: 18 }}>
+        <button onClick={() => avatarRef.current?.click()} title="Change avatar" style={{ position: "relative", width: 76, height: 76, borderRadius: "50%", border: `2px solid ${T.ba}`, background: profile?.avatar_url ? `center/cover no-repeat url(${profile.avatar_url})` : "linear-gradient(135deg,#7C3AED,#06B6D4)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, fontWeight: 800, color: "#fff", cursor: "pointer", flexShrink: 0, overflow: "hidden" }}>
+          {!profile?.avatar_url && initial}
+          <span style={{ position: "absolute", bottom: -2, right: -2, background: T.p, borderRadius: "50%", width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, border: `2px solid ${B.surface}` }}>{avatarBusy ? "…" : "✎"}</span>
+        </button>
+        <input ref={avatarRef} type="file" accept="image/*" onChange={onAvatar} style={{ display: "none" }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <EditableText value={profile?.display_name || session?.user?.user_metadata?.full_name || "Add your name"} onSave={v => { onProfile({ ...(profile || {}), display_name: v }); saveProfile(session.token, userId, { display_name: v }); }} style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 20, fontWeight: 700, color: B.white }} />
+          <div style={{ fontSize: 12.5, color: B.muted, marginTop: 3 }}>{session?.user?.email}</div>
+          <div style={{ fontSize: 11.5, color: syncState === "error" ? "#F87171" : "#4ADE80", marginTop: 4 }}>{syncState === "saving" ? "☁️ Saving…" : syncState === "error" ? "⚠ Sync error" : "☁️ Cloud synced"} · {schoolCount} school{schoolCount === 1 ? "" : "s"}</div>
+        </div>
+        <button onClick={onSignOut} style={{ padding: "9px 15px", borderRadius: 10, border: "1px solid rgba(248,113,113,0.3)", background: "rgba(248,113,113,0.07)", color: "#F87171", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Sign out</button>
+      </div>
+
+      {/* Achievements */}
+      <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 18, padding: 20, marginBottom: 18 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, color: B.muted, marginBottom: 13 }}>🏆 Achievements <span style={{ color: B.mutedMid }}>({unlocked.length}/{ACHIEVEMENTS.length})</span></div>
+        <AchievementsGrid unlockedIds={unlocked} />
+      </div>
+
+      {/* Media library */}
+      <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 18, padding: 20 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+          <div>
+            <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 16, fontWeight: 700, color: B.white }}>📁 Media library</div>
+            <div style={{ fontSize: 11.5, color: B.muted, marginTop: 2 }}>{(items || []).length} file{(items || []).length === 1 ? "" : "s"} · {fmtBytes(used)} used · reuse these across schools & blocks</div>
+          </div>
+          <button onClick={() => fileRef.current?.click()} disabled={busy} style={{ background: T.grad, border: "none", borderRadius: 10, color: "#fff", padding: "9px 15px", cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit", opacity: busy ? 0.6 : 1 }}>{busy ? "Uploading…" : "⬆ Upload files"}</button>
+          <input ref={fileRef} type="file" multiple onChange={onUpload} style={{ display: "none" }} />
+        </div>
+        {err && <div style={{ fontSize: 12, color: "#F87171", marginBottom: 10 }}>{err}</div>}
+        {items === null ? <div style={{ fontSize: 13, color: B.muted, padding: 24, textAlign: "center" }}>Loading…</div>
+          : items.length === 0 ? <div style={{ fontSize: 13, color: B.muted, padding: 30, textAlign: "center", lineHeight: 1.6, border: `1px dashed ${B.borderMid}`, borderRadius: 12 }}>Your library is empty.<br />Upload images, PDFs, audio or video to reuse them anywhere.</div>
+          : <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(140px,1fr))", gap: 12 }}>
+            {items.map(m => (
+              <div key={m.path} style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 12, overflow: "hidden", position: "relative" }}>
+                <button onClick={() => remove(m)} title="Delete" style={{ position: "absolute", top: 6, right: 6, zIndex: 2, background: "rgba(0,0,0,0.5)", border: "none", borderRadius: 7, color: "#F87171", width: 24, height: 22, cursor: "pointer", fontSize: 12 }}>🗑</button>
+                <a href={m.url} target="_blank" rel="noreferrer" style={{ display: "block", textDecoration: "none" }}>
+                  <div style={{ height: 100, background: B.surface3, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
+                    {isImageFile(m) ? <img src={m.url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontSize: 34 }}>{FILE_ICON(m.name, m.url)}</span>}
+                  </div>
+                  <div style={{ padding: "8px 10px" }}>
+                    <div style={{ fontSize: 11.5, color: B.white, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{m.name}</div>
+                    <div style={{ fontSize: 10, color: B.muted, marginTop: 2 }}>{fmtBytes(m.size)}</div>
+                  </div>
+                </a>
+                <button onClick={() => { navigator.clipboard?.writeText(m.url); }} title="Copy link" style={{ width: "100%", background: "none", border: "none", borderTop: `1px solid ${B.border}`, color: B.mutedMid, padding: "6px", cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>🔗 Copy link</button>
+              </div>
+            ))}
+          </div>}
+      </div>
+    </div>
+  );
+}
+
 function AccountModal({ session, syncState, schoolCount, achStats, onSignOut, onClose }) {
   const unlocked = ACHIEVEMENTS.filter(a => a.test(achStats || { schools: schoolCount, published: 0, students: 0 })).map(a => a.id);
   return (
@@ -6063,6 +6256,7 @@ export default function Senseito() {
   const [accountOpen, setAccountOpen] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [justBuiltId, setJustBuiltId] = useState(null); // triggers the one-time "wow" reveal
+  const [profile, setProfile] = useState(null); // { avatar_url, display_name }
   const [studentsById, setStudentsById] = useState({}); // per-school enrolled counts (from published analytics)
   const [achQueue, setAchQueue] = useState([]); // achievements waiting to be celebrated
   const achSeen = useRef(null); // ids already acknowledged (baseline + celebrated)
@@ -6083,6 +6277,7 @@ export default function Senseito() {
   const active = schools.find(s => s.id === view);
   function showAToast(msg, type = "ok") { setAToast({ msg, type }); clearTimeout(aToastTimer.current); aToastTimer.current = setTimeout(() => setAToast(null), 3500); }
   useEffect(() => { setIterHistory([]); }, [view]); // fresh chat per project
+  useEffect(() => { if (session?.user?.id) loadProfile(session.token, session.user.id).then(p => p && setProfile(p)); else setProfile(null); }, [session]);
 
   // auth bootstrap (OAuth hash → session)
   useEffect(() => {
@@ -6436,13 +6631,13 @@ export default function Senseito() {
           })}
         </div>
         )}
-        <div onClick={() => setAccountOpen(true)} style={{ padding: "13px 14px", borderTop: `1px solid ${B.border}`, cursor: "pointer", display: "flex", alignItems: "center", gap: 10 }}
-          onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.03)"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+        <div onClick={() => { if (session) { setView("profile"); setSideOpen(false); } else setAccountOpen(true); }} title={session ? "Open your profile" : "Sign in"} style={{ padding: "13px 14px", borderTop: `1px solid ${B.border}`, cursor: "pointer", display: "flex", alignItems: "center", gap: 10, background: view === "profile" ? "rgba(124,58,237,0.1)" : "transparent" }}
+          onMouseEnter={e => view !== "profile" && (e.currentTarget.style.background = "rgba(255,255,255,0.03)")} onMouseLeave={e => view !== "profile" && (e.currentTarget.style.background = "transparent")}>
           {session ? (<>
-            <div style={{ width: 30, height: 30, borderRadius: "50%", background: "linear-gradient(135deg,#7C3AED,#06B6D4)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: "white", flexShrink: 0 }}>{(session.user?.email || "?")[0].toUpperCase()}</div>
+            <div style={{ width: 30, height: 30, borderRadius: "50%", background: profile?.avatar_url ? `center/cover no-repeat url(${profile.avatar_url})` : "linear-gradient(135deg,#7C3AED,#06B6D4)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: "white", flexShrink: 0, overflow: "hidden" }}>{!profile?.avatar_url && (session.user?.email || "?")[0].toUpperCase()}</div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: B.white, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{session.user?.email}</div>
-              <div style={{ fontSize: 10.5, color: syncState === "error" ? "#F87171" : "#4ADE80" }}>{syncState === "saving" ? "☁️ Saving…" : syncState === "error" ? "⚠ Sync error" : "☁️ Cloud synced"}</div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: B.white, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{profile?.display_name || session.user?.email}</div>
+              <div style={{ fontSize: 10.5, color: syncState === "error" ? "#F87171" : "#4ADE80" }}>{syncState === "saving" ? "☁️ Saving…" : syncState === "error" ? "⚠ Sync error" : "👤 View profile"}</div>
             </div>
           </>) : (<>
             <div style={{ width: 30, height: 30, borderRadius: "50%", background: B.surface3, border: `1px solid ${B.borderMid}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, flexShrink: 0 }}>👤</div>
@@ -6461,7 +6656,10 @@ export default function Senseito() {
         <div style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 0, background: "radial-gradient(ellipse 50% 40% at 85% 10%,rgba(6,182,212,0.07) 0%,transparent 55%)", animation: "aurora 11s ease-in-out infinite reverse" }} />
         <div style={{ position: "relative", zIndex: 1 }}>
           <Boundary resetKey={view}>
-            {view === "home" || !active
+            {view === "profile"
+              ? (session ? <ProfileView session={session} profile={profile} onProfile={setProfile} achStats={achStats} schoolCount={schools.length} syncState={syncState} onBack={() => setView("home")} onSignOut={() => { setSession(null); setSchools([]); setSyncState("idle"); setView("home"); }} />
+                : <Home onCreated={createSchool} />)
+              : view === "home" || !active
               ? <Home onCreated={createSchool} />
               : <SchoolPage key={active.id} rec={active} onUpdate={(patch) => updateSchool(active.id, patch)} onPublish={publishSchool} publishing={publishing} publicBase={publicBase} token={session?.token} onSetSlug={setCustomSlug} onIterate={applyIterate} iterating={iterating} iterProg={iterProg} justBuilt={active.id === justBuiltId} onRevealSeen={() => setJustBuiltId(null)} onStats={(n) => setStudentsById(m => (m[active.id] === n ? m : { ...m, [active.id]: n }))} />}
           </Boundary>
