@@ -1524,7 +1524,23 @@ function Toast({ toast }) {
 // Duolingo-style lesson-complete celebration: confetti burst + a "ready" card.
 // A reward the creator attaches to a lesson: a downloadable file (and/or a note),
 // revealed when the student completes the lesson.
-function hasReward(r) { return !!(r && (r.file?.url || r.gameId || (r.note && r.note.trim()))); }
+function hasReward(r) { return !!(r && (r.file?.url || r.gameId || r.brick || (r.note && r.note.trim()))); }
+// Content bricks that work well as an unlockable reward (self-contained, render & edit standalone).
+const REWARD_BRICKS = [["callout", "📝 Note"], ["video_embed", "▶️ Video"], ["image", "🖼️ Image"], ["embed", "🔗 Embed"], ["cta_button", "🔘 Button"], ["library", "📚 Library"], ["showroom", "🎬 Slides"]];
+// Opens a reward brick (any block) in a focused modal — read-only for students.
+function RewardBrickModal({ block, school, T, onClose }) {
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 320, background: "rgba(0,0,0,0.8)", backdropFilter: "blur(8px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "max(24px,5vh) 16px 40px", overflowY: "auto" }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 18, width: "100%", maxWidth: 640, padding: 16, boxShadow: `0 0 80px ${T.pg}` }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: B.white }}>🎁 {block?.data?.title || BLOCK_META[block?.type]?.label || "Your reward"}</div>
+          <button onClick={onClose} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "5px 10px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>✕</button>
+        </div>
+        <BlockRenderer block={block} T={T} school={school} bus={{}} canEdit={false} />
+      </div>
+    </div>
+  );
+}
 // Plays a reward game (a Game Lab game) in a focused modal.
 function GamePlayModal({ code, title, T, onClose }) {
   return (
@@ -1548,8 +1564,9 @@ function RewardLink({ reward, T, compact }) {
     </a>
   );
 }
-function CelebrationOverlay({ title, xp, badge, T, reward, rewardGame, forks, onChoose, onClose }) {
+function CelebrationOverlay({ title, xp, badge, T, reward, rewardGame, school, forks, onChoose, onClose }) {
   const [playing, setPlaying] = useState(false);
+  const [openBrick, setOpenBrick] = useState(false);
   const colors = [T.p, T.a, T.hi, "#4ADE80", "#FBBF24", "#F472B6"];
   const pieces = Array.from({ length: 28 }, (_, i) => ({ left: Math.random() * 100, dur: 1.6 + Math.random() * 1.4, delay: Math.random() * 0.5, c: colors[i % colors.length], w: 6 + Math.random() * 6 }));
   return (
@@ -1567,10 +1584,12 @@ function CelebrationOverlay({ title, xp, badge, T, reward, rewardGame, forks, on
             <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "center" }}>
               <RewardLink reward={reward} T={T} />
               {rewardGame?.code && <button onClick={() => setPlaying(true)} style={{ display: "inline-flex", alignItems: "center", gap: 7, background: T.grad, border: "none", borderRadius: 10, color: "#fff", padding: "10px 15px", cursor: "pointer", fontSize: 13.5, fontWeight: 700, fontFamily: "inherit" }}>🎮 Play {rewardGame.title || "your game"}</button>}
+              {reward?.brick && <button onClick={() => setOpenBrick(true)} style={{ display: "inline-flex", alignItems: "center", gap: 7, background: T.grad, border: "none", borderRadius: 10, color: "#fff", padding: "10px 15px", cursor: "pointer", fontSize: 13.5, fontWeight: 700, fontFamily: "inherit" }}>🎁 Open {reward.label || BLOCK_META[reward.brick.type]?.label || "your reward"}</button>}
             </div>
           </div>
         )}
         {playing && rewardGame?.code && <GamePlayModal code={rewardGame.code} title={rewardGame.title} T={T} onClose={() => setPlaying(false)} />}
+        {openBrick && reward?.brick && <RewardBrickModal block={reward.brick} school={school} T={T} onClose={() => setOpenBrick(false)} />}
         {forks && forks.length ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <div style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.4, color: B.muted, marginBottom: 2 }}>🌿 Choose your path</div>
@@ -1780,7 +1799,7 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, onChooseFork, c
       let lf = (lesson.forks || []).map(f => ({ ...f, toTitle: (school.semesters || []).flatMap(s => s.lessons || []).find(l => l.id === f.to)?.title })).filter(f => f.to);
       if (chosenFork) lf = lf.filter(f => f.to === chosenFork); // mentor picked the path → show just that one
       const rg = lesson.reward?.gameId ? (school.games || []).find(g => g.id === lesson.reward.gameId) : null;
-      return <CelebrationOverlay title={lesson.title} xp={school.gamification?.xpPerLesson || 0} badge={school.template === "kids" ? "🌟" : "🎉"} T={T} reward={lesson.reward} rewardGame={rg} forks={lf.length ? lf : null} onChoose={(to) => { onChooseFork?.(to); setCelebrate(false); onClose(); }} onClose={() => { setCelebrate(false); onClose(); }} />;
+      return <CelebrationOverlay title={lesson.title} xp={school.gamification?.xpPerLesson || 0} badge={school.template === "kids" ? "🌟" : "🎉"} T={T} reward={lesson.reward} rewardGame={rg} school={school} forks={lf.length ? lf : null} onChoose={(to) => { onChooseFork?.(to); setCelebrate(false); onClose(); }} onClose={() => { setCelebrate(false); onClose(); }} />;
     })()}
     <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(0,0,0,0.82)", backdropFilter: "blur(10px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onClose}>
       <div style={{ background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 20, width: "100%", maxWidth: 680, height: "86vh", maxHeight: 760, display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: `0 0 80px ${T.pg}` }} onClick={e => e.stopPropagation()}>
@@ -4199,10 +4218,11 @@ function DashboardSection({ section, rec, T, onUpdate, readOnly, school, onInges
 // ─────────────────────────────────────────────────────────────
 // LESSON ROW
 // ─────────────────────────────────────────────────────────────
-function LessonRow({ lesson, idx, T, progress, onEnter, onEdit, onToggleLock, readOnly, mentorName, games = [] }) {
+function LessonRow({ lesson, idx, T, progress, onEnter, onEdit, onToggleLock, readOnly, mentorName, games = [], school }) {
   const tm = TM[lesson.type] || TM.Dialogue;
   const state = progress[lesson.number] || "locked";
   const [playReward, setPlayReward] = useState(false);
+  const [openBrick, setOpenBrick] = useState(false);
   const rewardGame = lesson.reward?.gameId ? games.find(g => g.id === lesson.reward.gameId) : null;
   // lesson.open is a SCHOOL-level override (set by the creator) that ships to the
   // published version — an open lesson is never gated, for creator and students alike.
@@ -4225,11 +4245,13 @@ function LessonRow({ lesson, idx, T, progress, onEnter, onEdit, onToggleLock, re
           {(lesson.blocks || []).length > 0 && <span style={{ display: "flex", gap: 4, alignItems: "center" }}><span style={{ fontSize: 10, color: B.muted }}>·</span>{lesson.blocks.map((b, bi) => <span key={bi} title={BLOCK_META[b.type]?.label || b.type} style={{ fontSize: 13 }}>{BLOCK_META[b.type]?.icon || "🧩"}</span>)}</span>}
           {hasReward(lesson.reward) && <span title={lesson.reward.label || "Completion reward"} style={{ fontSize: 11, color: T.hi, display: "inline-flex", alignItems: "center", gap: 3 }}>🎁 {state === "passed" ? "Reward" : "Reward on completion"}</span>}
         </div>
-        {state === "passed" && (lesson.reward?.file?.url || rewardGame?.code) && <div style={{ marginTop: 9, display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {state === "passed" && (lesson.reward?.file?.url || rewardGame?.code || lesson.reward?.brick) && <div style={{ marginTop: 9, display: "flex", gap: 8, flexWrap: "wrap" }}>
           {lesson.reward?.file?.url && <RewardLink reward={lesson.reward} T={T} compact />}
           {rewardGame?.code && <button onClick={() => setPlayReward(true)} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 10, color: T.hi, padding: "5px 11px", cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit" }}>🎮 Play {rewardGame.title || "reward"}</button>}
+          {lesson.reward?.brick && <button onClick={() => setOpenBrick(true)} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 10, color: T.hi, padding: "5px 11px", cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit" }}>🎁 Open {lesson.reward.label || BLOCK_META[lesson.reward.brick.type]?.label || "reward"}</button>}
         </div>}
         {playReward && rewardGame?.code && <GamePlayModal code={rewardGame.code} title={rewardGame.title} T={T} onClose={() => setPlayReward(false)} />}
+        {openBrick && lesson.reward?.brick && <RewardBrickModal block={lesson.reward.brick} school={school} T={T} onClose={() => setOpenBrick(false)} />}
       </div>
       <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "flex-end", gap: 7, padding: "12px 14px 12px 0", flexShrink: 0 }}>
         {!readOnly && (
@@ -4437,7 +4459,7 @@ function blockFields(type) {
     quiz: [],
   })[type] || [];
 }
-function LessonEditor({ lesson, T, allowed, lessons = [], games = [], onSave, onDelete, onApplyAI, onAuthorBlock, onClose }) {
+function LessonEditor({ lesson, T, allowed, lessons = [], games = [], school, onSave, onDelete, onApplyAI, onAuthorBlock, onClose }) {
   const [d, setD] = useState({ ...lesson, blocks: (lesson.blocks || []).map(b => ({ ...b, data: { ...(b.data || {}) } })), passLogic: normPass(lesson.passLogic, (lesson.blocks || []).length, lesson.mentorGuidance !== false) });
   const [addType, setAddType] = useState("");
   const [busyIdx, setBusyIdx] = useState(-1);
@@ -4498,7 +4520,22 @@ function LessonEditor({ lesson, T, allowed, lessons = [], games = [], onSave, on
           {/* Completion reward — a downloadable the student unlocks when they pass this lesson. */}
           <div>
             <div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>🎁 Completion reward <span style={{ color: B.muted, fontWeight: 400 }}>(optional — unlocked when the lesson is passed)</span></div>
-            {d.reward?.gameId ? (
+            {d.reward?.brick ? (
+              <div style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 10, padding: 11, display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: B.white }}>
+                  <span style={{ fontSize: 16 }}>{BLOCK_META[d.reward.brick.type]?.icon || "🧩"}</span>
+                  <span style={{ flex: 1, minWidth: 0 }}>Unlock brick: {BLOCK_META[d.reward.brick.type]?.label || d.reward.brick.type}</span>
+                  <button onClick={() => set({ reward: undefined })} title="Remove reward" style={{ background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.3)", borderRadius: 7, color: "#F87171", padding: "4px 9px", cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>Remove</button>
+                </div>
+                <input value={d.reward.label || ""} onChange={e => setReward({ label: e.target.value })} placeholder="Button label (e.g. Open the bonus)" style={{ ...inp.input, fontSize: 12 }} />
+                <input value={d.reward.note || ""} onChange={e => setReward({ note: e.target.value })} placeholder="Short note shown with the reward (optional)" style={{ ...inp.input, fontSize: 12 }} />
+                <BrickFrame T={T} school={school} canEdit blockType={d.reward.brick.type} block={d.reward.brick} ctx={{ title: d.title }} onReplace={nb => setReward({ brick: nb })}>
+                  <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 12, padding: 12 }}>
+                    <BlockRenderer block={d.reward.brick} T={T} school={school} canEdit onEditData={nd => setReward({ brick: { ...d.reward.brick, data: nd } })} />
+                  </div>
+                </BrickFrame>
+              </div>
+            ) : d.reward?.gameId ? (
               <div style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 10, padding: 11, display: "flex", flexDirection: "column", gap: 8 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: B.white }}>
                   <span style={{ fontSize: 16 }}>🎮</span>
@@ -4522,6 +4559,7 @@ function LessonEditor({ lesson, T, allowed, lessons = [], games = [], onSave, on
                 {media && <button onClick={() => setPickReward(true)} style={{ background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 9, color: T.hi, padding: "8px 13px", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>📁 Pick from my media</button>}
                 <button onClick={() => { const u = window.prompt("Direct file URL (https):", ""); if (u && /^https?:\/\//i.test(u.trim())) setReward({ file: { url: u.trim(), name: u.trim().split("/").pop() } }); }} style={{ background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.mutedMid, padding: "8px 13px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit" }}>🔗 Paste a URL</button>
                 {games.length > 0 && <select value="" onChange={e => e.target.value && setReward({ gameId: e.target.value })} style={{ background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, padding: "8px 11px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit" }}><option value="">🎮 Unlock a game…</option>{games.map(g => <option key={g.id} value={g.id}>{g.title || "Untitled game"}</option>)}</select>}
+                <select value="" onChange={e => e.target.value && setReward({ brick: fallbackBlock(e.target.value, { title: d.title }) })} style={{ background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, padding: "8px 11px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit" }}><option value="">🧩 Unlock a brick…</option>{REWARD_BRICKS.map(([t, l]) => <option key={t} value={t}>{l}</option>)}</select>
                 {!media && <span style={{ fontSize: 11, color: B.muted }}>Sign in to attach files from your media library.</span>}
               </div>
             )}
@@ -5660,7 +5698,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
         outputs={rec.lessonOutputs?.[activeLesson.number]} onOutputs={(o) => onUpdate({ lessonOutputs: { ...(rec.lessonOutputs || {}), [activeLesson.number]: o } })}
         blockOverrides={rec.lessonBlocks?.[activeLesson.number]} onOverrideBlock={(i, nb) => onUpdate({ lessonBlocks: { ...(rec.lessonBlocks || {}), [activeLesson.number]: { ...(rec.lessonBlocks?.[activeLesson.number] || {}), [i]: nb } } })} />}
       {editingLesson && !readOnly && <LessonEditor lesson={editingLesson} T={T} allowed={allowedBlocksFor(school.learningPath)}
-        lessons={(school.semesters || []).flatMap(s => s.lessons || [])} games={school.games || []}
+        lessons={(school.semesters || []).flatMap(s => s.lessons || [])} games={school.games || []} school={school}
         onSave={(draft) => { saveLesson(editingLesson.number, draft); setEditingLesson(null); showToast("✓ Lesson updated"); }}
         onDelete={() => { if (window.confirm("Delete this lesson? This can't be undone.")) { deleteLessonByNumber(editingLesson.number); setEditingLesson(null); showToast("✓ Lesson deleted"); } }}
         onApplyAI={(inst) => applyIteration(inst)} onAuthorBlock={authorBlock}
@@ -5922,7 +5960,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
                     {!readOnly && <button onClick={() => deleteSemester(si)} title="Delete this part/semester" style={{ background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.3)", borderRadius: 8, color: "#F87171", padding: "4px 9px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit", fontWeight: 700 }}>🗑 Delete part</button>}
                   </div>
                 </div>
-                {sem.lessons?.map((l, li) => <LessonRow key={li} lesson={l} idx={(school.semesters || []).slice(0, si).reduce((a, s2) => a + (s2.lessons?.length || 0), 0) + li} T={T} progress={progress} mentorName={school.mentor?.name} games={school.games || []} onEnter={setActiveLesson} onEdit={setEditingLesson} onToggleLock={toggleLock} readOnly={readOnly} />)}
+                {sem.lessons?.map((l, li) => <LessonRow key={li} lesson={l} idx={(school.semesters || []).slice(0, si).reduce((a, s2) => a + (s2.lessons?.length || 0), 0) + li} T={T} progress={progress} mentorName={school.mentor?.name} games={school.games || []} school={school} onEnter={setActiveLesson} onEdit={setEditingLesson} onToggleLock={toggleLock} readOnly={readOnly} />)}
                 {/* Per-part add-lesson controls */}
                 {!readOnly && (
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
