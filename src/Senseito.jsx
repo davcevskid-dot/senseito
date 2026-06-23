@@ -2770,6 +2770,29 @@ OUTPUT CONTRACT: return ONLY runnable HTML. Your FIRST character must be "<". Do
     fallback: current || "",
   });
 }
+
+// "Fix / Enhance" — audits an existing AI-generated visual for FUNCTIONAL bugs
+// (dead buttons, broken listeners, JS errors, clipped/zero-size elements) and
+// repairs them WITHOUT changing the concept. Falls back to the original code if
+// the result is incomplete, so it can never replace a working visual with junk.
+async function enhanceVisual(school, current, { accents } = {}) {
+  if (!current) return current;
+  const T = themeFor(school);
+  const [p, a] = accents || [T.p, T.a];
+  const sys = `You are a meticulous front-end FIXER. You receive ONE self-contained HTML fragment (inline <style> + optional vanilla <script>) used as a visual inside a learning app. Make it genuinely WORK and look polished — WITHOUT changing its concept, layout, copy or style.
+FIND & FIX: buttons/links that do nothing (missing or wrongly-wired event listeners, handlers referencing ids that don't exist, a transparent layer with pointer-events stealing clicks), animations that never start, JavaScript errors, elements with zero/negative size or that overflow/clip, broken responsive sizing. Make every interactive element actually respond with visible feedback. Wrap script bodies in try/catch so one error can't blank the whole thing.
+KEEP: the same design, colours, text and composition — only repair and refine. Accents stay ${p}/${a}; transparent background; light text (#e7e9f5); responsive.
+HARD RULES: NO external URLs/images/fonts/libraries (runs sandboxed offline); no postMessage/resize scripts.
+OUTPUT CONTRACT: return ONLY the COMPLETE corrected HTML fragment. First character must be "<". No prose, no markdown fences, no <html>/<head>/<body> wrappers.`;
+  const user = `Audit this fragment, fix everything that doesn't work, refine the polish, and return the COMPLETE working fragment (HTML only, start with "<"):\n\n${current}`;
+  const ok = (c) => /<\s*(svg|div|canvas|section|main|figure|h1|h2|p|span|style|ul|button)\b/i.test(c) && c.length > 60 && htmlComplete(c);
+  return genCodeWithRepair({
+    system: sys, user, model: "sonnet", tokens: 4000, ok,
+    repair: "Output ONLY the COMPLETE corrected HTML fragment, starting with '<', with every <style>/<script> properly closed. No prose.",
+    fallback: current,
+  });
+}
+
 function SignaturePanel({ school, T, canEdit, onUpdate }) {
   const soul = school.soul || null;
   const [busy, setBusy] = useState(false); // "regen" | "iter" | false
@@ -2778,7 +2801,14 @@ function SignaturePanel({ school, T, canEdit, onUpdate }) {
   async function run(kind) {
     const p = draft.trim(); if ((kind === "iter" && !p) || busy) return;
     setBusy(kind);
-    try { const code = await genSignature(school, p || undefined, kind === "iter" ? soul?.code : null); onUpdate({ data: { ...school, soul: { ...(soul || {}), code } } }); if (kind === "iter") setDraft(""); } catch { } setBusy(false);
+    try {
+      // "fix" audits & repairs the existing code (never replaces it with junk — see enhanceVisual's fallback).
+      const code = kind === "fix"
+        ? await enhanceVisual(school, soul?.code, { accents: [T.p, T.a] })
+        : await genSignature(school, p || undefined, kind === "iter" ? soul?.code : null);
+      if (code && code !== soul?.code) onUpdate({ data: { ...school, soul: { ...(soul || {}), code } } });
+      if (kind === "iter") setDraft("");
+    } catch { } setBusy(false);
   }
   const resize = (ev) => {
     ev.preventDefault(); const node = ev.currentTarget; try { node.setPointerCapture(ev.pointerId); } catch { }
@@ -2799,6 +2829,7 @@ function SignaturePanel({ school, T, canEdit, onUpdate }) {
         <div onPointerDown={resize} title="Drag to resize" style={{ height: 16, marginTop: 2, display: "flex", alignItems: "center", justifyContent: "center", cursor: "ns-resize", color: B.muted, fontSize: 11, touchAction: "none" }}>⇕ drag to resize</div>
         <input value={draft} onChange={e => setDraft(e.target.value)} placeholder='Tweak it… e.g. "make it more alive" or "add slow drifting particles"' style={{ width: "100%", background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, fontFamily: "inherit", fontSize: 12.5, padding: "8px 11px", marginTop: 6, boxSizing: "border-box" }} />
         <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 8, flexWrap: "wrap" }}>
+          <button onClick={() => run("fix")} disabled={!!busy} title="Audit the code, fix bugs (dead buttons, errors) and polish — without changing the design" style={{ background: T.grad, border: "none", borderRadius: 8, color: "#fff", padding: "6px 13px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 700, opacity: busy ? 0.6 : 1, boxShadow: `0 4px 14px ${T.pg}` }}>{busy === "fix" ? <><Spinner color="#fff" />Fixing…</> : "🪄 Fix / Enhance"}</button>
           <button onClick={() => run("iter")} disabled={!!busy || !draft.trim()} title="Keep it; change only what you describe" style={{ background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 8, color: T.hi, padding: "6px 13px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 700, opacity: (busy || !draft.trim()) ? 0.6 : 1 }}>{busy === "iter" ? <><Spinner color={T.hi} />Tweaking…</> : "✎ Iterate"}</button>
           <button onClick={() => run("regen")} disabled={!!busy} style={{ background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "6px 13px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 700, opacity: busy ? 0.6 : 1 }}>{busy === "regen" ? <><Spinner color={B.mutedMid} />Reimagining…</> : "↻ Regenerate"}</button>
           <button onClick={() => onUpdate({ data: { ...school, soul: { ...soul, code: undefined } } })} style={{ background: "none", border: "1px solid rgba(248,113,113,0.3)", borderRadius: 8, color: "#F87171", padding: "6px 13px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 700 }}>✕ Remove</button>
