@@ -906,8 +906,14 @@ const MENTOR_GARDEN_NOTE = `MINDSET GARDEN: this school has a Garden where limit
 
 function mentorSys(school, lesson, bus, opts = {}) {
   const dna = school.knowledgeDNA ? `\nKNOWLEDGE DNA (your source material — teach from this, use its vocabulary):\n${String(school.knowledgeDNA).slice(0, 4000)}\n` : "";
-  const modeNote = passNote(opts.np || normPass(lesson.passLogic, (lesson.blocks || []).length, lesson.mentorGuidance !== false));
+  const np = opts.np || normPass(lesson.passLogic, (lesson.blocks || []).length, lesson.mentorGuidance !== false);
+  const modeNote = passNote(np);
   const status = opts.activityStatus ? `\nLEARNER'S ACTIVITY STATUS: ${opts.activityStatus}` : "";
+  // Mentor-decided branching: YOU pick which path the student goes down.
+  const forks = (lesson.forks || []).map(f => ({ ...f, title: (school.semesters || []).flatMap(s => s.lessons || []).find(l => l.id === f.to)?.title })).filter(f => f.to);
+  const forkNote = (np.mode === "mentor" && lesson.forkBy === "mentor" && forks.length)
+    ? `\nBRANCHING — YOU choose the path. Based on what the student has shown you (their report, their gaps, what they need most), decide which path fits THEM. The options are:\n${forks.map(f => `- ${f.title || f.label}`).join("\n")}\nWhen they've met the bar, INSTEAD of "PASS:", end your reply with a line EXACTLY: FORK: <the exact path name from the list above> — and add one sentence on why that path suits them.`
+    : "";
   return `You are ${school.mentor.name}, an AI mentor inside the "${school.name}" school on Senseito.
 ${school.mentor.systemVoice}
 ${dna}${busContext(bus, school)}
@@ -915,7 +921,7 @@ THIS LESSON: "${lesson.title}" (${lesson.type})
 CONCEPT: ${lesson.concept}
 MISSION: ${lesson.mission}
 PASS CRITERIA: ${lesson.passCriteria}
-${modeNote}${status}
+${modeNote}${forkNote}${status}
 LESSON TYPE BEHAVIOR:
 - Quiz: run it live, one question at a time, react to each answer.
 - Debate: take the opposing side and argue hard; the student must defend their position.
@@ -1648,6 +1654,7 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, onChooseFork, c
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [chatPassed, setChatPassed] = useState(false);
+  const [chosenFork, setChosenFork] = useState(null); // mentor-decided branching: the path the mentor picked
   const [manualDone, setManualDone] = useState(false);
   const [missionShown, setMissionShown] = useState(false);
   const bottomRef = useRef(null);
@@ -1710,11 +1717,21 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, onChooseFork, c
           })();
         }
       }
-      // The mentor's explicit verdict — when it judges the bar met, it ends with "PASS: <reason>".
-      // This is the PRIMARY gate for mentor mode (so its approval and the actual pass are the same act —
-      // no more "the mentor said go on but the lesson never passed").
-      const pmatch = reply.match(/(^|\n)\s*PASS:\s*(.+)\s*$/i);
-      const mentorPassed = !!pmatch && np.mode === "mentor";
+      // Mentor-decided branching: the mentor ends with "FORK: <path>" to both pass AND choose the path.
+      let mentorPassed = false, forkPick = null;
+      const isMentorFork = np.mode === "mentor" && lesson.forkBy === "mentor" && (lesson.forks || []).length;
+      const fmatch = isMentorFork ? reply.match(/(^|\n)\s*FORK:\s*(.+)\s*$/i) : null;
+      if (fmatch) {
+        const choice = fmatch[2].trim().toLowerCase();
+        const fks = (lesson.forks || []).map(f => ({ ...f, title: ((school.semesters || []).flatMap(s => s.lessons || []).find(l => l.id === f.to)?.title) || "" }));
+        forkPick = fks.find(f => (f.title && choice.includes(f.title.toLowerCase())) || (f.label && choice.includes(f.label.toLowerCase()))) || fks[0];
+        reply = reply.replace(/(^|\n)\s*FORK:\s*.+\s*$/i, "").trim();
+        mentorPassed = true;
+      }
+      // Otherwise the mentor's explicit verdict — when it judges the bar met, it ends with "PASS: <reason>".
+      // This is the PRIMARY gate for mentor mode (so approval and the actual pass are the same act).
+      const pmatch = !fmatch ? reply.match(/(^|\n)\s*PASS:\s*(.+)\s*$/i) : null;
+      if (pmatch && np.mode === "mentor") mentorPassed = true;
       if (pmatch) reply = reply.replace(/(^|\n)\s*PASS:\s*.+\s*$/i, "").trim();
       // Mentor + mission: capture an assigned MISSION and pin it (stored as a 'mission' message).
       const mm = reply.match(/MISSION:\s*([\s\S]+)/i);
@@ -1728,8 +1745,13 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, onChooseFork, c
       if (!missionShown && reply.toLowerCase().includes("mission")) setMissionShown(true);
       if (mentorPassed && !chatPassed) {
         setChatPassed(true);
-        const reason = pmatch[2].replace(/\s+$/, "").trim();
-        setTimeout(() => setMsgs(m => [...m, { role: "system", content: `✅ Lesson complete. ${reason || "You've earned this one."}` }]), 450);
+        if (forkPick) {
+          setChosenFork(forkPick.to);
+          setTimeout(() => setMsgs(m => [...m, { role: "system", content: `✅ ${school.mentor.name} set your path: ${forkPick.title || forkPick.label || "next"}.` }]), 450);
+        } else {
+          const reason = (pmatch?.[2] || "").replace(/\s+$/, "").trim();
+          setTimeout(() => setMsgs(m => [...m, { role: "system", content: `✅ Lesson complete. ${reason || "You've earned this one."}` }]), 450);
+        }
       } else if (np.mode === "mentor" && !mentorPassed && !chatPassed) {
         // Backup: a strict independent examiner, only when the mentor didn't already call it.
         const transcript = [...convo, { role: "assistant", content: reply }];
@@ -1753,7 +1775,8 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, onChooseFork, c
   return (
     <>
     {celebrate && (() => {
-      const lf = (lesson.forks || []).map(f => ({ ...f, toTitle: (school.semesters || []).flatMap(s => s.lessons || []).find(l => l.id === f.to)?.title })).filter(f => f.to);
+      let lf = (lesson.forks || []).map(f => ({ ...f, toTitle: (school.semesters || []).flatMap(s => s.lessons || []).find(l => l.id === f.to)?.title })).filter(f => f.to);
+      if (chosenFork) lf = lf.filter(f => f.to === chosenFork); // mentor picked the path → show just that one
       const rg = lesson.reward?.gameId ? (school.games || []).find(g => g.id === lesson.reward.gameId) : null;
       return <CelebrationOverlay title={lesson.title} xp={school.gamification?.xpPerLesson || 0} badge={school.template === "kids" ? "🌟" : "🎉"} T={T} reward={lesson.reward} rewardGame={rg} forks={lf.length ? lf : null} onChoose={(to) => { onChooseFork?.(to); setCelebrate(false); onClose(); }} onClose={() => { setCelebrate(false); onClose(); }} />;
     })()}
@@ -4522,7 +4545,15 @@ function LessonEditor({ lesson, T, allowed, lessons = [], games = [], onSave, on
               </div>
             ))}
             <button onClick={addFork} disabled={otherLessons.length === 0} title={otherLessons.length === 0 ? "Add more lessons first" : ""} style={{ background: B.surface2, border: `1px dashed ${T.ba}`, borderRadius: 9, color: T.hi, padding: "7px 12px", cursor: otherLessons.length ? "pointer" : "not-allowed", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", opacity: otherLessons.length ? 1 : 0.5 }}>＋ Add a choice</button>
-            {(d.forks || []).some(f => f.to) && <div style={{ fontSize: 11, color: T.a, marginTop: 7, lineHeight: 1.5 }}>On completion, the student picks a path — auto-advance is off for this lesson.</div>}
+            {(d.forks || []).some(f => f.to) && (<>
+              {normPass(d.passLogic, d.blocks.length).mode === "mentor" && (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 9, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 11.5, color: B.muted }}>Who picks the path:</span>
+                  {[["student", "Student chooses"], ["mentor", "Mentor decides"]].map(([k, l]) => <button key={k} onClick={() => set({ forkBy: k })} style={{ background: (d.forkBy || "student") === k ? T.ps : B.surface2, border: `1px solid ${(d.forkBy || "student") === k ? T.ba : B.borderMid}`, borderRadius: 100, color: (d.forkBy || "student") === k ? T.hi : B.mutedMid, padding: "5px 12px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 700 }}>{l}</button>)}
+                </div>
+              )}
+              <div style={{ fontSize: 11, color: T.a, marginTop: 7, lineHeight: 1.5 }}>{(d.forkBy === "mentor" && normPass(d.passLogic, d.blocks.length).mode === "mentor") ? "Your mentor reads the student's report and routes them to the path they need — auto-advance is off." : "On completion, the student picks a path — auto-advance is off for this lesson."}</div>
+            </>)}
           </div>
 
           <div>
