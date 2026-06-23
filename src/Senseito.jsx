@@ -1,4 +1,7 @@
-import { useState, useRef, useEffect, useLayoutEffect, useMemo, Component } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useMemo, useContext, createContext, Component } from "react";
+
+// Signed-in creator's auth ({ token, userId }) — lets deep blocks open the media library.
+const MediaAuthCtx = createContext(null);
 
 // ═════════════════════════════════════════════════════════════
 // SENSEITO — Build any school you can imagine.
@@ -2892,6 +2895,8 @@ function ShowroomBlock({ data = {}, T, school, canEdit, onEditData, disabled }) 
   const [snap, setSnap] = useState(true); // magnetic aligner (toggle off for free-form)
   const imgFileRef = useRef(null);
   const [uploadingImg, setUploadingImg] = useState(false);
+  const media = useContext(MediaAuthCtx); // signed-in creator → can pull from their library
+  const [pickImg, setPickImg] = useState(false);
   const idx = Math.min(i, Math.max(0, slides.length - 1));
   const cur = slides[idx];
   const save = (next, goTo) => { onEditData?.({ ...data, slides: next }); if (goTo != null) setI(goTo); };
@@ -3040,7 +3045,9 @@ function ShowroomBlock({ data = {}, T, school, canEdit, onEditData, disabled }) 
               {selEl.type === "line" && <label style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11, color: B.mutedMid }}>Color<input type="color" value={selEl.color || T.p} onChange={ev => updEl(selEl.id, { color: ev.target.value })} style={{ width: 26, height: 24, border: "none", background: "none", cursor: "pointer", padding: 0 }} /></label>}
               {selEl.type === "image" && <>
                 <input ref={imgFileRef} type="file" accept="image/*" onChange={onPickImg} style={{ display: "none" }} />
+                {pickImg && media && <MediaPicker token={media.token} userId={media.userId} imagesOnly onPick={m => updEl(selEl.id, { url: m.url })} onClose={() => setPickImg(false)} />}
                 <button onClick={() => imgFileRef.current?.click()} disabled={uploadingImg} style={pill(false)}>{uploadingImg ? <><Spinner color={B.mutedMid} />Uploading…</> : "📎 Upload"}</button>
+                {media && <button onClick={() => setPickImg(true)} title="Choose from your media library" style={pill(false)}>🖼 Media</button>}
                 <button onClick={() => { const u = window.prompt("Image / SVG URL:", selEl.url || ""); if (u != null) updEl(selEl.id, { url: u.trim() }); }} style={pill(false)}>🔗 URL</button>
                 <button onClick={() => updEl(selEl.id, { fit: selEl.fit === "cover" ? "contain" : "cover" })} style={pill(false)}>Fit: {selEl.fit || "contain"}</button>
                 <button onClick={() => updEl(selEl.id, { frame: !selEl.frame })} style={pill(selEl.frame)}>Frame</button>
@@ -6564,6 +6571,7 @@ export default function Senseito() {
   function lvTemplate(key) { const t = TEMPLATES[key]; if (!t || !active) return; const d = active.data; const content = { ...contentOnly(d), template: key, theme: t.theme, skin: t.skin, font: t.font, density: t.density, gamiPreset: t.gami, progression: t.progression || "list" }; updateSchool(active.id, { data: composeSchool(content, d.knowledgeDNA) }); showAToast(`✓ ${t.emoji} ${t.label}`); }
 
   return (
+    <MediaAuthCtx.Provider value={session ? { token: session.token, userId: session.user.id } : null}>
     <div className={mode === "light" ? "light" : undefined} style={{ background: B.bg, minHeight: "100vh", fontFamily: "'Inter',-apple-system,sans-serif", color: B.white, display: "flex" }}>
       <GlobalStyle />
       <style>{`
@@ -6666,5 +6674,6 @@ export default function Senseito() {
         </div>
       </div>
     </div>
+    </MediaAuthCtx.Provider>
   );
 }
