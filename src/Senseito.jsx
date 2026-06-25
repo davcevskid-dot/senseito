@@ -5415,7 +5415,12 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   // Each school gets its OWN gentle background derived from its palette — so it reads as the school,
   // not as Senseito's dark/light chrome. Layered over var(--bg) so it still respects light/dark mode.
   const pHex = HEX_RE.test(T.p) ? T.p : "#7C3AED", aHex = HEX_RE.test(T.a) ? T.a : "#06B6D4";
-  const schoolBg = ts.pageBg || `radial-gradient(135% 80% at 50% -12%, ${hexA(pHex, 0.24)} 0%, ${hexA(pHex, 0.07)} 34%, transparent 68%), linear-gradient(180deg, ${hexA(aHex, 0.05)} 0%, transparent 30%), var(--bg)`;
+  // Full-coverage, clearly-visible background derived from the school's palette (or an explicit
+  // school.bgColor from the picker), layered over var(--bg) so it still reads in light/dark mode.
+  const bgC = HEX_RE.test(school.bgColor || "") ? school.bgColor : null;
+  const schoolBg = ts.pageBg || (bgC
+    ? `linear-gradient(165deg, ${hexA(bgC, 0.55)} 0%, ${hexA(bgC, 0.28)} 100%), var(--bg)`
+    : `linear-gradient(160deg, ${hexA(pHex, 0.30)} 0%, ${hexA(aHex, 0.16)} 48%, ${hexA(pHex, 0.24)} 100%), var(--bg)`);
   const shell = shellOf(school); // student-facing layout: lms | cards | arcade
   const navKind = shell === "lms" ? "sidebar" : (school.navStyle || ts.nav); // LMS forces the two-column sidebar
   let nv = navStyles(navKind, T); // navStyle = add-anywhere override of the template's nav
@@ -5811,9 +5816,24 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
         onClose={() => setCustomLessonSem(null)} />}
 
       <div style={{ maxWidth: ts.maxW, margin: "0 auto", padding: "14px 20px 80px", background: schoolBg, borderRadius: 20, minHeight: "100vh", border: `1px solid ${B.border}` }}>
-        {!readOnly && (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 0 14px", flexWrap: "wrap", gap: 8 }}>
-            <div style={{ fontSize: 12, color: B.muted }}>💬 Type in the left chat to change anything</div>
+        {!readOnly && (() => {
+          const tsel = { background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.white, fontFamily: "inherit", fontSize: 12.5, padding: "6px 8px", cursor: "pointer" };
+          const tlab = { display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, color: B.muted, fontWeight: 700 };
+          const applyVibe = (k) => { const t = TEMPLATES[k]; if (!t) return; onUpdate({ data: { ...school, template: k, theme: t.theme, skin: t.skin, font: t.font, density: t.density, ...(t.progression ? { progression: t.progression } : {}) } }); };
+          return (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 0 12px", flexWrap: "wrap", gap: 10 }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <label style={tlab}>🗂️ Layout
+                <select value={shell} onChange={e => onUpdate({ data: { ...school, shell: e.target.value, ...(e.target.value === "arcade" ? { progression: "arcade" } : {}) } })} style={tsel}>{SHELLS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
+              </label>
+              <label style={tlab}>🎨 Vibe
+                <select value={school.template || ""} onChange={e => e.target.value && applyVibe(e.target.value)} style={tsel}><option value="">Choose…</option>{Object.entries(TEMPLATES).map(([k, t]) => <option key={k} value={k}>{t.emoji} {t.label}</option>)}</select>
+              </label>
+              <label style={{ ...tlab, gap: 4 }} title="School background colour">🖌️ Bg
+                <input type="color" value={school.bgColor || pHex} onChange={e => onUpdate({ data: { ...school, bgColor: e.target.value } })} style={{ width: 26, height: 24, border: `1px solid ${B.borderMid}`, borderRadius: 6, background: "none", cursor: "pointer", padding: 0 }} />
+                {school.bgColor && <button onClick={() => onUpdate({ data: { ...school, bgColor: undefined } })} style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 10.5, fontFamily: "inherit" }}>reset</button>}
+              </label>
+            </div>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <button onClick={() => setGamelabOpen(true)} title="Build games here, then drop them into any section with a Game brick" style={{ background: B.surface2, border: `1px solid ${T.ba}`, borderRadius: 8, color: T.hi, padding: "6px 13px", cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit" }}>🎮 Game Lab{(school.games || []).length ? ` (${school.games.length})` : ""}</button>
               <button data-guide="publish" onClick={() => onPublish(rec)} disabled={publishing} style={{ background: rec.published ? "rgba(74,222,128,0.1)" : "linear-gradient(135deg,#059669,#047857)", border: rec.published ? "1px solid rgba(74,222,128,0.35)" : "none", borderRadius: 8, color: rec.published ? "#4ADE80" : "white", padding: "6px 13px", cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit" }}>
@@ -5821,7 +5841,8 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
               </button>
             </div>
           </div>
-        )}
+          );
+        })()}
         {!readOnly && gamelabOpen && (
           <div onClick={() => setGamelabOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 230, background: "rgba(0,0,0,0.82)", backdropFilter: "blur(10px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "max(24px,4vh) 16px 40px", overflowY: "auto" }}>
             <div onClick={e => e.stopPropagation()} style={{ background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 20, width: "100%", maxWidth: 680, padding: 20, boxShadow: `0 0 80px ${T.pg}` }}>
@@ -6070,10 +6091,6 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
                     </>;
                   })()}
                   <div style={{ height: 1, background: B.border, margin: "10px 0" }} />
-                  <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: B.muted, marginBottom: 8 }}>Layout (student view)</div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
-                    {SHELLS.map(([k, l]) => <button key={k} onClick={() => onUpdate({ data: { ...school, shell: k, ...(k === "arcade" ? { progression: "arcade" } : {}) } })} style={{ ...mi, border: `1px solid ${shell === k ? T.ba : B.border}`, background: shell === k ? T.ps : B.surface2, color: shell === k ? T.hi : B.white }}>{shell === k ? "✓ " : ""}{l}</button>)}
-                  </div>
                   <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: B.muted, marginBottom: 8 }}>Presets</div>
                   <button onClick={() => { setAddSecOpen(false); addClass(); }} disabled={addingClass} style={{ ...mi, width: "100%", marginBottom: 6 }}>🏫 Add a class — own teacher + curriculum</button>
                   <button onClick={singleChatPreset} style={{ ...mi, width: "100%" }}>💬 Single centered chat (no tabs)</button>
