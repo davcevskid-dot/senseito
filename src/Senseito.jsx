@@ -862,7 +862,8 @@ DECIDE which of three modes this message is:
 - "navStyle": "pills" | "topbar" | "chunky" | "minimal" | "soft" | "sidebar" — override the section navigation style independently of the theme. "sidebar" = a left vertical nav with content beside it (two-column).
 - "navGrad": a CSS gradient string for the navigation/sidebar background, e.g. "linear-gradient(180deg,#ef4444,#3b82f6)". Use for "make the sidebar a red→blue gradient". "" to clear.
 - "currency": { "word":"<what the points/XP are called, e.g. Energy, Coins, Sparks, Insight>", "icon":"<single emoji>" }. Use for "rename XP to …", "call points coins", "make XP energy". Set "currency": null to reset to "XP".
-- "progressSkin": "<a short description of a bespoke PROGRESS-bar metaphor that fits the subject, e.g. 'a shoelace that tightens', 'a rocket climbing toward a planet', 'a plant that grows', 'a jar filling up'>", OR "default" to restore the plain bar. Use whenever they ask to change the progress bar / completion meter / how progress looks.
+- "progressSkin": "<a short description of a bespoke PROGRESS-bar metaphor that fits the subject, e.g. 'a shoelace that tightens', 'a rocket climbing toward a planet', 'a plant that grows', 'a jar filling up'>", OR "default" to restore the plain bar. Use whenever they ask to change the progress bar / completion meter / loading bar / how progress looks.
+- "soul": "<a short description of a bespoke animated 'signature' centerpiece for the hero — e.g. 'a glowing constellation of the key ideas', 'an animated crest', 'drifting particles that form the topic'>", OR "remove" to take it away. A hidden delight — use ONLY when they explicitly ask for a hero/signature visual, a 'soul', or something special/animated at the top.
 IMPORTANT: "brand" is ONLY a company logo + nav links bar. A picture/illustration the user wants INSIDE the page body is NOT brand and NOT a cover — it's a content image: handle that as an "action" ("add an image brick of … to the dashboard/lesson"), not a design field.
 - "hero": { "emoji":false, "tagline":false, "description":false, "off":true } — set a key false to hide that piece; "off":true = minimal title-only header. (For "just a chat, no title/description" set hero.off true.)
 - "overlay": { "type":"mentorFab", "greeting":"<short>" } to add a floating chat bubble, or null to remove.
@@ -5163,7 +5164,6 @@ function SchoolReveal({ school, T, onClose, onTour }) {
 const GUIDE_STEPS = [
   { key: "chat", icon: "🪄", title: "Your magic wand", body: "This is the build chat — your direct line to Senseito. Type any change in plain English (“make it 8 lessons”, “add a community tab”, “warmer tone”) and the whole school rebuilds. No menus to hunt through." },
   { key: "hero", icon: "✏️", title: "Everything is editable", body: "Click any text here — the name, tagline, description — to edit it inline. If there's a cover image, hover it to set the focal point." },
-  { key: "soul", icon: "✨", title: "Your school's soul", body: "This signature centerpiece is generated uniquely for your school. It's the first thing that makes a visitor feel something — ask the build chat to reimagine it any time." },
   { key: "tabs", icon: "🧭", title: "Sections", body: "Each tab is a section — Lessons, Mentor, Tools, dashboards, community. Drag to reorder, double-click to rename, and press ＋ to add a new one." },
   { key: "publish", icon: "🌐", title: "Go live", body: "Publish gives you a shareable public link, a claimable custom URL, and live signup + student analytics right on this page." },
 ];
@@ -5847,8 +5847,8 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
             </div>
           </div>
 
-          {/* The school's signature centerpiece — its unique "soul" */}
-          {(school.soul?.code || !readOnly) && <div data-guide="soul"><SignaturePanel school={school} T={T} canEdit={!readOnly} onUpdate={onUpdate} /></div>}
+          {/* The school's signature centerpiece — only when summoned via the build chat (no longer a default). */}
+          {school.soul?.code && <div data-guide="soul"><SignaturePanel school={school} T={T} canEdit={!readOnly} onUpdate={onUpdate} /></div>}
 
           {/* Body bricks — freestanding content between the hero and the sections (shows on every tab) */}
           {((school.bodyBricks || []).length > 0 || !readOnly) && (
@@ -6033,7 +6033,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
 // ─────────────────────────────────────────────────────────────
 // HOME
 // ─────────────────────────────────────────────────────────────
-function Home({ onCreated }) {
+function Home({ onCreated, autofocus }) {
   const [prompt, setPrompt] = useState("");
   const [focused, setFocused] = useState(false);
   const [phase, setPhase] = useState("idle");
@@ -6048,6 +6048,8 @@ function Home({ onCreated }) {
   const [showStruct, setShowStruct] = useState(false);
   const taRef = useRef(null);
   const [prog, setProg] = useState({ pct: 0, label: "", facts: [] });
+  // On "New School" (returning users), jump straight to the create chat instead of making them scroll.
+  useEffect(() => { if (!autofocus) return; const t = setTimeout(() => { taRef.current?.focus(); taRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }); }, 120); return () => clearTimeout(t); }, []); // eslint-disable-line
 
   function structHint() {
     const h = [];
@@ -6083,12 +6085,10 @@ function Home({ onCreated }) {
       const facts = schoolFacts(content);
       setProg({ pct: 30, label: `Writing the lessons for “${content.name}”…`, facts, preview: content });
       // Give the school its "soul" — a bespoke signature centerpiece — in parallel with lesson authoring.
-      const soulP = genSignature(content).then(code => { content.soul = { ...(content.soul || {}), code }; }).catch(() => { });
-      // Bespoke "X factor" touches — a progress metaphor + a themed name for XP — generated in parallel.
-      const skinP = genProgressSkin(content).then(code => { if (code) content.progressSkin = { code }; }).catch(() => { });
-      const curP = genCurrency(content).then(c => { if (c) content.currency = c; }).catch(() => { });
+      // No auto-generated soul/progress widgets at build (removed as default — faster builds, less clutter).
+      // They remain a hidden power: a creator can summon them from the build chat ("add a signature
+      // visual", "change the loading/progress bar to a growing tree", "rename XP to Energy").
       await fillSchoolBlocks(content, { dna, onProgress: (d, t) => setProg(p => ({ ...p, pct: 30 + Math.round((d / t) * 64), label: `Authoring activities… (${d}/${t} done)` })) });
-      await Promise.all([soulP, skinP, curP]);
       autoFixSchool(content); // deterministic self-review so the one-shot feels finished
       const built = composeSchool(content, dna);
       built.sourcePrompt = (prompt || source || "").trim().slice(0, 400); // for the reveal's "you asked for →" beat
@@ -6955,15 +6955,24 @@ export default function Senseito() {
       if (out.reply) pushMsg({ role: "assistant", content: out.reply });
       const d = out.design && typeof out.design === "object" ? out.design : null;
       if (d) {
+        const mergeData = (extra) => setSchools(s => s.map(r => r.id === rec.id ? { ...r, data: { ...r.data, ...extra } } : r));
         if (applyDesign(rec, d)) { pushMsg({ role: "assistant", content: "✓ Design updated." }); showAToast("✓ Design updated", "ok"); }
-        // Progress-bar metaphor — regenerate (or reset) the bespoke skin on demand.
+        // Progress-bar metaphor — regenerate (or reset) the bespoke skin on demand (hidden power).
         if ("progressSkin" in d && d.progressSkin) {
-          const mergeData = (extra) => setSchools(s => s.map(r => r.id === rec.id ? { ...r, data: { ...r.data, ...extra } } : r));
           if (/^(default|none|plain|reset|normal)$/i.test(String(d.progressSkin).trim())) {
             mergeData({ progressSkin: undefined }); showAToast("✓ Progress bar reset", "ok");
           } else {
             setIterProg({ pct: 40, label: "Designing your progress visual…" });
             try { const code = await genProgressSkin(rec.data, String(d.progressSkin)); if (code) { mergeData({ progressSkin: { code } }); showAToast("✓ New progress visual", "ok"); } else showAToast("Couldn't build that — kept the current bar", "err"); } catch { }
+          }
+        }
+        // Signature "soul" centerpiece — a hidden delight summoned only on request.
+        if ("soul" in d && d.soul) {
+          if (/^(remove|none|delete|off)$/i.test(String(d.soul).trim())) {
+            mergeData({ soul: undefined }); showAToast("✓ Signature removed", "ok");
+          } else {
+            setIterProg({ pct: 40, label: "Crafting your school's signature…" });
+            try { const code = await genSignature(rec.data, String(d.soul)); if (code) { mergeData({ soul: { code } }); showAToast("✓ Signature added", "ok"); } } catch { }
           }
         }
         if (d.layout && LAYOUTS[d.layout]) {
@@ -7084,7 +7093,7 @@ export default function Senseito() {
               ? (session ? <ProfileView session={session} profile={profile} onProfile={setProfile} achStats={achStats} schoolCount={schools.length} syncState={syncState} onBack={() => setView("home")} onSignOut={() => { setSession(null); setSchools([]); setSyncState("idle"); setView("home"); }} />
                 : <Home onCreated={createSchool} />)
               : view === "home" || !active
-              ? <Home onCreated={createSchool} />
+              ? <Home onCreated={createSchool} autofocus={schools.length > 0} />
               : <SchoolPage key={active.id} rec={active} onUpdate={(patch) => updateSchool(active.id, patch)} onPublish={publishSchool} publishing={publishing} publicBase={publicBase} token={session?.token} onSetSlug={setCustomSlug} onIterate={applyIterate} iterating={iterating} iterProg={iterProg} justBuilt={active.id === justBuiltId} onRevealSeen={() => setJustBuiltId(null)} onStats={(n) => setStudentsById(m => (m[active.id] === n ? m : { ...m, [active.id]: n }))} />}
           </Boundary>
         </div>
