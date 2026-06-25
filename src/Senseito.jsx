@@ -854,7 +854,7 @@ DECIDE which of three modes this message is:
 - "skin": one of ${SKIN_KEYS.join(", ")}
 - "density": "compact" | "cozy" | "spacious"
 - "font": one of ${Object.keys(FONTS).join(", ")}
-- "cover": an https image URL for a hero banner, or "" to remove. "coverPos": CSS object-position for the cover focal point (e.g. "50% 25%", "left top").
+- "cover": an https image URL for a hero banner, or "" to remove. "coverPos": CSS object-position for the cover focal point (e.g. "50% 25%", "left top"). "coverHeight": a number 120–560 (pixels) for the cover's height — use for "make the cover taller/shorter/bigger", null to reset to default.
 - "fontScale": a number 0.8–1.4 for overall text size (1 = default).
 - "minimal": true/false — minimalist mode. When true, deliberately terse/short activities are shown as-is and never hidden or flagged as empty. Use for "keep it minimal", "distilled one-liner lessons", "don't pad the content".
 - "progression": "list" | "map" | "arcade" — how the lessons section is laid out. "map" = a Duolingo-style winding path of lesson nodes ("make the lessons a map/journey/path"). "arcade" = a gamified single "run" screen with an XP/streak HUD that auto-advances to the next lesson as you clear each ("make it a game", "arcade mode", "play it like a game", "one continuous game"). (Add-anywhere — works on any theme.)
@@ -5928,10 +5928,10 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
             </div>
           )}
           {/* Banner — varies by the school's visual skin */}
-          <div data-guide="hero" style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: sk.radius, overflow: "hidden", animation: "fadeUp 0.5s ease" }}>
-            {/* A full cover image IS the header — the title sits on it; no duplicated title/description below. */}
+          <div data-guide="hero" style={{ background: B.surface, overflow: "hidden", animation: "fadeUp 0.5s ease", ...(school.cover ? { marginLeft: -20, marginRight: -20, borderRadius: 0, borderBottom: `1px solid ${B.border}` } : { border: `1px solid ${B.border}`, borderRadius: sk.radius }) }}>
+            {/* A full cover image IS the header — bleeds edge-to-edge; the title sits on it; no duplicated title/description below. */}
             {school.cover ? <div style={{ position: "relative" }}>
-              <img src={school.cover} alt="" style={{ width: "100%", height: "clamp(200px,30vw,300px)", objectFit: "cover", objectPosition: school.coverPos || "center", display: "block" }} />
+              <img src={school.cover} alt="" style={{ width: "100%", height: Number(school.coverHeight) > 0 ? Number(school.coverHeight) : "clamp(200px,30vw,300px)", objectFit: "cover", objectPosition: school.coverPos || "center", display: "block" }} />
               <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0.18) 45%, rgba(0,0,0,0.66) 100%)" }} />
               {!hero.off && <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: "24px 28px", textAlign: sk.align }}>
                 {hero.emoji !== false && <div style={{ fontSize: 32, marginBottom: 6 }}>{school.emoji || "🏫"}</div>}
@@ -5943,6 +5943,13 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
                   <button key={p} onClick={() => onUpdate({ data: { ...school, coverPos: p } })} title={p} style={{ width: 13, height: 13, borderRadius: 3, cursor: "pointer", border: "none", background: (school.coverPos || "50% 50%") === p ? "#fff" : "rgba(255,255,255,0.35)" }} />
                 ))}
               </div>}
+              {!readOnly && <div onPointerDown={(ev) => {
+                ev.preventDefault(); const node = ev.currentTarget; try { node.setPointerCapture(ev.pointerId); } catch { }
+                const sy = ev.clientY, oh = Number(school.coverHeight) || node.parentElement.getBoundingClientRect().height;
+                const move = (m) => onUpdate({ data: { ...school, coverHeight: Math.round(Math.max(120, Math.min(560, oh + (m.clientY - sy)))) } });
+                const up = () => { node.removeEventListener("pointermove", move); node.removeEventListener("pointerup", up); node.removeEventListener("pointercancel", up); };
+                node.addEventListener("pointermove", move); node.addEventListener("pointerup", up); node.addEventListener("pointercancel", up);
+              }} title="Drag to resize the cover" style={{ position: "absolute", left: "50%", transform: "translateX(-50%)", bottom: 4, width: 54, height: 16, display: "flex", alignItems: "center", justifyContent: "center", cursor: "ns-resize", color: "rgba(255,255,255,0.85)", fontSize: 12, background: "rgba(0,0,0,0.4)", borderRadius: 8, touchAction: "none" }}>⇕</div>}
             </div> : (
             <div style={{ padding: sk.align === "center" ? "34px 28px 26px" : "30px 28px 22px", background: T.heroGrad || sk.top, borderBottom: `1px solid ${B.border}`, textAlign: sk.align, position: "relative" }}>
               {sk.accentBar && <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 4, background: `linear-gradient(90deg,${T.p},${T.a})` }} />}
@@ -7087,6 +7094,7 @@ export default function Senseito() {
     if ("brand" in d) patch.brand = d.brand === null ? undefined : { ...(cur.brand || {}), ...(d.brand || {}) };
     if ("overlay" in d) patch.overlay = d.overlay;
     if ("currency" in d) patch.currency = (d.currency && d.currency.word) ? { word: String(d.currency.word).slice(0, 16), icon: String(d.currency.icon || "").slice(0, 4) } : undefined;
+    if ("coverHeight" in d) patch.coverHeight = d.coverHeight === null ? undefined : Math.max(120, Math.min(560, Math.round(Number(d.coverHeight)) || 240));
     if (!Object.keys(patch).length) return false;
     pushVersion(rec.id, cur); // snapshot for Undo
     updateSchool(rec.id, { data: { ...cur, ...patch } });
