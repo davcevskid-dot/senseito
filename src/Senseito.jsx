@@ -1913,6 +1913,7 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, onChooseFork, c
           <div style={{ padding: "14px 18px", borderTop: `1px solid ${B.border}`, background: B.surface2, display: "flex", gap: 10, alignItems: "flex-end" }}>
             <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} placeholder={chatPassed ? "Lesson complete" : "Reply to your mentor… (Enter to send)"} disabled={chatPassed} rows={2}
               style={{ flex: 1, background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 10, color: B.white, fontFamily: "inherit", fontSize: 14, lineHeight: 1.5, padding: "9px 13px", resize: "none", outline: "none", opacity: chatPassed ? 0.4 : 1 }} />
+            {!chatPassed && <MicButton onText={t => setInput(v => (v ? v.trim() + " " : "") + t)} T={T} />}
             <button onClick={send} disabled={loading || !input.trim() || chatPassed}
               style={{ background: T.p, border: "none", borderRadius: 10, padding: "10px 16px", color: "white", fontFamily: "inherit", fontSize: 15, fontWeight: 700, cursor: "pointer", flexShrink: 0, alignSelf: "flex-end", opacity: (loading || chatPassed) ? 0.5 : 1 }}>↑</button>
           </div>
@@ -1992,6 +1993,7 @@ function MentorOffice({ school, T, chat, onChat, bus, onIngest, progress }) {
         <div style={{ padding: "13px 16px", borderTop: `1px solid ${B.border}`, background: B.surface2, display: "flex", gap: 10, alignItems: "flex-end" }}>
           <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} placeholder={`Ask ${school.mentor.name} anything…`} rows={2}
             style={{ flex: 1, background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 10, color: B.white, fontFamily: "inherit", fontSize: 14, lineHeight: 1.5, padding: "9px 13px", resize: "none" }} />
+          <MicButton onText={t => setInput(v => (v ? v.trim() + " " : "") + t)} T={T} />
           <button onClick={send} disabled={loading || !input.trim()}
             style={{ background: T.p, border: "none", borderRadius: 10, padding: "10px 16px", color: "white", fontFamily: "inherit", fontSize: 15, fontWeight: 700, cursor: "pointer", flexShrink: 0, opacity: loading || !input.trim() ? 0.5 : 1 }}>↑</button>
         </div>
@@ -4153,6 +4155,7 @@ function MentorFab({ school, bus, T, progress }) {
         </div>
         <div style={{ padding: "10px 12px", borderTop: `1px solid ${B.border}`, display: "flex", gap: 8 }}>
           <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); send(); } }} placeholder="Ask…" style={{ flex: 1, background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 10, color: B.white, fontFamily: "inherit", fontSize: 13, padding: "8px 11px" }} />
+          <MicButton onText={t => setInput(v => (v ? v.trim() + " " : "") + t)} T={T} />
           <button onClick={send} disabled={loading || !input.trim()} style={{ background: T.p, border: "none", borderRadius: 10, padding: "8px 12px", color: "white", fontSize: 14, fontWeight: 700, cursor: "pointer", opacity: (loading || !input.trim()) ? 0.5 : 1 }}>↑</button>
         </div>
       </div>
@@ -6647,6 +6650,7 @@ function ProjectChat({ rec, iterating, history, onSend, onIterate, onBack, onThe
       </div>
       <div data-guide="chat" style={{ padding: "10px 12px", borderTop: `1px solid ${B.border}`, display: "flex", gap: 8, alignItems: "flex-end" }}>
         <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} placeholder={iterating ? "Working…" : "Ask or describe a change…"} disabled={iterating} rows={2} style={{ flex: 1, background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 10, color: B.white, fontFamily: "inherit", fontSize: 13, lineHeight: 1.5, padding: "8px 11px", resize: "none" }} />
+        <MicButton onText={t => setInput(v => (v ? v.trim() + " " : "") + t)} T={T} />
         <button onClick={send} disabled={iterating || !input.trim()} style={{ background: T.p, border: "none", borderRadius: 10, padding: "9px 13px", color: "white", fontFamily: "inherit", fontSize: 15, fontWeight: 700, cursor: "pointer", flexShrink: 0, opacity: (iterating || !input.trim()) ? 0.5 : 1 }}>↑</button>
       </div>
     </div>
