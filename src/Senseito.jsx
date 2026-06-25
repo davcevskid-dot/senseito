@@ -5510,7 +5510,9 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   // Even a fresh single-class school SHOWS as a (renameable) class. The published view only
   // reveals the class bar once there are 2+ classes; the creator always sees it to manage.
   const displayClasses = classes || [{ id: "c_main", title: school.classTitle || school.category || "Class 1", icon: school.emoji || "📚", mentorName: school.mentor?.name, _implicit: true }];
-  const showClassBar = (classes ? classes.length >= 2 : false) || !readOnly;
+  // Only show the class switcher once there are 2+ classes (declutter the default view).
+  // Single-class creators add a class from the section "+" menu instead.
+  const showClassBar = classes ? classes.length >= 2 : false;
   function renameClass(id, title) {
     if (!title || !title.trim()) return;
     if (!school.classes) {
@@ -5874,7 +5876,6 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
                 return <button key={c.id} onClick={goLessons} onDoubleClick={rename} title={readOnly ? c.title : "Click to open · double-click to rename"} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: on ? T.grad : B.surface2, border: `1px solid ${on ? "transparent" : B.borderMid}`, borderRadius: 100, color: on ? "#fff" : B.mutedMid, padding: "6px 14px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 700, boxShadow: on ? `0 4px 14px ${T.pg}` : "none" }}>{c.icon} {c.title}<span style={{ fontSize: 10.5, opacity: 0.85, fontWeight: 600 }}>{done}/{ls.length}</span></button>;
               })}
               {!readOnly && <button onClick={addClass} disabled={addingClass} title="Create a new class (its own teacher + curriculum) in this school" style={{ background: "none", border: `1px dashed ${T.ba}`, borderRadius: 100, color: T.hi, padding: "6px 13px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 700, opacity: addingClass ? 0.6 : 1 }}>{addingClass ? <><Spinner color={T.hi} />Building class…</> : "＋ Add a class"}</button>}
-              {!readOnly && <span style={{ fontSize: 10.5, color: B.muted }}>{displayClasses.length < 2 ? "· hidden from students until you add a 2nd class · double-click to rename" : "double-click a class to rename"}</span>}
             </div>
           )}
           {/* Banner — varies by the school's visual skin */}
@@ -5983,6 +5984,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
                   })()}
                   <div style={{ height: 1, background: B.border, margin: "10px 0" }} />
                   <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: B.muted, marginBottom: 8 }}>Presets</div>
+                  <button onClick={() => { setAddSecOpen(false); addClass(); }} disabled={addingClass} style={{ ...mi, width: "100%", marginBottom: 6 }}>🏫 Add a class — own teacher + curriculum</button>
                   <button onClick={singleChatPreset} style={{ ...mi, width: "100%" }}>💬 Single centered chat (no tabs)</button>
                   {SECTIONS.length > 1 && <button onClick={() => removeSection(activeTab)} style={{ ...mi, width: "100%", marginTop: 8, color: "#F87171", border: "1px solid rgba(248,113,113,0.3)", background: "rgba(248,113,113,0.06)" }}>🗑 Remove “{(SECTIONS.find(s => s.id === activeTab)?.title) || "this section"}”</button>}
                 </div>
@@ -6682,7 +6684,7 @@ function ProjectChat({ rec, iterating, history, onSend, onIterate, onBack, onThe
         </>}
       </div>
       <div style={{ flex: 1, overflowY: "auto", padding: "10px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
-        <div style={{ fontSize: 12, color: B.mutedMid, lineHeight: 1.6, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 10, padding: "10px 12px" }}>👋 Ask me anything about this project, or tell me what to change — “add a quiz to lesson 2”, “how could I make this better?”, “add a daily habit tracker”.</div>
+        <div style={{ fontSize: 12, color: B.mutedMid, lineHeight: 1.6, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 10, padding: "10px 12px" }}>👋 Tell me what to change — e.g. “add a quiz to lesson 2”.</div>
         {history.map((m, i) => (
           <div key={i} style={{ display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start", gap: 7, alignItems: "flex-start" }}>
             {m.role !== "user" && <div style={{ flex: "0 0 22px", marginTop: 2 }}><SenseitoMark size={22} /></div>}
