@@ -1392,6 +1392,8 @@ function BuildProgress({ pct = 0, label = "", facts = [], title = "Building your
   useEffect(() => { if (!facts.length) return; setFi(0); const id = setInterval(() => setFi(i => (i + 1) % facts.length), 2900); return () => clearInterval(id); }, [facts.length]);
   const [pi, setPi] = useState(0);
   useEffect(() => { const id = setInterval(() => setPi(p => p + 1), 3000); return () => clearInterval(id); }, []); // rotating phase phrases
+  const [ti, setTi] = useState(0);
+  useEffect(() => { const id = setInterval(() => setTi(t => t + 1), 6000); return () => clearInterval(id); }, []); // wait-tips linger longer (~6s)
   const shown = Math.min(100, Math.round(disp));
   // Time-based reveal: the moment the plan lands, the school visibly assembles itself
   // (name → tagline → mentor → nav tabs → lessons) over ~2.6s instead of popping in at once.
@@ -1430,8 +1432,8 @@ function BuildProgress({ pct = 0, label = "", facts = [], title = "Building your
         <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: B.muted, marginTop: 7 }}>
           <span>{shown}%</span><span>{eta}</span>
         </div>
-        {!preview && (() => { const tip = WAIT_TIPS[pi % WAIT_TIPS.length]; return (
-          <div key={pi} style={{ marginTop: 14, display: "flex", gap: 11, alignItems: "flex-start", background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 12, padding: "12px 14px", animation: "fadeUp 0.45s ease" }}>
+        {!preview && (() => { const tip = WAIT_TIPS[ti % WAIT_TIPS.length]; return (
+          <div key={ti} style={{ marginTop: 14, display: "flex", gap: 11, alignItems: "flex-start", background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 12, padding: "12px 14px", animation: "fadeUp 0.45s ease" }}>
             <span style={{ fontSize: 17, flexShrink: 0 }}>{tip.icon}</span>
             <span style={{ fontSize: 12.5, color: B.mutedMid, lineHeight: 1.6 }}>{tip.t}</span>
           </div>
@@ -5403,7 +5405,7 @@ function GuideButton({ T, onClick, pulse }) {
   );
 }
 
-function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, publicBase, token, onSetSlug, onIterate, iterating = false, iterProg = { pct: 0, label: "" }, justBuilt = false, onRevealSeen, onStats }) {
+function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, publicBase, token, onSetSlug, onIterate, iterating = false, iterProg = { pct: 0, label: "" }, justBuilt = false, onRevealSeen, onStats, guideOpen = false, onGuideOpen, onGuideClose }) {
   const school = rec.data;
   const T = themeFor(school);
   const sk = skinCfg(school.skin, T);
@@ -5533,9 +5535,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const toastTimer = useRef(null);
   // WOW: one-time reveal on a freshly generated school + re-openable Creator Guide.
   const [reveal, setReveal] = useState(justBuilt && !readOnly);
-  const [guideOpen, setGuideOpen] = useState(false);
-  const [guidePulse, setGuidePulse] = useState(() => { try { return !localStorage.getItem("senseito_guideSeen"); } catch { return true; } });
-  const openGuide = () => { setGuideOpen(true); setGuidePulse(false); try { localStorage.setItem("senseito_guideSeen", "1"); } catch { } };
+  const openGuide = () => { onGuideOpen?.(); try { localStorage.setItem("senseito_guideSeen", "1"); } catch { } };
   // Getting-started checklist state (self-ticks "preview a lesson"; collapse/dismiss persist per school).
   const [previewed, setPreviewed] = useState(() => { try { return !!localStorage.getItem("sx_prev_" + rec.id); } catch { return false; } });
   const [ckDismissed, setCkDismissed] = useState(() => { try { return !!localStorage.getItem("sx_ck_" + rec.id); } catch { return false; } });
@@ -5792,8 +5792,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
       <SchoolEffects effect={school.effect} T={T} />
       <Toast toast={toast} />
       {!readOnly && reveal && <SchoolReveal school={school} T={T} onClose={() => { setReveal(false); onRevealSeen?.(); }} onTour={() => { setReveal(false); onRevealSeen?.(); openGuide(); }} />}
-      {!readOnly && <GuideButton T={T} pulse={guidePulse} onClick={openGuide} />}
-      {!readOnly && guideOpen && <CreatorGuide school={school} T={T} onClose={() => setGuideOpen(false)} />}
+      {!readOnly && guideOpen && <CreatorGuide school={school} T={T} onClose={() => onGuideClose?.()} />}
       {/* LMS shell renders the lesson INLINE (below the cover) instead of in this modal. */}
       {activeLesson && shell !== "lms" && renderLessonView(activeLesson, false)}
       {editingLesson && !readOnly && <LessonEditor lesson={editingLesson} T={T} allowed={allowedBlocksFor(school.learningPath)}
@@ -5902,7 +5901,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
             const ckItems = [
               { label: "Your school is built", done: true },
               { label: "Preview your first lesson", done: previewed, cta: "Try it", act: () => firstLesson && enterLesson(firstLesson) },
-              { label: "Make it yours — tweak it in the left chat", done: (rec.revision || 0) > 0 },
+              { label: "Make it yours — tweak it in the left chat", done: (rec.revision || 0) > 0 || !!rec.chatUsed },
               { label: rec.published ? "Published 🌐" : "Publish & share your school", done: !!rec.published, cta: "Publish", act: () => onPublish(rec) },
             ];
             if (ckItems.every(i => i.done)) return null;
@@ -6153,7 +6152,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
 // ─────────────────────────────────────────────────────────────
 // HOME
 // ─────────────────────────────────────────────────────────────
-function Home({ onCreated, autofocus }) {
+function Home({ onCreated, autofocus, onAutofocusDone }) {
   const [prompt, setPrompt] = useState("");
   const [focused, setFocused] = useState(false);
   const [phase, setPhase] = useState("idle");
@@ -6168,8 +6167,8 @@ function Home({ onCreated, autofocus }) {
   const [showStruct, setShowStruct] = useState(false);
   const taRef = useRef(null);
   const [prog, setProg] = useState({ pct: 0, label: "", facts: [] });
-  // On "New School" (returning users), jump straight to the create chat instead of making them scroll.
-  useEffect(() => { if (!autofocus) return; const t = setTimeout(() => { taRef.current?.focus(); taRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }); }, 120); return () => clearTimeout(t); }, []); // eslint-disable-line
+  // ONLY when "New School" is clicked (autofocus flips true) jump to the create chat — never on plain app open.
+  useEffect(() => { if (!autofocus) return; const t = setTimeout(() => { taRef.current?.focus(); taRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }); onAutofocusDone?.(); }, 120); return () => clearTimeout(t); }, [autofocus]); // eslint-disable-line
 
   function structHint() {
     const h = [];
@@ -6778,6 +6777,8 @@ export default function Senseito() {
   const [accountOpen, setAccountOpen] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [justBuiltId, setJustBuiltId] = useState(null); // triggers the one-time "wow" reveal
+  const [scrollHome, setScrollHome] = useState(false); // set by "New School" → Home scrolls to the create chat
+  const [guideOpen, setGuideOpen] = useState(false); // Creator Guide (opened from the 🧭 button by the theme toggle)
   const [profile, setProfile] = useState(null); // { avatar_url, display_name }
   const [studentsById, setStudentsById] = useState({}); // per-school enrolled counts (from published analytics)
   const [achQueue, setAchQueue] = useState([]); // achievements waiting to be celebrated
@@ -6798,7 +6799,7 @@ export default function Senseito() {
 
   const active = schools.find(s => s.id === view);
   function showAToast(msg, type = "ok") { setAToast({ msg, type }); clearTimeout(aToastTimer.current); aToastTimer.current = setTimeout(() => setAToast(null), 3500); }
-  useEffect(() => { setIterHistory([]); }, [view]); // fresh chat per project
+  useEffect(() => { setIterHistory([]); setGuideOpen(false); }, [view]); // fresh chat per project; close the guide on switch
   useEffect(() => { if (session?.user?.id) loadProfile(session.token, session.user.id).then(p => p && setProfile(p)); else setProfile(null); }, [session]);
 
   // auth bootstrap (OAuth hash → session)
@@ -7053,6 +7054,7 @@ export default function Senseito() {
   // Conversational chat: converse / advise, OR apply a design patch, OR execute a content edit.
   async function chatSend(text) {
     const rec = active; if (!text || iterating || !rec) return;
+    if (!rec.chatUsed) updateSchool(rec.id, { chatUsed: true }); // ticks the "make it yours" checklist step
     // Deterministic shortcut: "make [section] sticky / unsticky" — match a section by name and toggle it.
     const mSticky = text.match(/\bmake\s+(?:the\s+)?(.+?)\s+(?:section\s+|tab\s+)?(un)?stick(?:y|ied)?\b/i) || text.match(/\b(un)?stick(?:y)?\s+(?:the\s+)?(.+?)\s*(?:section|tab)?$/i);
     if (mSticky) {
@@ -7153,9 +7155,12 @@ export default function Senseito() {
             <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 19, fontWeight: 700, letterSpacing: -0.5, color: B.white }}>
               Sensei<span style={{ background: "linear-gradient(135deg,#7C3AED,#06B6D4)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>to</span>
             </div>
-            <ThemeToggle mode={mode} setMode={setMode} />
+            <div style={{ display: "flex", gap: 7, alignItems: "center" }}>
+              {active && <button onClick={() => setGuideOpen(true)} title="Creator Guide — how to use Senseito" style={{ background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: "#A78BFA", padding: "6px 10px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>🧭</button>}
+              <ThemeToggle mode={mode} setMode={setMode} />
+            </div>
           </div>
-          <button onClick={() => { setView("home"); setSideOpen(false); }} style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "none", background: view === "home" ? "linear-gradient(135deg,#7C3AED,#6D28D9)" : "rgba(124,58,237,0.1)", color: view === "home" ? "white" : "#A78BFA", fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", textAlign: "left", boxShadow: view === "home" ? "0 0 18px rgba(124,58,237,0.25)" : "none" }}>＋ New School</button>
+          <button onClick={() => { setView("home"); setSideOpen(false); setScrollHome(true); }} style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "none", background: view === "home" ? "linear-gradient(135deg,#7C3AED,#6D28D9)" : "rgba(124,58,237,0.1)", color: view === "home" ? "white" : "#A78BFA", fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", textAlign: "left", boxShadow: view === "home" ? "0 0 18px rgba(124,58,237,0.25)" : "none" }}>＋ New School</button>
         </div>
         {active ? (
           <Boundary resetKey={view} fallback={() => <div style={{ flex: 1, padding: 16, fontSize: 12, color: B.muted }}>Chat hit an error. <button onClick={() => setView("home")} style={{ background: "none", border: "none", color: "#A78BFA", cursor: "pointer", fontFamily: "inherit", fontSize: 12 }}>← Back to schools</button></div>}>
@@ -7214,8 +7219,8 @@ export default function Senseito() {
               ? (session ? <ProfileView session={session} profile={profile} onProfile={setProfile} achStats={achStats} schoolCount={schools.length} syncState={syncState} onBack={() => setView("home")} onSignOut={() => { setSession(null); setSchools([]); setSyncState("idle"); setView("home"); }} />
                 : <Home onCreated={createSchool} />)
               : view === "home" || !active
-              ? <Home onCreated={createSchool} autofocus={schools.length > 0} />
-              : <SchoolPage key={active.id} rec={active} onUpdate={(patch) => updateSchool(active.id, patch)} onPublish={publishSchool} publishing={publishing} publicBase={publicBase} token={session?.token} onSetSlug={setCustomSlug} onIterate={applyIterate} iterating={iterating} iterProg={iterProg} justBuilt={active.id === justBuiltId} onRevealSeen={() => setJustBuiltId(null)} onStats={(n) => setStudentsById(m => (m[active.id] === n ? m : { ...m, [active.id]: n }))} />}
+              ? <Home onCreated={createSchool} autofocus={scrollHome} onAutofocusDone={() => setScrollHome(false)} />
+              : <SchoolPage key={active.id} rec={active} onUpdate={(patch) => updateSchool(active.id, patch)} onPublish={publishSchool} publishing={publishing} publicBase={publicBase} token={session?.token} onSetSlug={setCustomSlug} onIterate={applyIterate} iterating={iterating} iterProg={iterProg} justBuilt={active.id === justBuiltId} onRevealSeen={() => setJustBuiltId(null)} onStats={(n) => setStudentsById(m => (m[active.id] === n ? m : { ...m, [active.id]: n }))} guideOpen={guideOpen} onGuideOpen={() => setGuideOpen(true)} onGuideClose={() => setGuideOpen(false)} />}
           </Boundary>
         </div>
       </div>
