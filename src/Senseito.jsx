@@ -5412,6 +5412,10 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const hero = school.hero || {}; // { emoji?, tagline?, description?, off? } — false hides; cover via school.cover
   const dens = ({ compact: 11, cozy: 18, spacious: 28 })[school.density] || 18; // vertical rhythm between sections
   const ts = tplStyle(school); // structural look (nav style / width / page background) from the template
+  // Each school gets its OWN gentle background derived from its palette — so it reads as the school,
+  // not as Senseito's dark/light chrome. Layered over var(--bg) so it still respects light/dark mode.
+  const pHex = HEX_RE.test(T.p) ? T.p : "#7C3AED", aHex = HEX_RE.test(T.a) ? T.a : "#06B6D4";
+  const schoolBg = ts.pageBg || `radial-gradient(135% 80% at 50% -12%, ${hexA(pHex, 0.24)} 0%, ${hexA(pHex, 0.07)} 34%, transparent 68%), linear-gradient(180deg, ${hexA(aHex, 0.05)} 0%, transparent 30%), var(--bg)`;
   const shell = shellOf(school); // student-facing layout: lms | cards | arcade
   const navKind = shell === "lms" ? "sidebar" : (school.navStyle || ts.nav); // LMS forces the two-column sidebar
   let nv = navStyles(navKind, T); // navStyle = add-anywhere override of the template's nav
@@ -5806,7 +5810,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
         onAdd={(lessonObj) => addCustomLessonToSemester(customLessonSem, lessonObj)}
         onClose={() => setCustomLessonSem(null)} />}
 
-      <div style={{ maxWidth: ts.maxW, margin: "0 auto", padding: "0 20px 80px", background: ts.pageBg || undefined, borderRadius: ts.pageBg ? 20 : undefined, minHeight: ts.pageBg ? "100vh" : undefined }}>
+      <div style={{ maxWidth: ts.maxW, margin: "0 auto", padding: "14px 20px 80px", background: schoolBg, borderRadius: 20, minHeight: "100vh", border: `1px solid ${B.border}` }}>
         {!readOnly && (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "18px 0 14px", flexWrap: "wrap", gap: 8 }}>
             <div style={{ fontSize: 12, color: B.muted }}>💬 Type in the left chat to change anything</div>
@@ -5925,14 +5929,21 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
           )}
           {/* Banner — varies by the school's visual skin */}
           <div data-guide="hero" style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: sk.radius, overflow: "hidden", animation: "fadeUp 0.5s ease" }}>
-            {school.cover && <div style={{ position: "relative" }}>
-              <img src={school.cover} alt="" style={{ width: "100%", height: 170, objectFit: "cover", objectPosition: school.coverPos || "center", display: "block" }} />
+            {/* A full cover image IS the header — the title sits on it; no duplicated title/description below. */}
+            {school.cover ? <div style={{ position: "relative" }}>
+              <img src={school.cover} alt="" style={{ width: "100%", height: "clamp(200px,30vw,300px)", objectFit: "cover", objectPosition: school.coverPos || "center", display: "block" }} />
+              <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0.18) 45%, rgba(0,0,0,0.66) 100%)" }} />
+              {!hero.off && <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: "24px 28px", textAlign: sk.align }}>
+                {hero.emoji !== false && <div style={{ fontSize: 32, marginBottom: 6 }}>{school.emoji || "🏫"}</div>}
+                <div style={{ fontFamily: sk.font, fontSize: "clamp(24px,5vw,38px)", fontWeight: 800, letterSpacing: -0.6, color: "#fff", textShadow: "0 2px 18px rgba(0,0,0,0.55)" }}><EditableText value={school.name} readOnly={readOnly} onSave={v => onUpdate({ data: { ...school, name: v } })} /></div>
+                {hero.tagline !== false && school.tagline && <div style={{ fontSize: 14.5, color: "rgba(255,255,255,0.92)", marginTop: 6, fontStyle: sk.font.includes("Lora") ? "normal" : "italic", textShadow: "0 1px 10px rgba(0,0,0,0.55)" }}><EditableText value={school.tagline} readOnly={readOnly} onSave={v => onUpdate({ data: { ...school, tagline: v } })} /></div>}
+              </div>}
               {!readOnly && <div style={{ position: "absolute", top: 8, right: 8, display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 3, background: "rgba(0,0,0,0.45)", borderRadius: 8, padding: 4 }} title="Set the cover's focal point">
                 {["0% 0%", "50% 0%", "100% 0%", "0% 50%", "50% 50%", "100% 50%", "0% 100%", "50% 100%", "100% 100%"].map(p => (
                   <button key={p} onClick={() => onUpdate({ data: { ...school, coverPos: p } })} title={p} style={{ width: 13, height: 13, borderRadius: 3, cursor: "pointer", border: "none", background: (school.coverPos || "50% 50%") === p ? "#fff" : "rgba(255,255,255,0.35)" }} />
                 ))}
               </div>}
-            </div>}
+            </div> : (
             <div style={{ padding: sk.align === "center" ? "34px 28px 26px" : "30px 28px 22px", background: T.heroGrad || sk.top, borderBottom: `1px solid ${B.border}`, textAlign: sk.align, position: "relative" }}>
               {sk.accentBar && <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 4, background: `linear-gradient(90deg,${T.p},${T.a})` }} />}
               {hero.emoji !== false && !hero.off && <div style={{ fontSize: sk.emoji, marginBottom: 10 }}>{school.emoji || "🏫"}</div>}
@@ -5941,6 +5952,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
               {hero.tagline !== false && !hero.off && <div style={{ fontSize: 14, color: sk.onColor ? "rgba(255,255,255,0.85)" : T.a, fontStyle: sk.font.includes("Lora") ? "normal" : "italic", marginBottom: 12 }}><EditableText value={school.tagline} readOnly={readOnly} onSave={v => onUpdate({ data: { ...school, tagline: v } })} /></div>}
               {hero.description !== false && !hero.off && <div style={{ fontSize: 13, color: sk.onColor ? "rgba(255,255,255,0.78)" : B.mutedMid, lineHeight: 1.7, maxWidth: 560, margin: sk.align === "center" ? "0 auto" : 0 }}><EditableText value={flattenText(school.description)} readOnly={readOnly} placeholder="Add a description…" onSave={v => onUpdate({ data: { ...school, description: v } })} /></div>}
             </div>
+            )}
             <div style={{ padding: "14px 28px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 14 }}>
               <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
                 {[["Duration", school.duration], ["Category", school.category], ["Path", pathLabel(school.learningPath)], ["Lessons", total]].map(([l, v]) => (
