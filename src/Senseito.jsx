@@ -2242,7 +2242,7 @@ function EvalChat({ system, opener, criteria, minUser, T, disabled, placeholder,
 
 // Browser speech-to-text helper (optional, Chrome/Edge).
 function getSpeech() { return typeof window !== "undefined" ? (window.SpeechRecognition || window.webkitSpeechRecognition) : null; }
-function MicButton({ onText, T }) {
+function MicButton({ onText, T, icon }) {
   const SR = getSpeech(); const [on, setOn] = useState(false); const recRef = useRef(null);
   if (!SR) return null;
   function toggle() {
@@ -2251,6 +2251,7 @@ function MicButton({ onText, T }) {
     r.onresult = (e) => { let t = ""; for (let i = e.resultIndex; i < e.results.length; i++) t += e.results[i][0].transcript; onText(t); };
     r.onend = () => setOn(false); recRef.current = r; r.start(); setOn(true);
   }
+  if (icon) return <button onClick={toggle} title={on ? "Stop" : "Speak"} style={{ background: on ? "rgba(248,113,113,0.15)" : B.surface3, border: `1px solid ${on ? "rgba(248,113,113,0.4)" : B.borderMid}`, borderRadius: 9, color: on ? "#F87171" : B.mutedMid, width: 38, height: 30, cursor: "pointer", fontSize: 14, fontFamily: "inherit", flexShrink: 0 }}>{on ? "■" : "🎤"}</button>;
   return <button onClick={toggle} style={{ background: on ? "rgba(248,113,113,0.15)" : B.surface3, border: `1px solid ${on ? "rgba(248,113,113,0.4)" : B.borderMid}`, borderRadius: 8, color: on ? "#F87171" : B.mutedMid, padding: "6px 11px", cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>{on ? "■ Stop" : "🎤 Speak"}</button>;
 }
 
@@ -4551,6 +4552,7 @@ function LessonEditor({ lesson, T, allowed, lessons = [], games = [], school, on
     setAdding(false);
   }
   const inp = { ...bx, fontSize: 13 };
+  const secH = { fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.3, color: T.p, marginTop: 6, paddingTop: 13, borderTop: `1px solid ${B.border}` };
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 220, background: "rgba(0,0,0,0.82)", backdropFilter: "blur(10px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onClose}>
       <div style={{ background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 20, width: "100%", maxWidth: 600, maxHeight: "88vh", display: "flex", flexDirection: "column", overflow: "hidden" }} onClick={e => e.stopPropagation()}>
@@ -4559,9 +4561,11 @@ function LessonEditor({ lesson, T, allowed, lessons = [], games = [], school, on
           <button onClick={onClose} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "6px 11px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>✕</button>
         </div>
         <div style={{ flex: 1, overflowY: "auto", padding: "18px 22px", display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ ...secH, marginTop: 0, paddingTop: 0, borderTop: "none" }}>1 · Basics</div>
           <div><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>Title</div><input value={d.title || ""} onChange={e => set({ title: e.target.value })} style={inp.input} /></div>
-          <div><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>Concept</div><textarea value={d.concept || ""} onChange={e => set({ concept: e.target.value })} rows={2} style={inp.input} /></div>
-          <div><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>📖 Theory <span style={{ color: B.muted, fontWeight: 400 }}>(optional reading — if set, students read it first; it unlocks the mentor/activities. Markdown ok.)</span></div><textarea value={d.theory || ""} onChange={e => set({ theory: e.target.value })} rows={4} placeholder="The core reading for this lesson. Leave empty if the mentor teaches the theory through conversation." style={inp.input} /></div>
+          <div><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>Concept <span style={{ color: B.muted, fontWeight: 400 }}>(one line — what this lesson teaches)</span></div><textarea value={d.concept || ""} onChange={e => set({ concept: e.target.value })} rows={2} style={inp.input} /></div>
+          <div style={secH}>2 · Content & look</div>
+          <div><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>📖 Theory <span style={{ color: B.muted, fontWeight: 400 }}>(optional reading — students read it first; it unlocks the mentor/activities. Markdown ok.)</span></div><textarea value={d.theory || ""} onChange={e => set({ theory: e.target.value })} rows={4} placeholder="The core reading for this lesson. Leave empty if the mentor teaches the theory through conversation." style={inp.input} /></div>
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
             <div style={{ flex: 2, minWidth: 180 }}><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>Cover image URL (optional)</div><input value={d.cover || ""} onChange={e => set({ cover: e.target.value })} placeholder="https://…" style={inp.input} /></div>
             <div><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>Accent color</div>
@@ -4571,17 +4575,19 @@ function LessonEditor({ lesson, T, allowed, lessons = [], games = [], school, on
               </div>
             </div>
           </div>
+          <div style={secH}>3 · How students pass</div>
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
             <div style={{ flex: "0 0 140px", minWidth: 120 }}><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>Type</div>
               <select value={d.type || "Dialogue"} onChange={e => set({ type: e.target.value })} style={{ ...inp.input, cursor: "pointer" }}>{Object.keys(TM).map(t => <option key={t} value={t}>{t}</option>)}</select></div>
             <div style={{ flex: 1, minWidth: 200 }}><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>How to pass this lesson</div>
               <PassLogicEditor value={d.passLogic} hasActs={(d.blocks || []).length > 0} onChange={pl => set({ passLogic: pl })} /></div>
           </div>
-          <div><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>Pass criteria (used by mentor / AI evaluation)</div><textarea value={d.passCriteria || ""} onChange={e => set({ passCriteria: e.target.value })} rows={2} style={inp.input} /></div>
+          <div><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>Pass criteria <span style={{ color: B.muted, fontWeight: 400 }}>(what the mentor/AI checks for)</span></div><textarea value={d.passCriteria || ""} onChange={e => set({ passCriteria: e.target.value })} rows={2} style={inp.input} /></div>
 
+          <div style={secH}>4 · Completion reward</div>
           {/* Completion reward — a downloadable the student unlocks when they pass this lesson. */}
           <div>
-            <div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>🎁 Completion reward <span style={{ color: B.muted, fontWeight: 400 }}>(optional — unlocked when the lesson is passed)</span></div>
+            <div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>🎁 Reward <span style={{ color: B.muted, fontWeight: 400 }}>(optional — unlocked when the lesson is passed)</span></div>
             {d.reward?.brick ? (
               <div style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 10, padding: 11, display: "flex", flexDirection: "column", gap: 8 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: B.white }}>
@@ -4628,9 +4634,10 @@ function LessonEditor({ lesson, T, allowed, lessons = [], games = [], school, on
             {pickReward && media && <MediaPicker token={media.token} userId={media.userId} onPick={m => setReward({ file: { url: m.url, name: m.name } })} onClose={() => setPickReward(false)} />}
           </div>
 
+          <div style={secH}>5 · Branching</div>
           {/* Branching — turn this lesson into a fork that sends the student down different paths. */}
           <div>
-            <div style={{ fontSize: 11, color: B.muted, marginBottom: 3 }}>🌿 Branching <span style={{ color: B.muted, fontWeight: 400 }}>(optional — choose-your-own-adventure)</span></div>
+            <div style={{ fontSize: 11, color: B.muted, marginBottom: 3 }}>🌿 Paths <span style={{ color: B.muted, fontWeight: 400 }}>(optional — choose-your-own-adventure)</span></div>
             <div style={{ fontSize: 11, color: B.muted, marginBottom: 7, lineHeight: 1.5 }}>Offer choices the student picks after passing this lesson — each opens a different next lesson instead of just advancing in order.</div>
             {(d.forks || []).map((f, i) => (
               <div key={i} style={{ display: "flex", gap: 6, marginBottom: 6, alignItems: "center" }}>
@@ -4656,7 +4663,7 @@ function LessonEditor({ lesson, T, allowed, lessons = [], games = [], school, on
           </div>
 
           <div>
-            <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: T.p, marginBottom: 8 }}>Activities ({d.blocks.length})</div>
+            <div style={{ ...secH, marginBottom: 8 }}>6 · Activities ({d.blocks.length})</div>
             {d.blocks.map((b, i) => {
               const fields = blockFields(b.type);
               return (
@@ -6102,7 +6109,10 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
           <div key={activeTab} className="sx-stagger" style={{ flex: 1, minWidth: 0, width: "100%", display: "flex", flexDirection: "column", gap: dens, ...(SECTIONS.find(s => s.id === activeTab)?.sticky ? { position: "sticky", top: 64, alignSelf: "flex-start", maxHeight: "calc(100vh - 80px)", overflowY: "auto" } : {}) }}>
           {activeTab === "lessons" && (shell === "lms" ? (activeLesson ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              <button onClick={() => setActiveLesson(null)} style={{ alignSelf: "flex-start", background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.mutedMid, padding: "7px 13px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 700 }}>← All lessons</button>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <button onClick={() => setActiveLesson(null)} style={{ background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.mutedMid, padding: "7px 13px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 700 }}>← All lessons</button>
+                {!readOnly && <button onClick={() => setEditingLesson(activeLesson)} style={{ background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 9, color: T.hi, padding: "7px 13px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 700 }}>✎ Edit lesson</button>}
+              </div>
               {renderLessonView(activeLesson, true)}
             </div>
           ) : (
@@ -6815,8 +6825,10 @@ function ProjectChat({ rec, iterating, history, onSend, onIterate, onBack, onThe
       </div>
       <div data-guide="chat" style={{ padding: "10px 12px", borderTop: `1px solid ${B.border}`, display: "flex", gap: 8, alignItems: "flex-end" }}>
         <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} placeholder={iterating ? "Working…" : "Ask or describe a change…"} disabled={iterating} rows={2} style={{ flex: 1, background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 10, color: B.white, fontFamily: "inherit", fontSize: 13, lineHeight: 1.5, padding: "8px 11px", resize: "none" }} />
-        <MicButton onText={t => setInput(v => (v ? v.trim() + " " : "") + t)} T={T} />
-        <button onClick={send} disabled={iterating || !input.trim()} style={{ background: T.p, border: "none", borderRadius: 10, padding: "9px 13px", color: "white", fontFamily: "inherit", fontSize: 15, fontWeight: 700, cursor: "pointer", flexShrink: 0, opacity: (iterating || !input.trim()) ? 0.5 : 1 }}>↑</button>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <MicButton icon onText={t => setInput(v => (v ? v.trim() + " " : "") + t)} T={T} />
+          <button onClick={send} disabled={iterating || !input.trim()} style={{ background: T.p, border: "none", borderRadius: 9, width: 38, height: 30, color: "white", fontFamily: "inherit", fontSize: 15, fontWeight: 700, cursor: "pointer", flexShrink: 0, opacity: (iterating || !input.trim()) ? 0.5 : 1 }}>↑</button>
+        </div>
       </div>
     </div>
   );
