@@ -6011,6 +6011,29 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
               ))}
               {!readOnly && <button onClick={() => setAddSecOpen(o => !o)} title="Add or manage sections" style={{ flexShrink: 0, width: 40, padding: "10px 0", borderRadius: 10, border: `1px dashed ${B.borderMid}`, background: addSecOpen ? T.ps : "transparent", color: addSecOpen ? T.hi : B.mutedMid, fontFamily: "inherit", fontSize: 17, fontWeight: 700, cursor: "pointer" }}>＋</button>}
             </div>
+            {/* LMS layout: the lessons live IN the sidebar; clicking one opens it inline in the main pane. */}
+            {shell === "lms" && SECTIONS.some(s => s.kind === "lessons") && (() => {
+              const lessonsId = SECTIONS.find(s => s.kind === "lessons")?.id;
+              const list = (viewSemesters || []).flatMap(s => s.lessons || []);
+              return (
+                <div style={{ marginTop: 10, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 12, padding: 8, display: "flex", flexDirection: "column", gap: 2, maxHeight: "calc(100vh - 240px)", overflowY: "auto" }}>
+                  <div style={{ fontSize: 9.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.3, color: B.muted, padding: "4px 8px 6px" }}>Lessons</div>
+                  {list.map((l, i) => {
+                    const st = progress[l.number] || "locked";
+                    const locked = readOnly && st === "locked" && !l.open;
+                    const on = activeLesson?.number === l.number && activeTab === lessonsId;
+                    return (
+                      <button key={l.id || i} disabled={locked} onClick={() => { if (lessonsId) setTab(lessonsId); enterLesson(l); }}
+                        title={l.title} style={{ textAlign: "left", background: on ? T.ps : "none", border: `1px solid ${on ? T.ba : "transparent"}`, borderRadius: 8, color: st === "passed" ? "#4ADE80" : on ? T.hi : locked ? B.muted : B.mutedMid, padding: "7px 9px", cursor: locked ? "not-allowed" : "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: on ? 700 : 500, display: "flex", alignItems: "center", gap: 7, opacity: locked ? 0.6 : 1 }}>
+                        <span style={{ flexShrink: 0, fontSize: 11 }}>{st === "passed" ? "✓" : locked ? "🔒" : st === "active" ? "▸" : "·"}</span>
+                        <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{l.title}</span>
+                      </button>
+                    );
+                  })}
+                  {!list.length && <div style={{ fontSize: 11.5, color: B.muted, padding: "4px 8px" }}>No lessons yet.</div>}
+                </div>
+              );
+            })()}
             {!readOnly && addSecOpen && (() => {
               const mi = { textAlign: "left", background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 9, color: B.white, padding: "9px 12px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" };
               return (
@@ -6053,12 +6076,18 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
             })()}
           </div>
           <div key={activeTab} className="sx-stagger" style={{ flex: 1, minWidth: 0, width: "100%", display: "flex", flexDirection: "column", gap: dens, ...(SECTIONS.find(s => s.id === activeTab)?.sticky ? { position: "sticky", top: 64, alignSelf: "flex-start", maxHeight: "calc(100vh - 80px)", overflowY: "auto" } : {}) }}>
-          {activeTab === "lessons" && (shell === "lms" && activeLesson ? (
+          {activeTab === "lessons" && (shell === "lms" ? (activeLesson ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <button onClick={() => setActiveLesson(null)} style={{ alignSelf: "flex-start", background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.mutedMid, padding: "7px 13px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 700 }}>← All lessons</button>
               {renderLessonView(activeLesson, true)}
             </div>
-          ) : (<>
+          ) : (
+            <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 16, padding: "32px 28px" }}>
+              <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 21, fontWeight: 800, color: B.white, letterSpacing: -0.4, marginBottom: 8 }}>{school.emoji || "🏫"} {school.name}</div>
+              {flattenText(school.description) && <div style={{ fontSize: 14, color: B.mutedMid, lineHeight: 1.7, marginBottom: 16 }}>{flattenText(school.description)}</div>}
+              {(() => { const first = (viewSemesters || []).flatMap(s => s.lessons || [])[0]; return first ? <button onClick={() => enterLesson(first)} style={{ ...pBtn(T) }}>▶ Start: {first.title}</button> : <div style={{ fontSize: 12.5, color: T.hi }}>Pick a lesson from the sidebar to begin.</div>; })()}
+            </div>
+          )) : (<>
             {isAdventure && (
               <div style={{ background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 12, padding: "10px 15px", fontSize: 12.5, color: T.hi, display: "flex", alignItems: "center", gap: 8 }}>🌿 <span><strong>Choose-your-own-adventure</strong> — your path branches based on the choices you make after certain lessons.</span></div>
             )}
