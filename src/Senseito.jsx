@@ -1318,6 +1318,16 @@ function LoaderCard({ title, steps, stepIdx, sub }) {
 }
 
 const BUILD_STEPS = ["Reading your vision...", "Distilling source material...", "Synthesizing curriculum structure...", "Summoning your mentor...", "Designing missions & pass criteria...", "Suggesting tools & improvements...", "Finalizing School DNA..."];
+// Shown while the plan is still being designed (before any preview) so the wait never feels dead.
+const WAIT_TIPS = [
+  { icon: "🧠", t: "Designing a real curriculum takes a moment — your mentor, lessons, concept map and activities are all being authored from scratch." },
+  { icon: "💬", t: "Tip: once it's built, just type changes in the chat — “add a quiz to lesson 2”, “make it 8 lessons”, “warmer tone”." },
+  { icon: "🚀", t: "Secret: type “change the progress bar to a rocket” to give your school a custom progress visual." },
+  { icon: "🎓", t: "Your mentor won't pass students until they've actually shown they get it." },
+  { icon: "📎", t: "You can attach a PDF or paste a transcript and Senseito teaches THAT, in its own words." },
+  { icon: "🌿", t: "Lessons can branch — build a choose-your-own-adventure where the path depends on the learner." },
+  { icon: "🎁", t: "Reward finishing a lesson with a downloadable, a game from your Game Lab, or a bonus brick." },
+];
 const ITERATE_STEPS = ["Reading your instruction...", "Re-architecting the school...", "Rewriting affected lessons...", "Refreshing suggestions...", "Applying changes..."];
 
 // Fun, real facts pulled FROM the school being built — shown while the user waits.
@@ -1353,7 +1363,7 @@ function BuildProgress({ pct = 0, label = "", facts = [], title = "Building your
         // Honest bar: never run far ahead of the REAL pct (so it can't pretend to be ~85%
         // while the architect call is still pending). During the long per-semester authoring
         // it's allowed a bigger lead so it keeps visibly creeping instead of stalling at 30%.
-        const ceiling = pct >= 100 ? 100 : pct + (preview ? 22 : 10);
+        const ceiling = pct >= 100 ? 100 : pct + (preview ? 22 : 30);
         let target = Math.max(pct, Math.min(trickle, ceiling));
         if (target < d) target = d;             // never go backwards
         if (d >= ceiling && pct < 100) return d; // hold at the ceiling until real pct moves
@@ -1404,6 +1414,12 @@ function BuildProgress({ pct = 0, label = "", facts = [], title = "Building your
         <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: B.muted, marginTop: 7 }}>
           <span>{shown}%</span><span>{eta}</span>
         </div>
+        {!preview && (() => { const tip = WAIT_TIPS[pi % WAIT_TIPS.length]; return (
+          <div key={pi} style={{ marginTop: 14, display: "flex", gap: 11, alignItems: "flex-start", background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 12, padding: "12px 14px", animation: "fadeUp 0.45s ease" }}>
+            <span style={{ fontSize: 17, flexShrink: 0 }}>{tip.icon}</span>
+            <span style={{ fontSize: 12.5, color: B.mutedMid, lineHeight: 1.6 }}>{tip.t}</span>
+          </div>
+        ); })()}
         {preview ? (() => {
           const lessons = (preview.semesters || []).flatMap(s => s.lessons || []);
           const allDone = pct >= 100;
