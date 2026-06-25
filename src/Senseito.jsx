@@ -5328,6 +5328,32 @@ function CreatorGuide({ school, T, onClose }) {
   );
 }
 
+// A compact, self-ticking "getting started" checklist for the creator — clear next steps
+// (auto-checks what it can detect), collapsible and dismissible. Hidden once complete.
+function CreatorChecklist({ items, T, collapsed, onToggle, onDismiss }) {
+  const done = items.filter(i => i.done).length;
+  return (
+    <div style={{ background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 14, padding: "12px 15px", boxShadow: `0 4px 18px ${T.pg}` }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <span style={{ fontSize: 13, fontWeight: 800, color: B.white, fontFamily: "'Space Grotesk',sans-serif" }}>🚀 Getting started</span>
+        <div style={{ flex: 1, height: 5, background: B.surface3, borderRadius: 3, overflow: "hidden", maxWidth: 160 }}><div style={{ width: `${(done / items.length) * 100}%`, height: "100%", background: T.grad, borderRadius: 3, transition: "width 0.4s" }} /></div>
+        <span style={{ fontSize: 11.5, color: B.muted }}>{done}/{items.length}</span>
+        <button onClick={onToggle} style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>{collapsed ? "▸" : "▾"}</button>
+        <button onClick={onDismiss} title="Dismiss" style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 14, fontFamily: "inherit" }}>✕</button>
+      </div>
+      {!collapsed && <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 11 }}>
+        {items.map((it, i) => (
+          <div key={i} style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 12.5 }}>
+            <span style={{ width: 18, height: 18, borderRadius: "50%", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 11, background: it.done ? "rgba(74,222,128,0.15)" : B.surface3, border: `1px solid ${it.done ? "rgba(74,222,128,0.4)" : B.borderMid}`, color: it.done ? "#4ADE80" : B.muted }}>{it.done ? "✓" : ""}</span>
+            <span style={{ flex: 1, color: it.done ? B.muted : B.white, textDecoration: it.done ? "line-through" : "none" }}>{it.label}</span>
+            {!it.done && it.cta && <button onClick={it.act} style={{ background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 7, color: T.hi, padding: "3px 11px", cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit" }}>{it.cta}</button>}
+          </div>
+        ))}
+      </div>}
+    </div>
+  );
+}
+
 // Persistent re-open handle for the Creator Guide (top-right corner).
 function GuideButton({ T, onClick, pulse }) {
   return (
@@ -5468,6 +5494,12 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const [guideOpen, setGuideOpen] = useState(false);
   const [guidePulse, setGuidePulse] = useState(() => { try { return !localStorage.getItem("senseito_guideSeen"); } catch { return true; } });
   const openGuide = () => { setGuideOpen(true); setGuidePulse(false); try { localStorage.setItem("senseito_guideSeen", "1"); } catch { } };
+  // Getting-started checklist state (self-ticks "preview a lesson"; collapse/dismiss persist per school).
+  const [previewed, setPreviewed] = useState(() => { try { return !!localStorage.getItem("sx_prev_" + rec.id); } catch { return false; } });
+  const [ckDismissed, setCkDismissed] = useState(() => { try { return !!localStorage.getItem("sx_ck_" + rec.id); } catch { return false; } });
+  const [ckCollapsed, setCkCollapsed] = useState(false);
+  const dismissCk = () => { setCkDismissed(true); try { localStorage.setItem("sx_ck_" + rec.id, "1"); } catch { } };
+  const enterLesson = (l) => { if (!previewed) { setPreviewed(true); try { localStorage.setItem("sx_prev_" + rec.id, "1"); } catch { } } setActiveLesson(l); };
 
   const progress = rec.progress || {};
   const xp = rec.xp || 0;
@@ -5816,6 +5848,18 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
             </div>
           )}
           <BrandBar school={school} T={T} readOnly={readOnly} onUpdate={onUpdate} />
+          {(() => {
+            if (readOnly || ckDismissed) return null;
+            const firstLesson = (school.semesters || []).flatMap(s => s.lessons || [])[0];
+            const ckItems = [
+              { label: "Your school is built", done: true },
+              { label: "Preview your first lesson", done: previewed, cta: "Try it", act: () => firstLesson && enterLesson(firstLesson) },
+              { label: "Make it yours — tweak it in the left chat", done: (rec.revision || 0) > 0 },
+              { label: rec.published ? "Published 🌐" : "Publish & share your school", done: !!rec.published, cta: "Publish", act: () => onPublish(rec) },
+            ];
+            if (ckItems.every(i => i.done)) return null;
+            return <CreatorChecklist items={ckItems} T={T} collapsed={ckCollapsed} onToggle={() => setCkCollapsed(c => !c)} onDismiss={dismissCk} />;
+          })()}
           {/* Classes — a top-level header menu (parallel tracks, each with its own teacher).
               Even a fresh school shows one renameable class; the bar only appears to viewers with 2+ classes. */}
           {showClassBar && (
@@ -5963,9 +6007,9 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
               {[["list", "☰ List"], ["map", "🗺️ Map"], ["arcade", "🎮 Arcade"]].map(([k, l]) => <button key={k} onClick={() => onUpdate({ data: { ...school, progression: k } })} style={{ background: (school.progression || "list") === k ? T.ps : "none", border: `1px solid ${(school.progression || "list") === k ? T.ba : B.borderMid}`, borderRadius: 8, color: (school.progression || "list") === k ? T.hi : B.mutedMid, padding: "5px 11px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 700 }}>{l}</button>)}
             </div>}
             {school.progression === "arcade" ? (
-              <ArcadeRun school={viewSchool} T={T} progress={progress} xp={xp} onEnter={setActiveLesson} onEdit={setEditingLesson} readOnly={readOnly} />
+              <ArcadeRun school={viewSchool} T={T} progress={progress} xp={xp} onEnter={enterLesson} onEdit={setEditingLesson} readOnly={readOnly} />
             ) : school.progression === "map" ? (
-              <LessonMap school={viewSchool} T={T} progress={progress} onEnter={setActiveLesson} onEdit={setEditingLesson} readOnly={readOnly} />
+              <LessonMap school={viewSchool} T={T} progress={progress} onEnter={enterLesson} onEdit={setEditingLesson} readOnly={readOnly} />
             ) : viewSemesters.map((sem) => { const si = (school.semesters || []).indexOf(sem); return (
               <div key={si} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, padding: "2px 4px" }}>
@@ -5979,7 +6023,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
                     {!readOnly && <button onClick={() => deleteSemester(si)} title="Delete this part/semester" style={{ background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.3)", borderRadius: 8, color: "#F87171", padding: "4px 9px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit", fontWeight: 700 }}>🗑 Delete part</button>}
                   </div>
                 </div>
-                {sem.lessons?.map((l, li) => <LessonRow key={li} lesson={l} idx={(school.semesters || []).slice(0, si).reduce((a, s2) => a + (s2.lessons?.length || 0), 0) + li} T={T} progress={progress} mentorName={school.mentor?.name} games={school.games || []} school={school} onEnter={setActiveLesson} onEdit={setEditingLesson} onToggleLock={toggleLock} readOnly={readOnly} />)}
+                {sem.lessons?.map((l, li) => <LessonRow key={li} lesson={l} idx={(school.semesters || []).slice(0, si).reduce((a, s2) => a + (s2.lessons?.length || 0), 0) + li} T={T} progress={progress} mentorName={school.mentor?.name} games={school.games || []} school={school} onEnter={enterLesson} onEdit={setEditingLesson} onToggleLock={toggleLock} readOnly={readOnly} />)}
                 {/* Per-part add-lesson controls */}
                 {!readOnly && (
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
