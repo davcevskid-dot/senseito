@@ -914,6 +914,10 @@ function mentorSys(school, lesson, bus, opts = {}) {
   const status = opts.activityStatus ? `\nLEARNER'S ACTIVITY STATUS: ${opts.activityStatus}` : "";
   // Mentor-decided branching: YOU pick which path the student goes down.
   const forks = (lesson.forks || []).map(f => ({ ...f, title: (school.semesters || []).flatMap(s => s.lessons || []).find(l => l.id === f.to)?.title })).filter(f => f.to);
+  const hasActs = (lesson.blocks || []).length > 0;
+  const unlockNote = (np.mode === "mentor" && hasActs)
+    ? `\nACTIVITY GATE: the student's hands-on activities stay LOCKED until you open them. Once they've engaged enough to start practising, include a line EXACTLY: UNLOCK (on its own) to open their activities. Do it naturally when they're ready — never mention this mechanic.`
+    : "";
   const forkNote = (np.mode === "mentor" && lesson.forkBy === "mentor" && forks.length)
     ? `\nBRANCHING — YOU choose the path. Based on what the student has shown you (their report, their gaps, what they need most), decide which path fits THEM. The options are:\n${forks.map(f => `- ${f.title || f.label}`).join("\n")}\nWhen they've met the bar, INSTEAD of "PASS:", end your reply with a line EXACTLY: FORK: <the exact path name from the list above> — and add one sentence on why that path suits them.`
     : "";
@@ -924,7 +928,7 @@ THIS LESSON: "${lesson.title}" (${lesson.type})
 CONCEPT: ${lesson.concept}
 MISSION: ${lesson.mission}
 PASS CRITERIA: ${lesson.passCriteria}
-${modeNote}${forkNote}${status}
+${modeNote}${unlockNote}${forkNote}${status}
 LESSON TYPE BEHAVIOR:
 - Quiz: run it live, one question at a time, react to each answer.
 - Debate: take the opposing side and argue hard; the student must defend their position.
@@ -1722,6 +1726,22 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, onChooseFork, c
   else if (np.mode === "activities") passed = total > 0 ? ratio >= (np.activityPct / 100) : manualDone;
   else passed = chatPassed; // mentor approves (the activity % / mission are enforced BY the mentor, no double-gate)
 
+  // ── Flow stages: Theory → Mentor → Activities (whatever subset exists) ──
+  // Theory gates the mentor; the mentor gates the activities (it must UNLOCK them).
+  const hasTheory = !!(lesson.theory && String(lesson.theory).trim());
+  const theoryRead = msgs.some(m => m.role === "theory_done");
+  const mentorUnlocked = msgs.some(m => m.role === "unlock");
+  const mentorEngaged = msgs.filter(m => m.role === "user").length >= 2; // safety net so no one gets stuck
+  const stages = [];
+  if (hasTheory) stages.push("theory");
+  if (showMentorTab) stages.push("mentor");
+  if ((showActsTab && blocks.length) || (!hasTheory && !showMentorTab)) stages.push("activities");
+  if (!stages.length) stages.push("activities");
+  const theoryGate = hasTheory && !theoryRead && !canEdit;
+  const activitiesUnlocked = canEdit || (!theoryGate && (!showMentorTab || mentorUnlocked || mentorEngaged || passed));
+  const stageUnlocked = (st) => canEdit ? true : st === "theory" ? true : st === "mentor" ? !theoryGate : activitiesUnlocked;
+  const markTheoryRead = () => { setMsgs(m => m.some(x => x.role === "theory_done") ? m : [...m, { role: "theory_done" }]); setTab(stages[stages.indexOf("theory") + 1] || "theory"); };
+
   // Record the pass the moment it happens (unlocks the next lesson + saves progress),
   // so the student advances even if they close with ✕ instead of clicking Complete.
   const passFired = useRef(false);
@@ -1739,6 +1759,9 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, onChooseFork, c
       // Capture any limiting belief the mentor flagged (WEED:) into the Garden, strip it from view.
       const wd = reply.match(/WEED:\s*(.+)/i);
       if (wd) { onIngest?.({ title: lesson?.title, lessonId: lesson?.number }, { type: "mindset", weed: wd[1].trim() }); reply = reply.replace(/\n?\s*WEED:\s*.+/i, "").trim(); }
+      // Mentor opens the activities gate (Theory→Mentor→Activities flow).
+      const didUnlock = /(^|\n)\s*UNLOCK\s*$/im.test(reply);
+      if (didUnlock) reply = reply.replace(/(^|\n)\s*UNLOCK\s*$/im, "").trim();
       // Mentor personalizes an activity to THIS learner (TWEAK n: …) using the conversation.
       const tw = reply.match(/TWEAK\s+(\d+)\s*:\s*(.+)/i);
       if (tw) {
@@ -1781,6 +1804,7 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, onChooseFork, c
         setMsgs(m => [...m, { role: "assistant", content: reply || "…" }]);
       }
       if (!missionShown && reply.toLowerCase().includes("mission")) setMissionShown(true);
+      if (didUnlock && !mentorUnlocked) setMsgs(m => [...m, { role: "unlock" }, { role: "system", content: "🔓 Activities unlocked — open the Activities tab." }]);
       if (mentorPassed && !chatPassed) {
         setChatPassed(true);
         if (forkPick) {
@@ -1807,8 +1831,10 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, onChooseFork, c
     setLoading(false);
   }
 
-  const TABS = [...(showMentorTab ? [["mentor", "💬 Guided Lesson"]] : []), ...(showActsTab && blocks.length ? [["activities", `🧩 Activities (${blocks.length})`]] : [])];
-  const activeTab = TABS.some(([k]) => k === tab) ? tab : (TABS[0]?.[0] || "activities");
+  const stageLabel = (s) => s === "theory" ? "📖 Theory" : s === "mentor" ? "💬 Guided Lesson" : (blocks.length ? `🧩 Activities (${blocks.length})` : "✓ Finish");
+  const TABS = stages.map(s => [s, stageLabel(s)]);
+  const firstUnlocked = stages.find(stageUnlocked) || stages[0];
+  const activeTab = (TABS.some(([k]) => k === tab) && stageUnlocked(tab)) ? tab : firstUnlocked;
 
   return (
     <>
@@ -1836,22 +1862,23 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, onChooseFork, c
 
         {TABS.length > 1 && (
           <div style={{ display: "flex", gap: 4, padding: "8px 14px 0", background: B.surface2, borderBottom: `1px solid ${B.border}` }}>
-            {TABS.map(([k, l]) => (
-              <button key={k} onClick={() => setTab(k)} style={{ padding: "8px 14px", background: "none", border: "none", borderBottom: `2px solid ${activeTab === k ? T.p : "transparent"}`, color: activeTab === k ? B.white : B.muted, fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>{l}</button>
-            ))}
+            {TABS.map(([k, l]) => { const unlocked = stageUnlocked(k); return (
+              <button key={k} onClick={() => unlocked && setTab(k)} disabled={!unlocked} title={unlocked ? "" : (k === "mentor" ? "Read the theory first" : "Your mentor unlocks this")} style={{ padding: "8px 14px", background: "none", border: "none", borderBottom: `2px solid ${activeTab === k ? T.p : "transparent"}`, color: activeTab === k ? B.white : unlocked ? B.muted : B.muted, fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: unlocked ? "pointer" : "not-allowed", opacity: unlocked ? 1 : 0.5 }}>{unlocked ? l : `🔒 ${l}`}</button>
+            ); })}
+          </div>
+        )}
+
+        {activeTab === "theory" && (
+          <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
+            <Markdown text={String(lesson.theory || "")} />
+            {!canEdit && <button onClick={markTheoryRead} style={{ ...pBtn(T), alignSelf: "center", marginTop: 4 }}>{stages[stages.indexOf("theory") + 1] === "mentor" ? "I've read this — talk to my mentor →" : stages.length > 1 ? "I've read this — continue →" : "✓ Done"}</button>}
+            {canEdit && <div style={{ fontSize: 11.5, color: B.muted, textAlign: "center" }}>Students read this first; it unlocks the next stage. Edit it from the lesson editor.</div>}
           </div>
         )}
 
         {activeTab === "activities" && (
           <div style={{ flex: 1, overflowY: "auto", padding: "18px 22px", display: "flex", flexDirection: "column", gap: 14 }}>
-            {np.mode === "mentor" && np.mission && !briefed && !canEdit && showMentor ? (
-              <div style={{ textAlign: "center", padding: "36px 20px" }}>
-                <div style={{ fontSize: 30, marginBottom: 10 }}>🔒</div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: B.white, marginBottom: 6 }}>Talk to your mentor first</div>
-                <div style={{ fontSize: 12.5, color: B.muted, lineHeight: 1.6, maxWidth: 360, margin: "0 auto 14px" }}>{school.mentor.name} will brief you, then open your activities.</div>
-                <button onClick={() => setTab("mentor")} style={pBtn(T)}>💬 Go to the lesson chat</button>
-              </div>
-            ) : (<>
+            {(<>
               <div style={{ fontSize: 13, color: B.mutedMid, lineHeight: 1.6 }}>{lesson.concept}</div>
               {mission && <div style={{ background: T.as_, border: `1px solid ${T.ba}`, borderRadius: 10, padding: "11px 14px", fontSize: 13, color: T.hi, lineHeight: 1.55 }}>🎯 <strong>Mission:</strong> {mission}<div style={{ fontSize: 11.5, color: B.mutedMid, marginTop: 5 }}>Do it, then report back in the lesson chat — your mentor approves it to pass.</div></div>}
               {total > 0 && <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -4520,6 +4547,7 @@ function LessonEditor({ lesson, T, allowed, lessons = [], games = [], school, on
         <div style={{ flex: 1, overflowY: "auto", padding: "18px 22px", display: "flex", flexDirection: "column", gap: 14 }}>
           <div><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>Title</div><input value={d.title || ""} onChange={e => set({ title: e.target.value })} style={inp.input} /></div>
           <div><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>Concept</div><textarea value={d.concept || ""} onChange={e => set({ concept: e.target.value })} rows={2} style={inp.input} /></div>
+          <div><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>📖 Theory <span style={{ color: B.muted, fontWeight: 400 }}>(optional reading — if set, students read it first; it unlocks the mentor/activities. Markdown ok.)</span></div><textarea value={d.theory || ""} onChange={e => set({ theory: e.target.value })} rows={4} placeholder="The core reading for this lesson. Leave empty if the mentor teaches the theory through conversation." style={inp.input} /></div>
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
             <div style={{ flex: 2, minWidth: 180 }}><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>Cover image URL (optional)</div><input value={d.cover || ""} onChange={e => set({ cover: e.target.value })} placeholder="https://…" style={inp.input} /></div>
             <div><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>Accent color</div>
