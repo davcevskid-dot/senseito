@@ -1202,7 +1202,19 @@ function getSections(school) {
   out.push({ id: "tools", kind: "tools", title: "Tools", icon: "🛠️" });
   return out;
 }
-// Normalize architect output (or a chosen layout) into clean sections with stable ids.
+// Student-facing visual shell. Explicit school.shell wins; otherwise inferred from
+// what the architect already chose (arcade progression / template), so it's AI-influenced.
+//  lms    = left sidebar of sections + lessons, big cover on top, lessons open INLINE.
+//  cards  = cover, full-width nav, lesson cards; a lesson opens in a modal.
+//  arcade = gamified single-run screen.
+function shellOf(school) {
+  const s = school?.shell;
+  if (s === "lms" || s === "cards" || s === "arcade") return s;
+  if (school?.progression === "arcade") return "arcade";
+  if (["corporate", "academy"].includes(school?.template)) return "lms";
+  return "cards";
+}
+const SHELLS = [["lms", "🗂️ LMS — sidebar + inline lessons"], ["cards", "🗃️ Cards — nav + lesson cards"], ["arcade", "🎮 Arcade — gamified run"]];
 function normalizeSections(content) {
   let secs = (Array.isArray(content.sections) && content.sections.length) ? content.sections : null;
   if (!secs && LAYOUTS[content.layout]) secs = LAYOUTS[content.layout].kinds.map(k => ({ kind: k }));
@@ -1679,7 +1691,7 @@ function AchievementsGrid({ unlockedIds = [] }) {
   );
 }
 
-function LessonView({ school, lesson, T: Tprop, onClose, onPass, onChooseFork, canEdit, onUpdateBlock, chat, onChat, bus, onIngest, outputs: outputsProp, onOutputs, blockOverrides, onOverrideBlock }) {
+function LessonView({ school, lesson, T: Tprop, onClose, onPass, onChooseFork, canEdit, onUpdateBlock, chat, onChat, bus, onIngest, outputs: outputsProp, onOutputs, blockOverrides, onOverrideBlock, inline = false }) {
   // Per-lesson accent override (lesson.accent) recolors the whole lesson modal.
   const T = (lesson.accent && HEX_RE.test(lesson.accent))
     ? { ...Tprop, p: lesson.accent, pg: hexA(lesson.accent, 0.18), ps: hexA(lesson.accent, 0.09), as_: hexA(lesson.accent, 0.12), ba: hexA(lesson.accent, 0.4), hi: lesson.accent, gr: `linear-gradient(135deg,${hexA(lesson.accent, 0.22)},${hexA(lesson.accent, 0.08)})`, grad: `linear-gradient(135deg,${lesson.accent},${lesson.accent}CC)` }
@@ -1844,8 +1856,8 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, onChooseFork, c
       const rg = lesson.reward?.gameId ? (school.games || []).find(g => g.id === lesson.reward.gameId) : null;
       return <CelebrationOverlay title={lesson.title} xp={school.gamification?.xpPerLesson || 0} badge={school.template === "kids" ? "🌟" : "🎉"} T={T} reward={lesson.reward} rewardGame={rg} school={school} forks={lf.length ? lf : null} onChoose={(to) => { onChooseFork?.(to); setCelebrate(false); onClose(); }} onClose={() => { setCelebrate(false); onClose(); }} />;
     })()}
-    <div style={{ position: "fixed", inset: 0, zIndex: 200, background: "rgba(0,0,0,0.82)", backdropFilter: "blur(10px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onClose}>
-      <div style={{ background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 20, width: "100%", maxWidth: 680, height: "86vh", maxHeight: 760, display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: `0 0 80px ${T.pg}` }} onClick={e => e.stopPropagation()}>
+    <div style={inline ? { position: "relative" } : { position: "fixed", inset: 0, zIndex: 200, background: "rgba(0,0,0,0.82)", backdropFilter: "blur(10px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={inline ? undefined : onClose}>
+      <div style={inline ? { background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 18, width: "100%", height: "min(80vh, 720px)", display: "flex", flexDirection: "column", overflow: "hidden" } : { background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 20, width: "100%", maxWidth: 680, height: "86vh", maxHeight: 760, display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: `0 0 80px ${T.pg}` }} onClick={e => e.stopPropagation()}>
         {/^https:\/\//i.test(lesson.cover || "") && <img src={lesson.cover} alt="" style={{ width: "100%", height: 130, objectFit: "cover", objectPosition: lesson.coverPos || "center", display: "block", flexShrink: 0 }} />}
         <div style={{ padding: "16px 22px", borderBottom: `1px solid ${B.border}`, background: B.surface2, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div>
@@ -5398,9 +5410,11 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const hero = school.hero || {}; // { emoji?, tagline?, description?, off? } — false hides; cover via school.cover
   const dens = ({ compact: 11, cozy: 18, spacious: 28 })[school.density] || 18; // vertical rhythm between sections
   const ts = tplStyle(school); // structural look (nav style / width / page background) from the template
-  let nv = navStyles(school.navStyle || ts.nav, T); // navStyle = add-anywhere override of the template's nav
+  const shell = shellOf(school); // student-facing layout: lms | cards | arcade
+  const navKind = shell === "lms" ? "sidebar" : (school.navStyle || ts.nav); // LMS forces the two-column sidebar
+  let nv = navStyles(navKind, T); // navStyle = add-anywhere override of the template's nav
   if (school.navGrad) nv = { ...nv, bar: { ...nv.bar, background: school.navGrad } }; // custom nav/sidebar gradient
-  const sidebar = (school.navStyle || ts.nav) === "sidebar"; // two-column shell
+  const sidebar = navKind === "sidebar"; // two-column shell
   const [leads, setLeads] = useState(null);
   const [students, setStudents] = useState(null);
   const [showLeads, setShowLeads] = useState(false);
@@ -5756,6 +5770,22 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const passedCount = Object.values(progress).filter(v => v === "passed").length;
   const pct = total ? Math.round((passedCount / total) * 100) : 0;
   const TABS = SECTIONS.map(s => [s.id, sectionTitle(s) + (s.kind === "tools" && rec.tools?.length ? ` (${rec.tools.length})` : "")]);
+  // Shared LessonView render — used as a modal (cards/arcade) or inline (LMS shell).
+  const renderLessonView = (l, inline) => (
+    <LessonView school={classes ? { ...school, mentor: classMentor(school, lessonClassId(school, l.number)) } : school} lesson={l} T={T} inline={inline}
+      onClose={() => {
+        const finished = l; setActiveLesson(null);
+        if (!inline && school.progression === "arcade" && finished && progress[finished.number] === "passed" && !(finished.forks || []).length) {
+          const all = (school.semesters || []).flatMap(s => s.lessons || []);
+          const next = all.find(x => x.number !== finished.number && progress[x.number] !== "passed" && (x.open || progress[x.number] === "active"));
+          if (next) setTimeout(() => setActiveLesson(next), 350);
+        }
+      }} onPass={() => handlePass(l.number)} onChooseFork={chooseFork}
+      canEdit={!readOnly} onUpdateBlock={(i, nb) => updateLessonBlock(l.number, i, nb)} bus={bus} onIngest={ingestOutput}
+      chat={rec.lessonChats?.[l.number]} onChat={(msgs) => onUpdate({ lessonChats: { ...(rec.lessonChats || {}), [l.number]: msgs } })}
+      outputs={rec.lessonOutputs?.[l.number]} onOutputs={(o) => onUpdate({ lessonOutputs: { ...(rec.lessonOutputs || {}), [l.number]: o } })}
+      blockOverrides={rec.lessonBlocks?.[l.number]} onOverrideBlock={(i, nb) => onUpdate({ lessonBlocks: { ...(rec.lessonBlocks || {}), [l.number]: { ...(rec.lessonBlocks?.[l.number] || {}), [i]: nb } } })} />
+  );
 
   return (
     <div style={{ position: "relative", fontFamily: fontStack(school) }}>
@@ -5764,20 +5794,8 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
       {!readOnly && reveal && <SchoolReveal school={school} T={T} onClose={() => { setReveal(false); onRevealSeen?.(); }} onTour={() => { setReveal(false); onRevealSeen?.(); openGuide(); }} />}
       {!readOnly && <GuideButton T={T} pulse={guidePulse} onClick={openGuide} />}
       {!readOnly && guideOpen && <CreatorGuide school={school} T={T} onClose={() => setGuideOpen(false)} />}
-      {activeLesson && <LessonView school={classes ? { ...school, mentor: classMentor(school, lessonClassId(school, activeLesson.number)) } : school} lesson={activeLesson} T={T} onClose={() => {
-          const finished = activeLesson; setActiveLesson(null);
-          // Arcade: a continuous run — when you clear a lesson, roll straight into the next one.
-          // (Skip for branching lessons — the student's fork choice decides where they go.)
-          if (school.progression === "arcade" && finished && progress[finished.number] === "passed" && !(finished.forks || []).length) {
-            const all = (school.semesters || []).flatMap(s => s.lessons || []);
-            const next = all.find(l => l.number !== finished.number && progress[l.number] !== "passed" && (l.open || progress[l.number] === "active"));
-            if (next) setTimeout(() => setActiveLesson(next), 350);
-          }
-        }} onPass={() => handlePass(activeLesson.number)} onChooseFork={chooseFork}
-        canEdit={!readOnly} onUpdateBlock={(i, nb) => updateLessonBlock(activeLesson.number, i, nb)} bus={bus} onIngest={ingestOutput}
-        chat={rec.lessonChats?.[activeLesson.number]} onChat={(msgs) => onUpdate({ lessonChats: { ...(rec.lessonChats || {}), [activeLesson.number]: msgs } })}
-        outputs={rec.lessonOutputs?.[activeLesson.number]} onOutputs={(o) => onUpdate({ lessonOutputs: { ...(rec.lessonOutputs || {}), [activeLesson.number]: o } })}
-        blockOverrides={rec.lessonBlocks?.[activeLesson.number]} onOverrideBlock={(i, nb) => onUpdate({ lessonBlocks: { ...(rec.lessonBlocks || {}), [activeLesson.number]: { ...(rec.lessonBlocks?.[activeLesson.number] || {}), [i]: nb } } })} />}
+      {/* LMS shell renders the lesson INLINE (below the cover) instead of in this modal. */}
+      {activeLesson && shell !== "lms" && renderLessonView(activeLesson, false)}
       {editingLesson && !readOnly && <LessonEditor lesson={editingLesson} T={T} allowed={allowedBlocksFor(school.learningPath)}
         lessons={(school.semesters || []).flatMap(s => s.lessons || [])} games={school.games || []} school={school}
         onSave={(draft) => { saveLesson(editingLesson.number, draft); setEditingLesson(null); showToast("✓ Lesson updated"); }}
@@ -6011,6 +6029,10 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
                     </>;
                   })()}
                   <div style={{ height: 1, background: B.border, margin: "10px 0" }} />
+                  <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: B.muted, marginBottom: 8 }}>Layout (student view)</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
+                    {SHELLS.map(([k, l]) => <button key={k} onClick={() => onUpdate({ data: { ...school, shell: k, ...(k === "arcade" ? { progression: "arcade" } : {}) } })} style={{ ...mi, border: `1px solid ${shell === k ? T.ba : B.border}`, background: shell === k ? T.ps : B.surface2, color: shell === k ? T.hi : B.white }}>{shell === k ? "✓ " : ""}{l}</button>)}
+                  </div>
                   <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: B.muted, marginBottom: 8 }}>Presets</div>
                   <button onClick={() => { setAddSecOpen(false); addClass(); }} disabled={addingClass} style={{ ...mi, width: "100%", marginBottom: 6 }}>🏫 Add a class — own teacher + curriculum</button>
                   <button onClick={singleChatPreset} style={{ ...mi, width: "100%" }}>💬 Single centered chat (no tabs)</button>
@@ -6020,7 +6042,12 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
             })()}
           </div>
           <div key={activeTab} className="sx-stagger" style={{ flex: 1, minWidth: 0, width: "100%", display: "flex", flexDirection: "column", gap: dens, ...(SECTIONS.find(s => s.id === activeTab)?.sticky ? { position: "sticky", top: 64, alignSelf: "flex-start", maxHeight: "calc(100vh - 80px)", overflowY: "auto" } : {}) }}>
-          {activeTab === "lessons" && (<>
+          {activeTab === "lessons" && (shell === "lms" && activeLesson ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <button onClick={() => setActiveLesson(null)} style={{ alignSelf: "flex-start", background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.mutedMid, padding: "7px 13px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 700 }}>← All lessons</button>
+              {renderLessonView(activeLesson, true)}
+            </div>
+          ) : (<>
             {isAdventure && (
               <div style={{ background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 12, padding: "10px 15px", fontSize: 12.5, color: T.hi, display: "flex", alignItems: "center", gap: 8 }}>🌿 <span><strong>Choose-your-own-adventure</strong> — your path branches based on the choices you make after certain lessons.</span></div>
             )}
@@ -6036,7 +6063,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
               <span style={{ fontSize: 11, color: B.muted }}>Layout</span>
               {[["list", "☰ List"], ["map", "🗺️ Map"], ["arcade", "🎮 Arcade"]].map(([k, l]) => <button key={k} onClick={() => onUpdate({ data: { ...school, progression: k } })} style={{ background: (school.progression || "list") === k ? T.ps : "none", border: `1px solid ${(school.progression || "list") === k ? T.ba : B.borderMid}`, borderRadius: 8, color: (school.progression || "list") === k ? T.hi : B.mutedMid, padding: "5px 11px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 700 }}>{l}</button>)}
             </div>}
-            {school.progression === "arcade" ? (
+            {(school.progression === "arcade" || shell === "arcade") ? (
               <ArcadeRun school={viewSchool} T={T} progress={progress} xp={xp} onEnter={enterLesson} onEdit={setEditingLesson} readOnly={readOnly} />
             ) : school.progression === "map" ? (
               <LessonMap school={viewSchool} T={T} progress={progress} onEnter={enterLesson} onEdit={setEditingLesson} readOnly={readOnly} />
@@ -6109,7 +6136,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
                 </div>
               </div>
             )}
-          </>)}
+          </>))}
           {activeTab === "mentor" && <MentorOffice school={school} T={T} chat={rec.mentorChat || []} onChat={(msgs) => onUpdate({ mentorChat: msgs })} bus={bus} onIngest={ingestOutput} progress={progress} />}
           {activeTab === "tools" && <ToolsSection rec={rec} T={T} onUpdate={onUpdate} buildTool={buildTool} buildingTool={buildingTool} readOnly={readOnly} onReloadIdeas={reloadIdeas} onEditTool={editTool} />}
           {SECTIONS.filter(s => s.kind === "dashboard").map(sec => activeTab === sec.id
