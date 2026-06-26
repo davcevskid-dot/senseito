@@ -6856,6 +6856,7 @@ export default function Senseito() {
   const [justBuiltId, setJustBuiltId] = useState(null); // triggers the one-time "wow" reveal
   const [scrollHome, setScrollHome] = useState(false); // set by "New School" → Home scrolls to the create chat
   const [guideOpen, setGuideOpen] = useState(false); // Creator Guide (opened from the 🧭 button by the theme toggle)
+  const [sideCollapsed, setSideCollapsed] = useState(false); // hide the Senseito chat sidebar to focus on manual editing
   const [profile, setProfile] = useState(null); // { avatar_url, display_name }
   const [studentsById, setStudentsById] = useState({}); // per-school enrolled counts (from published analytics)
   const [achQueue, setAchQueue] = useState([]); // achievements waiting to be celebrated
@@ -7227,7 +7228,7 @@ export default function Senseito() {
         </div>
       )}
 
-      <div className={`ol-side${sideOpen ? " open" : ""}`}>
+      <div className={`ol-side${sideOpen ? " open" : ""}`} style={sideCollapsed ? { display: "none" } : undefined}>
         <div style={{ padding: "20px 18px 14px", borderBottom: `1px solid ${B.border}` }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
             <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 19, fontWeight: 700, letterSpacing: -0.5, color: B.white }}>
@@ -7235,6 +7236,7 @@ export default function Senseito() {
             </div>
             <div style={{ display: "flex", gap: 7, alignItems: "center" }}>
               {active && <button onClick={() => setGuideOpen(true)} title="Creator Guide — how to use Senseito" style={{ background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: "#A78BFA", padding: "6px 10px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>🧭</button>}
+              {active && <button onClick={() => setSideCollapsed(true)} title="Hide the chat — focus on editing" style={{ background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "6px 10px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>«</button>}
               <ThemeToggle mode={mode} setMode={setMode} />
             </div>
           </div>
@@ -7268,7 +7270,7 @@ export default function Senseito() {
           })}
         </div>
         )}
-        <div onClick={() => { if (session) { setView("profile"); setSideOpen(false); } else setAccountOpen(true); }} title={session ? "Open your profile" : "Sign in"} style={{ padding: "13px 14px", borderTop: `1px solid ${B.border}`, cursor: "pointer", display: "flex", alignItems: "center", gap: 10, background: view === "profile" ? "rgba(124,58,237,0.1)" : "transparent" }}
+        <div onClick={() => { if (session) { setView("profile"); setSideOpen(false); } else setAccountOpen(true); }} title={session ? "Open your profile" : "Sign in"} style={{ flexShrink: 0, padding: "13px 14px", borderTop: `1px solid ${B.borderMid}`, cursor: "pointer", display: "flex", alignItems: "center", gap: 10, background: view === "profile" ? "rgba(124,58,237,0.1)" : "var(--side)" }}
           onMouseEnter={e => view !== "profile" && (e.currentTarget.style.background = "rgba(255,255,255,0.03)")} onMouseLeave={e => view !== "profile" && (e.currentTarget.style.background = "transparent")}>
           {session ? (<>
             <div style={{ width: 30, height: 30, borderRadius: "50%", background: profile?.avatar_url ? `center/cover no-repeat url(${profile.avatar_url})` : "linear-gradient(135deg,#7C3AED,#06B6D4)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 700, color: "white", flexShrink: 0, overflow: "hidden" }}>{!profile?.avatar_url && (session.user?.email || "?")[0].toUpperCase()}</div>
@@ -7287,6 +7289,7 @@ export default function Senseito() {
       </div>
 
       <button onClick={() => setSideOpen(s => !s)} className="ol-burger" style={{ position: "fixed", top: 14, ...(sideOpen ? { right: 14 } : { left: 14 }), zIndex: 320, background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.mutedMid, padding: "7px 11px", cursor: "pointer", fontSize: 14 }}>{sideOpen ? "✕" : "☰"}</button>
+      {sideCollapsed && <button onClick={() => setSideCollapsed(false)} title="Show the Senseito chat" style={{ position: "fixed", top: 14, left: 14, zIndex: 320, background: "linear-gradient(135deg,#7C3AED,#06B6D4)", border: "none", borderRadius: 10, color: "white", padding: "8px 13px", cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit", boxShadow: "0 6px 20px rgba(124,58,237,0.4)" }}>💬 Chat »</button>}
 
       <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
         <div style={{ position: "fixed", inset: 0, pointerEvents: "none", zIndex: 0, background: "radial-gradient(ellipse 65% 35% at 50% -5%,rgba(124,58,237,0.1) 0%,transparent 60%)", animation: "aurora 9s ease-in-out infinite" }} />
