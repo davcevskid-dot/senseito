@@ -5425,10 +5425,20 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   // Full-coverage, clearly-visible background derived from the school's palette (or an explicit
   // school.bgColor from the picker), layered over var(--bg) so it still reads in light/dark mode.
   const bgC = HEX_RE.test(school.bgColor || "") ? school.bgColor : null;
-  const schoolBg = ts.pageBg || (bgC
-    ? `linear-gradient(165deg, ${hexA(bgC, 0.55)} 0%, ${hexA(bgC, 0.28)} 100%), var(--bg)`
-    : `linear-gradient(160deg, ${hexA(pHex, 0.30)} 0%, ${hexA(aHex, 0.16)} 48%, ${hexA(pHex, 0.24)} 100%), var(--bg)`);
+  const tintLayer = "linear-gradient(rgba(7,7,14,0.52),rgba(7,7,14,0.64))"; // scrim for text readability over a bg photo
+  const schoolBg = ts.pageBg || (school.bgImage
+    ? `${school.bgTint === false ? "" : tintLayer + ", "}url("${school.bgImage}") center/cover fixed, var(--bg)`
+    : bgC
+      ? `linear-gradient(165deg, ${hexA(bgC, 0.55)} 0%, ${hexA(bgC, 0.28)} 100%), var(--bg)`
+      : `linear-gradient(160deg, ${hexA(pHex, 0.30)} 0%, ${hexA(aHex, 0.16)} 48%, ${hexA(pHex, 0.24)} 100%), var(--bg)`);
   const shell = shellOf(school); // student-facing layout: lms | cards | arcade
+  const media = useContext(MediaAuthCtx); // signed-in creator → can pick bg/icon photos from their library
+  const [bgPick, setBgPick] = useState(false); // background-photo picker open
+  const [iconEdit, setIconEdit] = useState(false); // school-icon edit popover
+  const [iconPick, setIconPick] = useState(false); // school-icon image picker open
+  const schoolIcon = (size) => school.iconImage
+    ? <img src={school.iconImage} alt="" style={{ width: size, height: size, borderRadius: Math.round(size / 4), objectFit: "cover", display: "inline-block", verticalAlign: "middle" }} />
+    : <span style={{ fontSize: size }}>{school.emoji || "🏫"}</span>;
   const navKind = shell === "lms" ? "sidebar" : (school.navStyle || ts.nav); // LMS forces the two-column sidebar
   let nv = navStyles(navKind, T); // navStyle = add-anywhere override of the template's nav
   if (school.navGrad) nv = { ...nv, bar: { ...nv.bar, background: school.navGrad } }; // custom nav/sidebar gradient
@@ -5809,6 +5819,27 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
       <Toast toast={toast} />
       {!readOnly && reveal && <SchoolReveal school={school} T={T} onClose={() => { setReveal(false); onRevealSeen?.(); }} onTour={() => { setReveal(false); onRevealSeen?.(); openGuide(); }} />}
       {!readOnly && guideOpen && <CreatorGuide school={school} T={T} onClose={() => onGuideClose?.()} />}
+      {bgPick && media && <MediaPicker token={media.token} userId={media.userId} imagesOnly onPick={m => onUpdate({ data: { ...school, bgImage: m.url, bgTint: school.bgTint !== false } })} onClose={() => setBgPick(false)} />}
+      {iconPick && media && <MediaPicker token={media.token} userId={media.userId} imagesOnly onPick={m => onUpdate({ data: { ...school, iconImage: m.url } })} onClose={() => setIconPick(false)} />}
+      {!readOnly && iconEdit && (
+        <div onClick={() => setIconEdit(false)} style={{ position: "fixed", inset: 0, zIndex: 240, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 16, width: "100%", maxWidth: 360, padding: 20 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+              <div style={{ fontSize: 15, fontWeight: 700, color: B.white }}>School icon</div>
+              <button onClick={() => setIconEdit(false)} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.muted, padding: "5px 10px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>✕</button>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 14 }}>
+              <div style={{ width: 56, height: 56, borderRadius: 14, background: T.ps, border: `1px solid ${T.ba}`, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>{schoolIcon(school.iconImage ? 56 : 30)}</div>
+              <input value={school.iconImage ? "" : (school.emoji || "")} onChange={e => onUpdate({ data: { ...school, emoji: e.target.value.slice(0, 4), iconImage: undefined } })} placeholder="Type an emoji 🎯" style={{ flex: 1, background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, fontFamily: "inherit", fontSize: 18, padding: "8px 11px", textAlign: "center" }} />
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {media ? <button onClick={() => { setIconPick(true); setIconEdit(false); }} style={{ ...pBtn(T), flex: 1 }}>🖼️ Pick a photo</button>
+                : <button onClick={() => { const u = window.prompt("Icon image URL (https):", school.iconImage || ""); if (u != null) onUpdate({ data: { ...school, iconImage: u.trim() || undefined } }); }} style={{ ...pBtn(T), flex: 1 }}>🖼️ Photo URL</button>}
+              {school.iconImage && <button onClick={() => onUpdate({ data: { ...school, iconImage: undefined } })} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 10, color: B.mutedMid, padding: "0 13px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit" }}>Remove photo</button>}
+            </div>
+          </div>
+        </div>
+      )}
       {/* LMS shell renders the lesson INLINE (below the cover) instead of in this modal. */}
       {activeLesson && shell !== "lms" && renderLessonView(activeLesson, false)}
       {editingLesson && !readOnly && <LessonEditor lesson={editingLesson} T={T} allowed={allowedBlocksFor(school.learningPath)}
@@ -5840,6 +5871,10 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
                 <input type="color" value={school.bgColor || pHex} onChange={e => onUpdate({ data: { ...school, bgColor: e.target.value } })} style={{ width: 26, height: 24, border: `1px solid ${B.borderMid}`, borderRadius: 6, background: "none", cursor: "pointer", padding: 0 }} />
                 {school.bgColor && <button onClick={() => onUpdate({ data: { ...school, bgColor: undefined } })} style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 10.5, fontFamily: "inherit" }}>reset</button>}
               </label>
+              {media ? <button onClick={() => setBgPick(true)} title="Upload/pick a background photo" style={{ ...tsel, fontWeight: 700 }}>📷 Bg photo</button>
+                : <button onClick={() => { const u = window.prompt("Background image URL (https):", school.bgImage || ""); if (u != null) onUpdate({ data: { ...school, bgImage: u.trim() || undefined } }); }} style={{ ...tsel, fontWeight: 700 }}>📷 Bg photo</button>}
+              {school.bgImage && <label style={{ ...tlab, gap: 4 }} title="Tint the photo so text stays readable"><input type="checkbox" checked={school.bgTint !== false} onChange={e => onUpdate({ data: { ...school, bgTint: e.target.checked } })} /> tint</label>}
+              {school.bgImage && <button onClick={() => onUpdate({ data: { ...school, bgImage: undefined } })} style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 10.5, fontFamily: "inherit" }}>✕ photo</button>}
             </div>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               <button onClick={() => setGamelabOpen(true)} title="Build games here, then drop them into any section with a Game brick" style={{ background: B.surface2, border: `1px solid ${T.ba}`, borderRadius: 8, color: T.hi, padding: "6px 13px", cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit" }}>🎮 Game Lab{(school.games || []).length ? ` (${school.games.length})` : ""}</button>
@@ -5962,7 +5997,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
               <img src={school.cover} alt="" style={{ width: "100%", height: Number(school.coverHeight) > 0 ? Number(school.coverHeight) : "clamp(200px,30vw,300px)", objectFit: "cover", objectPosition: school.coverPos || "center", display: "block" }} />
               <div style={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0.18) 45%, rgba(0,0,0,0.66) 100%)" }} />
               {!hero.off && <div style={{ position: "absolute", left: 0, right: 0, bottom: 0, padding: "24px 28px", textAlign: sk.align }}>
-                {hero.emoji !== false && <div style={{ fontSize: 32, marginBottom: 6 }}>{school.emoji || "🏫"}</div>}
+                {hero.emoji !== false && <div onClick={() => !readOnly && setIconEdit(true)} title={!readOnly ? "Change icon" : ""} style={{ marginBottom: 6, lineHeight: 1, cursor: !readOnly ? "pointer" : "default", display: "inline-block" }}>{schoolIcon(40)}</div>}
                 <div style={{ fontFamily: sk.font, fontSize: "clamp(24px,5vw,38px)", fontWeight: 800, letterSpacing: -0.6, color: "#fff", textShadow: "0 2px 18px rgba(0,0,0,0.55)" }}><EditableText value={school.name} readOnly={readOnly} onSave={v => onUpdate({ data: { ...school, name: v } })} /></div>
                 {hero.tagline !== false && school.tagline && <div style={{ fontSize: 14.5, color: "rgba(255,255,255,0.92)", marginTop: 6, fontStyle: sk.font.includes("Lora") ? "normal" : "italic", textShadow: "0 1px 10px rgba(0,0,0,0.55)" }}><EditableText value={school.tagline} readOnly={readOnly} onSave={v => onUpdate({ data: { ...school, tagline: v } })} /></div>}
               </div>}
@@ -5981,7 +6016,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
             </div> : (
             <div style={{ padding: sk.align === "center" ? "34px 28px 26px" : "30px 28px 22px", background: T.heroGrad || sk.top, borderBottom: `1px solid ${B.border}`, textAlign: sk.align, position: "relative" }}>
               {sk.accentBar && <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 4, background: `linear-gradient(90deg,${T.p},${T.a})` }} />}
-              {hero.emoji !== false && !hero.off && <div style={{ fontSize: sk.emoji, marginBottom: 10 }}>{school.emoji || "🏫"}</div>}
+              {hero.emoji !== false && !hero.off && <div onClick={() => !readOnly && setIconEdit(true)} title={!readOnly ? "Change icon" : ""} style={{ marginBottom: 10, lineHeight: 1, cursor: !readOnly ? "pointer" : "default", display: "inline-block" }}>{schoolIcon(sk.emoji)}</div>}
               <div style={{ fontFamily: sk.font, fontSize: "clamp(20px,4vw,32px)", fontWeight: 700, letterSpacing: sk.font.includes("Lora") ? 0 : -1, color: sk.onColor ? "#fff" : B.white, marginBottom: 6 }}><EditableText value={school.name} readOnly={readOnly} onSave={v => onUpdate({ data: { ...school, name: v } })} /></div>
               {sk.rule && !hero.off && <div style={{ width: 48, height: 2, background: T.p, margin: "8px 0 12px" }} />}
               {hero.tagline !== false && !hero.off && <div style={{ fontSize: 14, color: sk.onColor ? "rgba(255,255,255,0.85)" : T.a, fontStyle: sk.font.includes("Lora") ? "normal" : "italic", marginBottom: 12 }}><EditableText value={school.tagline} readOnly={readOnly} onSave={v => onUpdate({ data: { ...school, tagline: v } })} /></div>}
