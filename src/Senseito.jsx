@@ -1214,7 +1214,7 @@ function shellOf(school) {
   if (["corporate", "academy"].includes(school?.template)) return "lms";
   return "cards";
 }
-const SHELLS = [["lms", "🗂️ LMS — sidebar + inline lessons"], ["cards", "🗃️ Cards — nav + lesson cards"], ["arcade", "🎮 Arcade — gamified run"]];
+const SHELLS = [["lms", "🗂️ LMS — sidebar + inline lessons"], ["cards", "🗃️ Cards — nav + lesson cards"], ["arcade", "🎮 Arcade — gamified run"], ["steps", "🪜 Steps — linear, no nav"]];
 function normalizeSections(content) {
   let secs = (Array.isArray(content.sections) && content.sections.length) ? content.sections : null;
   if (!secs && LAYOUTS[content.layout]) secs = LAYOUTS[content.layout].kinds.map(k => ({ kind: k }));
@@ -5488,7 +5488,9 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const addBodyBrick = (type) => { setBodyAddOpen(false); onUpdate({ data: { ...school, bodyBricks: [...(school.bodyBricks || []), fallbackBlock(type, { title: school.name }) ] } }); };
   const removeBodyBrick = (i) => onUpdate({ data: { ...school, bodyBricks: (school.bodyBricks || []).filter((_, j) => j !== i) } });
   const replaceBodyBrick = (i, nb) => onUpdate({ data: { ...school, bodyBricks: (school.bodyBricks || []).map((b, j) => j === i ? nb : b) } });
-  const activeTab = SECTIONS.some(s => s.id === tab) ? tab : SECTIONS[0]?.id; // stay valid if layout changes
+  // "steps" shell shows ONLY the lessons (as a numbered stepper) — no nav, no sidebar.
+  const stepsShell = shellOf(school) === "steps";
+  const activeTab = stepsShell ? (SECTIONS.find(s => s.kind === "lessons")?.id || SECTIONS[0]?.id) : (SECTIONS.some(s => s.id === tab) ? tab : SECTIONS[0]?.id); // stay valid if layout changes
   // ── Section management (the "+" between tabs + layout presets) ──
   function addSection(kind, preset) {
     const base = SECTIONS.map(s => ({ ...s })); const n = base.length;
@@ -5840,8 +5842,8 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
           </div>
         </div>
       )}
-      {/* LMS shell renders the lesson INLINE (below the cover) instead of in this modal. */}
-      {activeLesson && shell !== "lms" && renderLessonView(activeLesson, false)}
+      {/* LMS/Steps shells render the lesson INLINE (below the cover) instead of in this modal. */}
+      {activeLesson && shell !== "lms" && shell !== "steps" && renderLessonView(activeLesson, false)}
       {editingLesson && !readOnly && <LessonEditor lesson={editingLesson} T={T} allowed={allowedBlocksFor(school.learningPath)}
         lessons={(school.semesters || []).flatMap(s => s.lessons || [])} games={school.games || []} school={school}
         onSave={(draft) => { saveLesson(editingLesson.number, draft); setEditingLesson(null); showToast("✓ Lesson updated"); }}
@@ -6067,7 +6069,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
           )}
           {/* Tabs + section content — two-column when navStyle is "sidebar" */}
           <div style={{ display: "flex", flexDirection: sidebar ? "row" : "column", gap: sidebar ? 16 : dens, alignItems: "flex-start" }}>
-          <div style={{ position: "sticky", top: 10, zIndex: 80, ...(sidebar ? { width: 200, flexShrink: 0 } : { width: "100%" }) }}>
+          {!stepsShell && (<div style={{ position: "sticky", top: 10, zIndex: 80, ...(sidebar ? { width: 200, flexShrink: 0 } : { width: "100%" }) }}>
             <div data-guide="tabs" style={nv.bar}>
               {TABS.map(([k, l], ti) => (
                 <button key={k} draggable={!readOnly}
@@ -6140,9 +6142,36 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
                 </div>
               );
             })()}
-          </div>
+          </div>)}
           <div key={activeTab} className="sx-stagger" style={{ flex: 1, minWidth: 0, width: "100%", display: "flex", flexDirection: "column", gap: dens, ...(SECTIONS.find(s => s.id === activeTab)?.sticky ? { position: "sticky", top: 64, alignSelf: "flex-start", maxHeight: "calc(100vh - 80px)", overflowY: "auto" } : {}) }}>
-          {activeTab === "lessons" && (shell === "lms" ? (activeLesson ? (
+          {activeTab === "lessons" && (stepsShell ? (activeLesson ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <button onClick={() => setActiveLesson(null)} style={{ background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.mutedMid, padding: "7px 13px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 700 }}>← All steps</button>
+                {!readOnly && <button onClick={() => setEditingLesson(activeLesson)} style={{ background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 9, color: T.hi, padding: "7px 13px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 700 }}>✎ Edit lesson</button>}
+              </div>
+              {renderLessonView(activeLesson, true)}
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: 720, margin: "0 auto", width: "100%" }}>
+              {(viewSemesters || []).flatMap(s => s.lessons || []).map((l, i) => {
+                const st = progress[l.number] || "locked";
+                const locked = readOnly && st === "locked" && !l.open;
+                return (
+                  <button key={l.id || i} disabled={locked} onClick={() => enterLesson(l)} style={{ display: "flex", alignItems: "center", gap: 16, textAlign: "left", background: B.surface, border: `1px solid ${st === "passed" ? "rgba(74,222,128,0.3)" : st === "active" ? T.ba : B.border}`, borderRadius: 16, padding: "16px 18px", cursor: locked ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: locked ? 0.55 : 1, boxShadow: st === "active" ? `0 0 22px ${T.pg}` : "none" }}>
+                    <div style={{ width: 44, height: 44, borderRadius: "50%", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, fontWeight: 800, fontFamily: "'Space Grotesk',sans-serif", background: st === "passed" ? "rgba(74,222,128,0.15)" : T.grad, color: st === "passed" ? "#4ADE80" : "#fff", border: st === "passed" ? "1px solid rgba(74,222,128,0.4)" : "none" }}>{st === "passed" ? "✓" : locked ? "🔒" : i + 1}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 10, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", color: st === "passed" ? "#4ADE80" : T.p, marginBottom: 3 }}>Step {i + 1}</div>
+                      <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 16, fontWeight: 700, color: B.white, lineHeight: 1.25 }}>{l.title}</div>
+                      {l.concept && <div style={{ fontSize: 12.5, color: B.mutedMid, lineHeight: 1.5, marginTop: 3 }}>{flattenText(l.concept).slice(0, 90)}{flattenText(l.concept).length > 90 ? "…" : ""}</div>}
+                    </div>
+                    <div style={{ flexShrink: 0, fontSize: 14, color: st === "passed" ? "#4ADE80" : locked ? B.muted : T.hi, fontWeight: 700 }}>{st === "passed" ? "Review" : locked ? "Locked" : st === "active" ? "Continue →" : "Start →"}</div>
+                  </button>
+                );
+              })}
+              {!readOnly && <AddLessonBar T={T} disabled={iterating} onAdd={(topic) => onIterate(`Add ONE new lesson about "${topic}" to the end. Give it a fitting title, concept, mission, passCriteria and 1-3 activities. Keep all existing lessons exactly as they are.`)} />}
+            </div>
+          )) : shell === "lms" ? (activeLesson ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <button onClick={() => setActiveLesson(null)} style={{ background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.mutedMid, padding: "7px 13px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 700 }}>← All lessons</button>
