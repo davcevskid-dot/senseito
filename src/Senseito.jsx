@@ -6304,6 +6304,7 @@ function Home({ onCreated, autofocus, onAutofocusDone }) {
   const [answers, setAnswers] = useState({});
   const [struct, setStruct] = useState({ layout: "auto", depth: "auto", interactivity: "auto" });
   const [showStruct, setShowStruct] = useState(false);
+  const [mode, setMode] = useState("normal"); // generation latitude: fast | normal | super
   const taRef = useRef(null);
   const [prog, setProg] = useState({ pct: 0, label: "", facts: [] });
   // ONLY when "New School" is clicked (autofocus flips true) jump to the create chat — never on plain app open.
@@ -6331,9 +6332,15 @@ function Home({ onCreated, autofocus, onAutofocusDone }) {
       let vision = source; let dna = null;
       if (source.length > DNA_THRESHOLD) { setProg(p => ({ ...p, pct: 10, label: "Distilling your source material…" })); dna = await api(DISTILL_SYS, [{ role: "user", content: source.slice(0, 30000) }], 1200); vision = (prompt || source).slice(0, 600); }
 
+      // Generation latitude — Fast (lean/templated) · Normal · Super (fully unchained within the school medium).
+      const modeHint = mode === "fast"
+        ? `\n\nMODE: FAST — keep it lean and conventional. Use standard block types and a tight structure (fewer lessons), concise copy. Don't over-design.`
+        : mode === "super"
+          ? `\n\nMODE: SUPER — you have FULL creative latitude. Invent an unusual, bespoke structure tailored to THIS exact subject (don't default to a generic course spine). Use rich, varied, interactive block types — including "custom" interactive bricks and "game" where they'd genuinely deepen the learning. Be ambitious and original: this should feel one-of-a-kind, not a template.`
+          : "";
       // PHASE 1 — compact plan (structure + block TYPES only). Always small, never truncates.
       setProg(p => ({ ...p, pct: 18, label: "Designing your curriculum & mentor…" }));
-      const planMsg = `Plan a school for this concept: ${vision}${dna ? `\n\nKNOWLEDGE DNA (teach THIS):\n${dna}` : ""}${structHint()}`;
+      const planMsg = `Plan a school for this concept: ${vision}${dna ? `\n\nKNOWLEDGE DNA (teach THIS):\n${dna}` : ""}${structHint()}${modeHint}`;
       const plan = await apiJSON(ARCHITECT_SYS, [{ role: "user", content: planMsg }], 6000, "sonnet");
       if (plan.needMoreInfo) { setClarifyQ(plan.needMoreInfo); setClarifyA(""); setPhase("clarify"); return; }
       const content = plan.school || plan;
@@ -6342,13 +6349,18 @@ function Home({ onCreated, autofocus, onAutofocusDone }) {
       // PHASE 2 — author block data per semester (parallel, budgeted, graceful fallback).
       const facts = schoolFacts(content);
       setProg({ pct: 30, label: `Writing the lessons for “${content.name}”…`, facts, preview: content });
-      // Give the school its "soul" — a bespoke signature centerpiece — in parallel with lesson authoring.
-      // No auto-generated soul/progress widgets at build (removed as default — faster builds, less clutter).
-      // They remain a hidden power: a creator can summon them from the build chat ("add a signature
-      // visual", "change the loading/progress bar to a growing tree", "rename XP to Energy").
+      // SUPER mode re-enables the bespoke "X factor" generators (a signature soul + a custom progress
+      // metaphor + a themed XP currency), authored in parallel with lessons. Fast/Normal stay lean.
+      const extraP = mode === "super" ? [
+        genSignature(content).then(code => { if (code) content.soul = { ...(content.soul || {}), code }; }).catch(() => { }),
+        genProgressSkin(content).then(code => { if (code) content.progressSkin = { code }; }).catch(() => { }),
+        genCurrency(content).then(c => { if (c) content.currency = c; }).catch(() => { }),
+      ] : [];
       await fillSchoolBlocks(content, { dna, onProgress: (d, t) => setProg(p => ({ ...p, pct: 30 + Math.round((d / t) * 64), label: `Authoring activities… (${d}/${t} done)` })) });
+      if (extraP.length) { setProg(p => ({ ...p, label: "Crafting bespoke touches…" })); await Promise.all(extraP); }
       autoFixSchool(content); // deterministic self-review so the one-shot feels finished
       const built = composeSchool(content, dna);
+      built.genMode = mode;
       built.sourcePrompt = (prompt || source || "").trim().slice(0, 400); // for the reveal's "you asked for →" beat
       setProg(p => ({ ...p, pct: 100, label: "Your school is ready! ✨" })); // completion beat
       await new Promise(r => setTimeout(r, 900)); // let the "ready" moment land before opening
@@ -6358,6 +6370,21 @@ function Home({ onCreated, autofocus, onAutofocusDone }) {
 
   function sourceText(extra = "") {
     return [prompt.trim(), attached?.text, extra].filter(Boolean).join("\n\n").trim();
+  }
+
+  // "Build it yourself" — drop into an empty-but-scaffolded school and assemble it by hand.
+  function buildManual() {
+    const name = prompt.trim().slice(0, 60) || "My School";
+    const content = {
+      name, emoji: "🏫", description: "", category: "Custom", duration: "", learningPath: "mixed", voicePreset: "sage",
+      mentorName: "Your Mentor", mentorPersonality: "A supportive guide — shape their name, voice and style.", sampleLine: "",
+      semesters: [{ number: 1, title: "Part 1", lessons: [] }],
+      sections: [{ id: "lessons", kind: "lessons", title: "Lessons", icon: "📚" }, { id: "mentor", kind: "mentor", title: "Mentor", icon: "🎓" }],
+      concepts: [], theme: "violet", skin: "aurora",
+    };
+    const built = composeSchool(content, null);
+    built.manual = true; built.genMode = "manual";
+    onCreated(built);
   }
 
   async function build() {
@@ -6420,6 +6447,14 @@ function Home({ onCreated, autofocus, onAutofocusDone }) {
               <button onClick={() => setAttached(null)} style={{ marginLeft: "auto", background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 13 }}>✕</button>
             </div>
           )}
+          <div style={{ display: "flex", gap: 6, marginTop: 12, flexWrap: "wrap" }}>
+            {[["fast", "⚡ Fast", "Quick & templated"], ["normal", "✨ Normal", "Balanced · recommended"], ["super", "🚀 Super", "Fully unchained · more tokens"]].map(([k, l, dsc]) => (
+              <button key={k} onClick={() => setMode(k)} title={dsc} style={{ flex: "1 1 130px", background: mode === k ? "rgba(124,58,237,0.14)" : B.surface3, border: `1px solid ${mode === k ? "rgba(124,58,237,0.5)" : B.borderMid}`, borderRadius: 10, color: mode === k ? "#C4B5FD" : B.mutedMid, padding: "8px 11px", cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
+                <div style={{ fontSize: 12.5, fontWeight: 700 }}>{l}</div>
+                <div style={{ fontSize: 10.5, opacity: 0.85, marginTop: 1 }}>{dsc}</div>
+              </button>
+            ))}
+          </div>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginTop: 10, paddingTop: 10, borderTop: `1px solid ${B.border}` }}>
             <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
               {CHIPS.map(c => <button key={c.key} onClick={() => setPrompt(CHIP_PROMPTS[c.key])} style={{ background: "rgba(124,58,237,0.09)", border: "1px solid rgba(124,58,237,0.28)", borderRadius: 100, padding: "3px 10px", fontSize: 11, color: "#F0ABFC", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>{c.label}</button>)}
@@ -6427,6 +6462,12 @@ function Home({ onCreated, autofocus, onAutofocusDone }) {
             </div>
             <button onClick={() => build()} style={{ background: "linear-gradient(135deg,#7C3AED,#6D28D9)", border: "none", borderRadius: 10, padding: "10px 20px", color: "white", fontFamily: "inherit", fontSize: 14, fontWeight: 700, cursor: "pointer", boxShadow: "0 0 20px rgba(124,58,237,0.35)", whiteSpace: "nowrap" }}>⚡ Build School</button>
           </div>
+        </div>
+      )}
+      {(phase === "idle" || phase === "error") && (
+        <div style={{ marginTop: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, fontSize: 12.5, color: B.muted }}>
+          <span>Prefer full control?</span>
+          <button onClick={buildManual} style={{ background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 100, color: "#A78BFA", padding: "6px 14px", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>✍️ Build it yourself manually →</button>
         </div>
       )}
       {(phase === "idle" || phase === "error") && (
