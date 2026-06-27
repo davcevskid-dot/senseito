@@ -1968,7 +1968,7 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, onChooseFork, c
 // ─────────────────────────────────────────────────────────────
 // MENTOR OFFICE HOURS
 // ─────────────────────────────────────────────────────────────
-function MentorOffice({ school, T, chat, onChat, bus, onIngest, progress }) {
+function MentorOffice({ school, T, chat, onChat, bus, onIngest, progress, onUpdate, readOnly }) {
   const msgs = chat?.length ? chat : [{ role: "assistant", content: `Office hours are open. Bring me something real — a question, a struggle, a situation from your life. We'll work on it together.` }];
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -1989,8 +1989,28 @@ function MentorOffice({ school, T, chat, onChat, bus, onIngest, progress }) {
     setLoading(false);
   }
 
+  const setMentor = (patch) => onUpdate?.({ data: { ...school, mentor: { ...school.mentor, ...patch } } });
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+      {!readOnly && onUpdate && (
+        <div style={{ background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 16, padding: "16px 18px" }}>
+          <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.5, color: T.p, marginBottom: 12 }}>🎓 Your mentor — shape who teaches</div>
+          <div style={{ display: "flex", gap: 13, alignItems: "center", marginBottom: 12 }}>
+            <div style={{ width: 44, height: 44, borderRadius: "50%", background: T.grad, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 }}>🎓</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 16, fontWeight: 700, color: B.white }}><EditableText value={school.mentor?.name || ""} placeholder="Name your mentor…" onSave={v => setMentor({ name: v })} /></div>
+              <div style={{ fontSize: 11, color: B.muted }}>{school.mentor?.teachingStyle || "Sage style"}</div>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 10 }}>
+            <span style={{ fontSize: 11, color: B.muted }}>Voice</span>
+            <select value={school.voicePreset || "sage"} onChange={e => { const v = e.target.value; onUpdate({ data: { ...school, voicePreset: v, mentor: { ...school.mentor, systemVoice: VOICES[v] || VOICES.sage, teachingStyle: `${v[0].toUpperCase()}${v.slice(1)} style` } } }); }} style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.white, fontFamily: "inherit", fontSize: 12.5, padding: "6px 9px", cursor: "pointer" }}>
+              {Object.keys(VOICES).map(v => <option key={v} value={v}>{v[0].toUpperCase() + v.slice(1)}</option>)}
+            </select>
+          </div>
+          <div style={{ fontSize: 12.5, color: B.mutedMid, lineHeight: 1.6 }}><EditableText value={school.mentor?.personality || ""} placeholder="Describe their personality — calm and exacting? warm and funny?…" onSave={v => setMentor({ personality: v })} /></div>
+        </div>
+      )}
       {(school.concepts || []).length > 0 && (
         <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 16, padding: "14px 18px" }}>
           <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.5, color: T.p, marginBottom: 10 }}>🧠 Your knowledge map</div>
@@ -6275,7 +6295,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
               </div>
             )}
           </>))}
-          {activeTab === "mentor" && <MentorOffice school={school} T={T} chat={rec.mentorChat || []} onChat={(msgs) => onUpdate({ mentorChat: msgs })} bus={bus} onIngest={ingestOutput} progress={progress} />}
+          {activeTab === "mentor" && <MentorOffice school={school} T={T} chat={rec.mentorChat || []} onChat={(msgs) => onUpdate({ mentorChat: msgs })} bus={bus} onIngest={ingestOutput} progress={progress} onUpdate={onUpdate} readOnly={readOnly} />}
           {activeTab === "tools" && <ToolsSection rec={rec} T={T} onUpdate={onUpdate} buildTool={buildTool} buildingTool={buildingTool} readOnly={readOnly} onReloadIdeas={reloadIdeas} onEditTool={editTool} />}
           {SECTIONS.filter(s => s.kind === "dashboard").map(sec => activeTab === sec.id
             ? <DashboardSection key={sec.id} section={sec} rec={rec} T={T} onUpdate={onUpdate} readOnly={readOnly} school={school} onIngest={ingestOutput} />
