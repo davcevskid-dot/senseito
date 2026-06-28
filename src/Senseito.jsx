@@ -5842,7 +5842,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
       <Toast toast={toast} />
       {!readOnly && reveal && <SchoolReveal school={school} T={T} onClose={() => { setReveal(false); onRevealSeen?.(); }} onTour={() => { setReveal(false); onRevealSeen?.(); openGuide(); }} />}
       {!readOnly && guideOpen && <CreatorGuide school={school} T={T} onClose={() => onGuideClose?.()} />}
-      {bgPick && media && <MediaPicker token={media.token} userId={media.userId} imagesOnly onPick={m => onUpdate({ data: { ...school, bgImage: m.url, bgTint: school.bgTint !== false } })} onClose={() => setBgPick(false)} />}
+      {bgPick && media && <MediaPicker token={media.token} userId={media.userId} imagesOnly onPick={m => onUpdate(bgPick === "hero" ? { data: { ...school, heroImage: m.url, heroTint: school.heroTint !== false } } : { data: { ...school, bgImage: m.url, bgTint: school.bgTint !== false } })} onClose={() => setBgPick(false)} />}
       {iconPick && media && <MediaPicker token={media.token} userId={media.userId} imagesOnly onPick={m => onUpdate({ data: { ...school, iconImage: m.url } })} onClose={() => setIconPick(false)} />}
       {!readOnly && iconEdit && (
         <div onClick={() => setIconEdit(false)} style={{ position: "fixed", inset: 0, zIndex: 240, background: "rgba(0,0,0,0.7)", backdropFilter: "blur(6px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
@@ -6041,15 +6041,26 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
                 node.addEventListener("pointermove", move); node.addEventListener("pointerup", up); node.addEventListener("pointercancel", up);
               }} title="Drag to resize the cover" style={{ position: "absolute", left: "50%", transform: "translateX(-50%)", bottom: 4, width: 54, height: 16, display: "flex", alignItems: "center", justifyContent: "center", cursor: "ns-resize", color: "rgba(255,255,255,0.85)", fontSize: 12, background: "rgba(0,0,0,0.4)", borderRadius: 8, touchAction: "none" }}>⇕</div>}
             </div> : (
-            <div style={{ padding: sk.align === "center" ? "34px 28px 26px" : "30px 28px 22px", background: T.heroGrad || sk.top, borderBottom: `1px solid ${B.border}`, textAlign: sk.align, position: "relative" }}>
-              {sk.accentBar && <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 4, background: `linear-gradient(90deg,${T.p},${T.a})` }} />}
+            (() => {
+              const onPhoto = !!school.heroImage; // a photo sits behind the title/description band
+              const heroBg = onPhoto ? `${school.heroTint === false ? "" : "linear-gradient(rgba(8,8,16,0.48),rgba(8,8,16,0.62)),"}url("${school.heroImage}") center/cover` : (T.heroGrad || sk.top);
+              const onC = onPhoto || sk.onColor; // light text when on a photo/colour
+              return (
+            <div style={{ padding: sk.align === "center" ? "34px 28px 26px" : "30px 28px 22px", background: heroBg, borderBottom: `1px solid ${B.border}`, textAlign: sk.align, position: "relative" }}>
+              {sk.accentBar && !onPhoto && <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 4, background: `linear-gradient(90deg,${T.p},${T.a})` }} />}
+              {!readOnly && <div style={{ position: "absolute", top: 8, right: 8, display: "flex", gap: 6 }}>
+                <button onClick={() => { if (media) setBgPick("hero"); else { const u = window.prompt("Hero photo URL (https):", school.heroImage || ""); if (u != null) onUpdate({ data: { ...school, heroImage: u.trim() || undefined } }); } }} title="Photo behind the title" style={{ background: "rgba(0,0,0,0.4)", border: "none", borderRadius: 8, color: "#fff", padding: "4px 9px", cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>📷 Hero photo</button>
+                {onPhoto && <button onClick={() => onUpdate({ data: { ...school, heroTint: school.heroTint === false } })} title="Tint for readability" style={{ background: "rgba(0,0,0,0.4)", border: "none", borderRadius: 8, color: "#fff", padding: "4px 9px", cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>{school.heroTint === false ? "Tint off" : "Tint on"}</button>}
+                {onPhoto && <button onClick={() => onUpdate({ data: { ...school, heroImage: undefined } })} title="Remove photo" style={{ background: "rgba(0,0,0,0.4)", border: "none", borderRadius: 8, color: "#fff", padding: "4px 9px", cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>✕</button>}
+              </div>}
               {hero.emoji !== false && !hero.off && <div onClick={() => !readOnly && setIconEdit(true)} title={!readOnly ? "Change icon" : ""} style={{ marginBottom: 10, lineHeight: 1, cursor: !readOnly ? "pointer" : "default", display: "inline-block" }}>{schoolIcon(sk.emoji)}</div>}
-              <div style={{ fontFamily: sk.font, fontSize: "clamp(20px,4vw,32px)", fontWeight: 700, letterSpacing: sk.font.includes("Lora") ? 0 : -1, color: sk.onColor ? "#fff" : B.white, marginBottom: 6 }}><EditableText value={school.name} readOnly={readOnly} onSave={v => onUpdate({ data: { ...school, name: v } })} /></div>
-              {sk.rule && !hero.off && <div style={{ width: 48, height: 2, background: T.p, margin: "8px 0 12px" }} />}
-              {hero.tagline !== false && !hero.off && <div style={{ fontSize: 14, color: sk.onColor ? "rgba(255,255,255,0.85)" : T.a, fontStyle: sk.font.includes("Lora") ? "normal" : "italic", marginBottom: 12 }}><EditableText value={school.tagline} readOnly={readOnly} onSave={v => onUpdate({ data: { ...school, tagline: v } })} /></div>}
-              {hero.description !== false && !hero.off && <div style={{ fontSize: 13, color: sk.onColor ? "rgba(255,255,255,0.78)" : B.mutedMid, lineHeight: 1.7, maxWidth: 560, margin: sk.align === "center" ? "0 auto" : 0 }}><EditableText value={flattenText(school.description)} readOnly={readOnly} placeholder="Add a description…" onSave={v => onUpdate({ data: { ...school, description: v } })} /></div>}
+              <div style={{ fontFamily: sk.font, fontSize: "clamp(20px,4vw,32px)", fontWeight: 700, letterSpacing: sk.font.includes("Lora") ? 0 : -1, color: onC ? "#fff" : B.white, textShadow: onPhoto ? "0 2px 14px rgba(0,0,0,0.5)" : "none", marginBottom: 6 }}><EditableText value={school.name} readOnly={readOnly} onSave={v => onUpdate({ data: { ...school, name: v } })} /></div>
+              {sk.rule && !hero.off && <div style={{ width: 48, height: 2, background: onPhoto ? "rgba(255,255,255,0.7)" : T.p, margin: "8px 0 12px" }} />}
+              {hero.tagline !== false && !hero.off && <div style={{ fontSize: 14, color: onC ? "rgba(255,255,255,0.88)" : T.a, fontStyle: sk.font.includes("Lora") ? "normal" : "italic", textShadow: onPhoto ? "0 1px 8px rgba(0,0,0,0.5)" : "none", marginBottom: 12 }}><EditableText value={school.tagline} readOnly={readOnly} onSave={v => onUpdate({ data: { ...school, tagline: v } })} /></div>}
+              {hero.description !== false && !hero.off && <div style={{ fontSize: 13, color: onC ? "rgba(255,255,255,0.82)" : B.mutedMid, lineHeight: 1.7, textShadow: onPhoto ? "0 1px 8px rgba(0,0,0,0.5)" : "none", maxWidth: 560, margin: sk.align === "center" ? "0 auto" : 0 }}><EditableText value={flattenText(school.description)} readOnly={readOnly} placeholder="Add a description…" onSave={v => onUpdate({ data: { ...school, description: v } })} /></div>}
             </div>
-            )}
+              );
+            })())}
             <div style={{ padding: "14px 28px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 14 }}>
               <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
                 {[["Duration", school.duration], ["Category", school.category], ["Path", pathLabel(school.learningPath)], ["Lessons", total]].map(([l, v]) => (
