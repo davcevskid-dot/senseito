@@ -6907,14 +6907,15 @@ function PublicSchool({ slug }) {
 // PROJECT CHAT — the left bar inside a project (Lovable-style). Every
 // message iterates the school; quick "levers" are zero-token tweaks.
 // ─────────────────────────────────────────────────────────────
-function ProjectChat({ rec, iterating, history, onSend, onIterate, onBack, onTheme, onVoice, onFont, onFontScale, onGami, onTemplate, onUndo, canUndo }) {
+function ProjectChat({ rec, iterating, thinking, history, onSend, onIterate, onBack, onTheme, onVoice, onFont, onFontScale, onGami, onTemplate, onUndo, canUndo }) {
+  const busy = iterating || thinking;
   const school = rec.data; const T = themeFor(school);
   const [input, setInput] = useState("");
   const [showLevers, setShowLevers] = useState(false);
   const [showSugg, setShowSugg] = useState(false);
   const bottom = useRef(null);
   useEffect(() => { bottom.current?.scrollIntoView({ behavior: "smooth" }); }, [history, iterating]);
-  function send() { const t = input.trim(); if (!t || iterating) return; setInput(""); onSend(t); }
+  function send() { const t = input.trim(); if (!t || busy) return; setInput(""); onSend(t); }
   const sel = { background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.white, fontFamily: "inherit", fontSize: 12, padding: "6px 8px", cursor: "pointer", width: "100%" };
   const collBtn = { width: "100%", textAlign: "left", background: "none", border: `1px solid ${B.border}`, borderRadius: 8, color: B.mutedMid, fontSize: 11.5, padding: "7px 10px", cursor: "pointer", fontFamily: "inherit" };
   const suggestions = (school.suggestions || []);
@@ -6961,14 +6962,14 @@ function ProjectChat({ rec, iterating, history, onSend, onIterate, onBack, onThe
             <div style={{ maxWidth: "88%", background: m.role === "user" ? T.ps : B.surface, border: `1px solid ${m.role === "user" ? T.ba : B.border}`, borderRadius: m.role === "user" ? "12px 4px 12px 12px" : "4px 12px 12px 12px", padding: "8px 11px", fontSize: 12.5, lineHeight: 1.5, color: B.white }}>{m.role === "user" ? m.content : <Markdown text={m.content} />}</div>
           </div>
         ))}
-        {iterating && <div style={{ display: "flex", gap: 4, paddingLeft: 4 }}>{[0, 1, 2].map(i => <div key={i} style={{ width: 6, height: 6, borderRadius: "50%", background: T.p, animation: `pulse 1s ${i * 0.2}s infinite` }} />)}</div>}
+        {busy && <div style={{ display: "flex", gap: 4, paddingLeft: 4 }}>{[0, 1, 2].map(i => <div key={i} style={{ width: 6, height: 6, borderRadius: "50%", background: T.p, animation: `pulse 1s ${i * 0.2}s infinite` }} />)}</div>}
         <div ref={bottom} />
       </div>
       <div data-guide="chat" style={{ padding: "10px 12px", borderTop: `1px solid ${B.border}`, display: "flex", gap: 8, alignItems: "flex-end" }}>
-        <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} placeholder={iterating ? "Working…" : "Ask or describe a change…"} disabled={iterating} rows={2} style={{ flex: 1, background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 10, color: B.white, fontFamily: "inherit", fontSize: 13, lineHeight: 1.5, padding: "8px 11px", resize: "none" }} />
+        <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} placeholder={iterating ? "Working…" : thinking ? "Thinking…" : "Ask or describe a change…"} disabled={busy} rows={2} style={{ flex: 1, background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 10, color: B.white, fontFamily: "inherit", fontSize: 13, lineHeight: 1.5, padding: "8px 11px", resize: "none" }} />
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <MicButton icon onText={t => setInput(v => (v ? v.trim() + " " : "") + t)} T={T} />
-          <button onClick={send} disabled={iterating || !input.trim()} style={{ background: T.p, border: "none", borderRadius: 9, width: 38, height: 30, color: "white", fontFamily: "inherit", fontSize: 15, fontWeight: 700, cursor: "pointer", flexShrink: 0, opacity: (iterating || !input.trim()) ? 0.5 : 1 }}>↑</button>
+          <button onClick={send} disabled={busy || !input.trim()} style={{ background: T.p, border: "none", borderRadius: 9, width: 38, height: 30, color: "white", fontFamily: "inherit", fontSize: 15, fontWeight: 700, cursor: "pointer", flexShrink: 0, opacity: (busy || !input.trim()) ? 0.5 : 1 }}>↑</button>
         </div>
       </div>
     </div>
@@ -7008,7 +7009,8 @@ export default function Senseito() {
   const savedRef = useRef({}); // id -> last-saved rec reference (for single-row saves)
   const [undo, setUndo] = useState(null); // { id, name, timer, restore }
   const [mode, setMode] = useThemeMode();
-  const [iterating, setIterating] = useState(false);
+  const [iterating, setIterating] = useState(false); // applying a real change to the school (shows the update bar)
+  const [chatThinking, setChatThinking] = useState(false); // just conversing — typing indicator only, NO update bar
   const [iterProg, setIterProg] = useState({ pct: 0, label: "" });
   const [iterHistory, setIterHistory] = useState([]); // chat thread: { role:"user"|"assistant", content }
   const [versions, setVersions] = useState({}); // id -> [data snapshots] for Undo (in-memory)
@@ -7291,12 +7293,16 @@ export default function Senseito() {
         return;
       }
     }
-    pushMsg({ role: "user", content: text }); setIterating(true); setIterProg({ pct: 8, label: "Thinking…" });
+    pushMsg({ role: "user", content: text }); setChatThinking(true);
     try {
       const thread = iterHistory.filter(m => m.role === "user" || m.role === "assistant").slice(-8).map(m => ({ role: m.role, content: m.content }));
       const out = await apiJSON(CHAT_SYS(rec.data), [...thread, { role: "user", content: text }], 800, "sonnet");
       if (out.reply) pushMsg({ role: "assistant", content: out.reply });
       const d = out.design && typeof out.design === "object" ? out.design : null;
+      // Only NOW — if there's a real change to apply — show the school-update bar. Pure chat shows nothing.
+      setChatThinking(false);
+      const willChange = !!(d || (out.action && typeof out.action === "string" && out.action.trim()));
+      if (willChange) { setIterating(true); setIterProg({ pct: 8, label: "Applying your change…" }); }
       if (d) {
         const mergeData = (extra) => setSchools(s => s.map(r => r.id === rec.id ? { ...r, data: { ...r.data, ...extra } } : r));
         if (applyDesign(rec, d)) { pushMsg({ role: "assistant", content: "✓ Design updated." }); showAToast("✓ Design updated", "ok"); }
@@ -7329,7 +7335,7 @@ export default function Senseito() {
         showAToast(r.ok ? "✓ Applied" : `✕ ${r.msg}`, r.ok ? "ok" : "err");
       }
     } catch (e) { pushMsg({ role: "assistant", content: "Sorry — " + (e.message || "something went wrong.") }); }
-    setIterating(false);
+    setChatThinking(false); setIterating(false);
   }
   function lvTheme(k) { if (!active) return; updateSchool(active.id, { data: { ...active.data, theme: k } }); showAToast(`✓ Theme: ${THEMES[k]?.label || k}`); }
   function lvFont(fk) { if (!active) return; updateSchool(active.id, { data: { ...active.data, font: fk } }); showAToast(`✓ Font: ${FONTS[fk]?.label || fk}`); }
@@ -7385,7 +7391,7 @@ export default function Senseito() {
         </div>
         {active ? (
           <Boundary resetKey={view} fallback={() => <div style={{ flex: 1, padding: 16, fontSize: 12, color: B.muted }}>Chat hit an error. <button onClick={() => setView("home")} style={{ background: "none", border: "none", color: "#A78BFA", cursor: "pointer", fontFamily: "inherit", fontSize: 12 }}>← Back to schools</button></div>}>
-            <ProjectChat rec={active} iterating={iterating} history={iterHistory} onSend={chatSend} onIterate={applyIterate} onBack={() => { setView("home"); setSideOpen(false); }} onTheme={lvTheme} onVoice={lvVoice} onFont={lvFont} onFontScale={lvFontScale} onGami={lvGami} onTemplate={lvTemplate} onUndo={undoEdit} canUndo={(versions[active.id]?.length || 0) > 0} />
+            <ProjectChat rec={active} iterating={iterating} thinking={chatThinking} history={iterHistory} onSend={chatSend} onIterate={applyIterate} onBack={() => { setView("home"); setSideOpen(false); }} onTheme={lvTheme} onVoice={lvVoice} onFont={lvFont} onFontScale={lvFontScale} onGami={lvGami} onTemplate={lvTemplate} onUndo={undoEdit} canUndo={(versions[active.id]?.length || 0) > 0} />
           </Boundary>
         ) : (
         <div style={{ flex: 1, overflowY: "auto", padding: "12px 10px" }}>
