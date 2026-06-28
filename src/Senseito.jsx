@@ -927,7 +927,7 @@ ${dna}${busContext(bus, school)}
 THIS LESSON: "${lesson.title}" (${lesson.type})
 CONCEPT: ${lesson.concept}
 MISSION: ${lesson.mission}
-PASS CRITERIA: ${lesson.passCriteria}
+PASS CRITERIA: ${lesson.passCriteria}${lesson.mentorBrief ? `\nYOUR BRIEF FOR THIS LESSON (the creator's instructions — follow them): ${lesson.mentorBrief}` : ""}
 ${modeNote}${unlockNote}${forkNote}${status}
 LESSON TYPE BEHAVIOR:
 - Quiz: run it live, one question at a time, react to each answer.
@@ -5240,7 +5240,7 @@ function SchoolReveal({ school, T, onClose, onTour }) {
           {/* CTAs */}
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 2 }}>
             <button onClick={onClose} style={{ flex: "2 1 200px", background: T.grad, border: "none", borderRadius: 12, color: "#fff", padding: "13px", cursor: "pointer", fontSize: 14, fontWeight: 800, fontFamily: "inherit", boxShadow: `0 8px 26px ${T.pg}` }}>Explore your school →</button>
-            <button onClick={onTour} style={{ flex: "1 1 150px", background: B.surface2, border: `1px solid ${T.ba}`, borderRadius: 12, color: T.hi, padding: "13px", cursor: "pointer", fontSize: 13.5, fontWeight: 700, fontFamily: "inherit" }}>🧭 Take the quick tour</button>
+            <button onClick={onTour} style={{ flex: "1 1 150px", background: B.surface2, border: `1px solid ${T.ba}`, borderRadius: 12, color: T.hi, padding: "13px", cursor: "pointer", fontSize: 13.5, fontWeight: 700, fontFamily: "inherit" }}>🪄 Set up your school</button>
           </div>
         </div>
       </div>
@@ -5432,6 +5432,201 @@ function GuideButton({ T, onClick, pulse }) {
   );
 }
 
+// ─────────────────────────────────────────────────────────────
+// SCHOOL SETUP WIZARD — a guided, slide-card flow to review & finish a school.
+// Phase 1 walks each lesson (Basics → Mentor → Activities → Theory → Pass →
+// Branching/Rewards); then School Mentor → Tools → Library → Events → Games →
+// Design → Suggestions → Publish.
+// ─────────────────────────────────────────────────────────────
+const WIZ_CARDS = ["basics", "mentor", "activities", "theory", "pass", "branching"];
+const WIZ_PHASES = ["lessons", "schoolmentor", "tools", "library", "events", "games", "design", "publish"];
+const WIZ_PHASE_LABEL = { lessons: "Check your lessons", schoolmentor: "Say hi to your mentor", tools: "Tools", library: "Library", events: "Events", games: "Games", design: "Design", publish: "Publish" };
+function SchoolWizard({ school, T, media, published, onUpdate, saveLesson, authorBlock, addFeatureSection, addSection, hasKind, onIterate, onPublish, openGameLab, onClose }) {
+  const lessons = (school.semesters || []).flatMap(s => s.lessons || []);
+  const [phase, setPhase] = useState(lessons.length ? "lessons" : "schoolmentor");
+  const [li, setLi] = useState(0);
+  const [ci, setCi] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [pick, setPick] = useState(null); // media-pick target: "cover" | "reward"
+  const lesson = lessons[li] || null;
+  const setL = (patch) => lesson && saveLesson(lesson.number, patch);
+  const phaseIdx = WIZ_PHASES.indexOf(phase);
+  const otherLessons = lessons.filter(l => l.id && l.id !== lesson?.id);
+
+  function next() {
+    if (phase === "lessons") {
+      if (ci < WIZ_CARDS.length - 1) return setCi(ci + 1);
+      if (li < lessons.length - 1) { setLi(li + 1); return setCi(0); }
+      return setPhase("schoolmentor");
+    }
+    if (phaseIdx < WIZ_PHASES.length - 1) setPhase(WIZ_PHASES[phaseIdx + 1]); else onClose();
+  }
+  function back() {
+    if (phase === "lessons") {
+      if (ci > 0) return setCi(ci - 1);
+      if (li > 0) { setLi(li - 1); return setCi(WIZ_CARDS.length - 1); }
+      return;
+    }
+    if (phaseIdx > 1) setPhase(WIZ_PHASES[phaseIdx - 1]); else { setPhase("lessons"); setLi(Math.max(0, lessons.length - 1)); setCi(WIZ_CARDS.length - 1); }
+  }
+  async function authorInto(type, replaceIdx) {
+    if (!lesson) return; setBusy(true);
+    try {
+      const nb = await authorBlock(type, { title: lesson.title, concept: lesson.concept });
+      const blocks = [...(lesson.blocks || [])]; if (replaceIdx != null) blocks[replaceIdx] = nb; else blocks.push(nb);
+      setL({ blocks });
+    } catch { if (replaceIdx == null) setL({ blocks: [...(lesson.blocks || []), fallbackBlock(type, { title: lesson.title })] }); }
+    setBusy(false);
+  }
+
+  const inp = { width: "100%", background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, fontFamily: "inherit", fontSize: 13, padding: "9px 11px", boxSizing: "border-box" };
+  const sub = { fontSize: 11, color: B.muted, marginBottom: 5, fontWeight: 700 };
+  const yn = (label, onYes) => (
+    <div style={{ display: "flex", gap: 8 }}><button onClick={() => { onYes(); next(); }} style={{ ...pBtn(T), flex: 1 }}>{label}</button><button onClick={next} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 10, color: B.mutedMid, padding: "0 16px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>Skip</button></div>
+  );
+
+  // ── card title + body ──
+  let heading = "", sup = "", body = null;
+  if (phase === "lessons" && lesson) {
+    sup = `Lesson ${li + 1} of ${lessons.length} · ${lesson.title}`;
+    const card = WIZ_CARDS[ci];
+    if (card === "basics") {
+      heading = "📝 Basics";
+      body = (<>
+        <div><div style={sub}>Title</div><input value={lesson.title || ""} onChange={e => setL({ title: e.target.value })} style={inp} /></div>
+        <div><div style={sub}>What it teaches</div><textarea value={lesson.concept || ""} onChange={e => setL({ concept: e.target.value })} rows={2} style={inp} /></div>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+          <button onClick={() => { if (media) setPick("cover"); else { const u = window.prompt("Lesson cover URL (https):", lesson.cover || ""); if (u != null) setL({ cover: u.trim() || undefined }); } }} style={{ ...pBtn(T) }}>🖼️ Cover photo</button>
+          {lesson.cover && <button onClick={() => setL({ cover: undefined })} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.mutedMid, padding: "8px 12px", cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>Remove</button>}
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: B.muted }}>Accent <input type="color" value={lesson.accent || T.p} onChange={e => setL({ accent: e.target.value })} style={{ width: 28, height: 26, border: "none", background: "none", cursor: "pointer", padding: 0 }} /></label>
+        </div>
+        {lesson.cover && <img src={lesson.cover} alt="" style={{ width: "100%", height: 120, objectFit: "cover", borderRadius: 10 }} />}
+      </>);
+    } else if (card === "mentor") {
+      heading = "🎓 Mentor's role here";
+      body = (<>
+        <div style={{ fontSize: 12.5, color: B.mutedMid, lineHeight: 1.6, background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 10, padding: "10px 12px" }}>For this lesson <b style={{ color: T.hi }}>{school.mentor?.name}</b> will guide the student through <i>{lesson.concept || "the concept"}</i>{lesson.mission ? <> toward the mission: <i>{lesson.mission}</i></> : null}, and pass them when: <i>{lesson.passCriteria || "they show they get it"}</i>.</div>
+        <div><div style={sub}>Mission (what the student must do)</div><input value={lesson.mission || ""} onChange={e => setL({ mission: e.target.value })} style={inp} /></div>
+        <div><div style={sub}>Extra brief for the mentor (optional — tweak its behaviour for this lesson)</div><textarea value={lesson.mentorBrief || ""} onChange={e => setL({ mentorBrief: e.target.value })} rows={3} placeholder="e.g. Be tougher here. Use a real sales scenario. Don't give the answer away." style={inp} /></div>
+      </>);
+    } else if (card === "activities") {
+      heading = "🧩 Activities";
+      const blocks = lesson.blocks || [];
+      body = (<>
+        <div style={{ fontSize: 12, color: B.mutedMid }}>Fill in the outlined ones and add any you like — these are what the student actually does.</div>
+        {blocks.map((b, i) => { const thin = isThinBlock(b); return (
+          <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, background: B.surface2, border: `1px solid ${thin ? T.ba : B.border}`, borderRadius: 10, padding: "9px 11px", ...(thin ? { boxShadow: `0 0 16px ${T.pg}` } : {}) }}>
+            <span style={{ fontSize: 15 }}>{BLOCK_META[b.type]?.icon || "🧩"}</span>
+            <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: B.white }}>{b.data?.title || BLOCK_META[b.type]?.label || b.type}{thin ? <span style={{ color: T.hi }}> · needs content</span> : null}</span>
+            <button onClick={() => authorInto(b.type, i)} disabled={busy} style={{ background: thin ? T.grad : T.ps, border: thin ? "none" : `1px solid ${T.ba}`, borderRadius: 7, color: thin ? "#fff" : T.hi, padding: "4px 10px", cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>{busy ? "…" : thin ? "✨ Generate" : "↻ Redo"}</button>
+            <button onClick={() => setL({ blocks: blocks.filter((_, j) => j !== i) })} style={{ background: "none", border: "none", color: "#F87171", cursor: "pointer", fontSize: 13 }}>✕</button>
+          </div>
+        ); })}
+        {!blocks.length && <div style={{ fontSize: 12, color: B.muted, textAlign: "center", padding: 14, border: `1px dashed ${B.borderMid}`, borderRadius: 10 }}>No activities yet — add some below (optional).</div>}
+        <select value="" onChange={e => { if (e.target.value) authorInto(e.target.value); e.target.value = ""; }} disabled={busy} style={{ ...inp, cursor: "pointer" }}><option value="">＋ Add an activity (AI fills it)…</option>{ALL_BLOCKS.map(t => <option key={t} value={t}>{BLOCK_META[t]?.icon} {BLOCK_META[t]?.label}</option>)}</select>
+      </>);
+    } else if (card === "theory") {
+      heading = "📖 Theory";
+      body = (<>
+        <div style={{ fontSize: 12.5, color: B.mutedMid, lineHeight: 1.6 }}>Want a reading the student does first? Leave empty if the mentor teaches the theory in conversation.</div>
+        <textarea value={lesson.theory || ""} onChange={e => setL({ theory: e.target.value })} rows={5} placeholder="The core reading for this lesson (markdown ok)…" style={inp} />
+      </>);
+    } else if (card === "pass") {
+      heading = "🎯 How they pass";
+      body = <PassLogicEditor value={lesson.passLogic} hasActs={(lesson.blocks || []).length > 0} onChange={pl => setL({ passLogic: pl })} />;
+    } else if (card === "branching") {
+      heading = "🌿 Branching & reward";
+      const forks = lesson.forks || [];
+      body = (<>
+        <div style={sub}>Paths (optional) — send the student to different lessons after this one</div>
+        {forks.map((f, i) => (
+          <div key={i} style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <input value={f.label || ""} onChange={e => setL({ forks: forks.map((x, j) => j === i ? { ...x, label: e.target.value } : x) })} placeholder="Choice" style={{ ...inp, flex: 1 }} />
+            <span style={{ color: B.muted }}>→</span>
+            <select value={f.to || ""} onChange={e => setL({ forks: forks.map((x, j) => j === i ? { ...x, to: e.target.value } : x) })} style={{ ...inp, flex: 1, cursor: "pointer" }}><option value="">Go to…</option>{otherLessons.map(l => <option key={l.id} value={l.id}>{l.title}</option>)}</select>
+            <button onClick={() => setL({ forks: forks.filter((_, j) => j !== i) })} style={{ background: "none", border: "none", color: "#F87171", cursor: "pointer", fontSize: 13 }}>✕</button>
+          </div>
+        ))}
+        <button onClick={() => setL({ forks: [...forks, { label: "", to: "" }] })} disabled={!otherLessons.length} style={{ background: B.surface2, border: `1px dashed ${T.ba}`, borderRadius: 9, color: T.hi, padding: "6px 12px", cursor: otherLessons.length ? "pointer" : "not-allowed", fontSize: 12, fontWeight: 700, fontFamily: "inherit", opacity: otherLessons.length ? 1 : 0.5, alignSelf: "flex-start" }}>＋ Add a path</button>
+        <div style={{ height: 1, background: B.border, margin: "4px 0" }} />
+        <div style={sub}>Completion reward (optional)</div>
+        {lesson.reward?.file?.url || lesson.reward?.gameId || lesson.reward?.brick ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: B.white, background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 9, padding: "9px 11px" }}><span>🎁</span><span style={{ flex: 1 }}>{lesson.reward.gameId ? "Unlock a game" : lesson.reward.brick ? `Unlock ${BLOCK_META[lesson.reward.brick.type]?.label || "a brick"}` : (lesson.reward.file?.name || "Download")}</span><button onClick={() => setL({ reward: undefined })} style={{ background: "none", border: "none", color: "#F87171", cursor: "pointer", fontSize: 12 }}>✕</button></div>
+        ) : (
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button onClick={() => { if (media) setPick("reward"); else { const u = window.prompt("File URL (https):", ""); if (u && /^https?:\/\//i.test(u.trim())) setL({ reward: { file: { url: u.trim(), name: u.trim().split("/").pop() } } }); } }} style={{ background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, padding: "8px 12px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit" }}>📁 File</button>
+            {(school.games || []).length > 0 && <select value="" onChange={e => e.target.value && setL({ reward: { gameId: e.target.value } })} style={{ ...inp, width: "auto", cursor: "pointer" }}><option value="">🎮 Game…</option>{school.games.map(g => <option key={g.id} value={g.id}>{g.title || "Game"}</option>)}</select>}
+          </div>
+        )}
+      </>);
+    }
+  } else if (phase === "schoolmentor") {
+    heading = "🎓 Say hi to your mentor"; sup = "The voice that teaches your whole school";
+    body = (<>
+      <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+        <div style={{ width: 48, height: 48, borderRadius: "50%", background: T.grad, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>🎓</div>
+        <input value={school.mentor?.name || ""} onChange={e => onUpdate({ data: { ...school, mentor: { ...school.mentor, name: e.target.value } } })} placeholder="Mentor name" style={{ ...inp, fontSize: 15, fontWeight: 700 }} />
+      </div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}><span style={sub}>Voice</span><select value={school.voicePreset || "sage"} onChange={e => { const v = e.target.value; onUpdate({ data: { ...school, voicePreset: v, mentor: { ...school.mentor, systemVoice: VOICES[v] || VOICES.sage, teachingStyle: `${v[0].toUpperCase()}${v.slice(1)} style` } } }); }} style={{ ...inp, width: "auto", cursor: "pointer" }}>{Object.keys(VOICES).map(v => <option key={v} value={v}>{v[0].toUpperCase() + v.slice(1)}</option>)}</select></div>
+      <div><div style={sub}>Personality & goals</div><textarea value={school.mentor?.personality || ""} onChange={e => onUpdate({ data: { ...school, mentor: { ...school.mentor, personality: e.target.value } } })} rows={3} placeholder="Calm and exacting? Warm and funny? What should they push students toward?" style={inp} /></div>
+    </>);
+  } else if (phase === "tools") {
+    heading = "🛠️ Tools"; sup = "Build-your-own interactive tools";
+    body = hasKind("tools") ? <div style={{ fontSize: 13, color: B.mutedMid }}>You already have a Tools section. ✓</div> : <>{<div style={{ fontSize: 12.5, color: B.mutedMid, marginBottom: 4 }}>Add a Tools section where you (or AI) can build interactive tools?</div>}{yn("＋ Add Tools section", () => addSection("tools"))}</>;
+  } else if (phase === "library") {
+    heading = "📚 Library"; sup = "Files & links for your students";
+    body = hasKind("library") ? <div style={{ fontSize: 13, color: B.mutedMid }}>Library added. ✓</div> : yn("＋ Add a Library", () => addFeatureSection("library", "library", "Library", "📚"));
+  } else if (phase === "events") {
+    heading = "📅 Events"; sup = "Live sessions & RSVP";
+    body = yn("＋ Add Events", () => addFeatureSection("events", "events", "Events", "📅"));
+  } else if (phase === "games") {
+    heading = "🎮 Games"; sup = "Build games in the Game Lab";
+    body = <div style={{ display: "flex", gap: 8 }}><button onClick={() => openGameLab()} style={{ ...pBtn(T), flex: 1 }}>🎮 Open Game Lab</button><button onClick={next} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 10, color: B.mutedMid, padding: "0 16px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>Skip</button></div>;
+  } else if (phase === "design") {
+    heading = "🎨 Design"; sup = "Pick a layout & polish";
+    body = (<>
+      <div style={sub}>Layout</div>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{[["lms", "🗂️ LMS"], ["cards", "🗃️ Cards"], ["steps", "🪜 Steps"], ["arcade", "🎮 Arcade"]].map(([k, l]) => <button key={k} onClick={() => onUpdate({ data: { ...school, shell: k, ...(k === "arcade" ? { progression: "arcade" } : k === "cards" ? { progression: "list" } : {}) } })} style={{ background: shellOf(school) === k ? T.ps : B.surface2, border: `1px solid ${shellOf(school) === k ? T.ba : B.borderMid}`, borderRadius: 8, color: shellOf(school) === k ? T.hi : B.mutedMid, padding: "6px 12px", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>{l}</button>)}</div>
+      {(school.suggestions || []).length > 0 && <>
+        <div style={{ ...sub, marginTop: 6 }}>✨ Improvement ideas (tap to apply)</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>{school.suggestions.slice(0, 4).map((s, i) => <button key={i} onClick={() => { onIterate(s); }} style={{ textAlign: "left", background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 9, color: T.hi, padding: "8px 11px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", lineHeight: 1.4 }}>✨ {s}</button>)}</div>
+      </>}
+      <div style={{ fontSize: 11.5, color: B.muted, marginTop: 4 }}>💬 Want something custom? Close the wizard and just tell the Senseito chat.</div>
+    </>);
+  } else if (phase === "publish") {
+    heading = "🚀 Publish"; sup = "Share your school with the world";
+    body = (<>
+      <div style={{ fontSize: 13, color: B.mutedMid, lineHeight: 1.6 }}>Your school is set up. Publish it to get a public link and start enrolling students. <span style={{ color: B.muted }}>(Pricing & payments come next.)</span></div>
+      <button onClick={() => { onPublish(); onClose(); }} style={{ ...pBtn(T), background: published ? "rgba(74,222,128,0.15)" : "linear-gradient(135deg,#059669,#047857)" }}>{published ? "✓ Published — copy link" : "🌐 Publish my school"}</button>
+    </>);
+  }
+
+  const atStart = phase === "lessons" && li === 0 && ci === 0;
+  const stepKey = `${phase}-${li}-${ci}`;
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 250, background: "rgba(2,2,8,0.72)", backdropFilter: "blur(7px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "max(24px,5vh) 16px 40px", overflowY: "auto" }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 480, background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 20, overflow: "hidden", boxShadow: `0 30px 90px rgba(0,0,0,0.6)` }}>
+        <div style={{ padding: "14px 18px", background: T.gr, borderBottom: `1px solid ${B.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div><div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.5, color: T.hi }}>Set up · {WIZ_PHASE_LABEL[phase]}</div>{sup && <div style={{ fontSize: 12, color: B.mutedMid, marginTop: 2 }}>{sup}</div>}</div>
+          <button onClick={onClose} title="Close" style={{ background: "rgba(0,0,0,0.25)", border: "none", borderRadius: 8, color: "#fff", width: 28, height: 28, cursor: "pointer", fontSize: 14 }}>✕</button>
+        </div>
+        {/* phase dots */}
+        <div style={{ display: "flex", gap: 4, padding: "10px 18px 0" }}>{WIZ_PHASES.map((p, i) => <div key={p} style={{ flex: 1, height: 4, borderRadius: 2, background: i < phaseIdx ? "#4ADE80" : i === phaseIdx ? T.p : B.surface3, transition: "background 0.3s" }} />)}</div>
+        <div key={stepKey} style={{ padding: "16px 18px 6px", display: "flex", flexDirection: "column", gap: 12, animation: "sxRise 0.32s ease both", minHeight: 180 }}>
+          <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 17, fontWeight: 800, color: B.white }}>{heading}</div>
+          {body}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 18px 16px" }}>
+          {!atStart && <button onClick={back} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 10, color: B.mutedMid, padding: "9px 15px", cursor: "pointer", fontSize: 13, fontFamily: "inherit", fontWeight: 700 }}>← Back</button>}
+          <div style={{ flex: 1 }} />
+          {phase !== "publish" && <button onClick={next} style={{ background: T.grad, border: "none", borderRadius: 10, color: "#fff", padding: "9px 20px", cursor: "pointer", fontSize: 13.5, fontFamily: "inherit", fontWeight: 800, boxShadow: `0 6px 18px ${T.pg}` }}>{phase === "lessons" ? "Approve →" : "Next →"}</button>}
+        </div>
+      </div>
+      {pick && media && <MediaPicker token={media.token} userId={media.userId} imagesOnly={pick === "cover"} onPick={m => { if (pick === "cover") setL({ cover: m.url }); else if (pick === "reward") setL({ reward: { file: { url: m.url, name: m.name } } }); }} onClose={() => setPick(null)} />}
+    </div>
+  );
+}
+
 function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, publicBase, token, onSetSlug, onIterate, iterating = false, iterProg = { pct: 0, label: "" }, justBuilt = false, onRevealSeen, onStats, guideOpen = false, onGuideOpen, onGuideClose, onOpenMedia }) {
   const school = rec.data;
   const T = themeFor(school);
@@ -5502,6 +5697,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   // Game Lab is a creator-only workspace (never a student section); strip any legacy stored ones.
   const SECTIONS = getSections(school).filter(s => s.kind !== "gamelab");
   const [gamelabOpen, setGamelabOpen] = useState(false);
+  const [wizardOpen, setWizardOpen] = useState(false);
   const [tab, setTab] = useState(() => SECTIONS[0]?.id || "mentor");
   const [addSecOpen, setAddSecOpen] = useState(false);
   const [bodyAddOpen, setBodyAddOpen] = useState(false);
@@ -5840,7 +6036,12 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
     <div style={{ position: "relative", fontFamily: fontStack(school) }}>
       <SchoolEffects effect={school.effect} T={T} />
       <Toast toast={toast} />
-      {!readOnly && reveal && <SchoolReveal school={school} T={T} onClose={() => { setReveal(false); onRevealSeen?.(); }} onTour={() => { setReveal(false); onRevealSeen?.(); openGuide(); }} />}
+      {!readOnly && reveal && <SchoolReveal school={school} T={T} onClose={() => { setReveal(false); onRevealSeen?.(); }} onTour={() => { setReveal(false); onRevealSeen?.(); setWizardOpen(true); }} />}
+      {!readOnly && wizardOpen && <SchoolWizard school={school} T={T} media={media} published={!!rec.published}
+        onUpdate={onUpdate} saveLesson={saveLesson} authorBlock={(type, ctx) => authorBlock(ctx || {}, type, "")}
+        addFeatureSection={addFeatureSection} addSection={addSection} hasKind={hasKind}
+        onIterate={applyIteration} onPublish={() => onPublish(rec)} openGameLab={() => setGamelabOpen(true)}
+        onClose={() => setWizardOpen(false)} />}
       {!readOnly && guideOpen && <CreatorGuide school={school} T={T} onClose={() => onGuideClose?.()} />}
       {bgPick && media && <MediaPicker token={media.token} userId={media.userId} imagesOnly onPick={m => onUpdate(bgPick === "hero" ? { data: { ...school, heroImage: m.url, heroTint: school.heroTint !== false } } : { data: { ...school, bgImage: m.url, bgTint: school.bgTint !== false } })} onClose={() => setBgPick(false)} />}
       {iconPick && media && <MediaPicker token={media.token} userId={media.userId} imagesOnly onPick={m => onUpdate({ data: { ...school, iconImage: m.url } })} onClose={() => setIconPick(false)} />}
@@ -5884,6 +6085,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
           return (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 0 12px", flexWrap: "wrap", gap: 8 }}>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <button onClick={() => setWizardOpen(true)} title="Guided setup — review every lesson, your mentor, tools, design & publish" style={{ ...pill, background: T.grad, border: "none", color: "#fff" }}>🪄 Set up</button>
               <button onClick={() => setStylesOpen(o => !o)} title="Theme, font & spacing" style={{ ...pill, color: T.hi, borderColor: stylesOpen ? T.ba : B.borderMid }}>🎨 Styles</button>
               <label style={{ ...pill, gap: 5 }} title="Experience vibe">🪄 Vibe
                 <select value={school.template || ""} onChange={e => e.target.value && applyVibe(e.target.value)} style={{ background: "none", border: "none", color: B.white, fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}><option value="">Auto</option>{Object.entries(TEMPLATES).map(([k, t]) => <option key={k} value={k}>{t.emoji} {t.label}</option>)}</select>
