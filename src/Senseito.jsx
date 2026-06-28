@@ -5432,7 +5432,7 @@ function GuideButton({ T, onClick, pulse }) {
   );
 }
 
-function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, publicBase, token, onSetSlug, onIterate, iterating = false, iterProg = { pct: 0, label: "" }, justBuilt = false, onRevealSeen, onStats, guideOpen = false, onGuideOpen, onGuideClose }) {
+function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, publicBase, token, onSetSlug, onIterate, iterating = false, iterProg = { pct: 0, label: "" }, justBuilt = false, onRevealSeen, onStats, guideOpen = false, onGuideOpen, onGuideClose, onOpenMedia }) {
   const school = rec.data;
   const T = themeFor(school);
   const sk = skinCfg(school.skin, T);
@@ -5454,6 +5454,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const shell = shellOf(school); // student-facing layout: lms | cards | arcade
   const media = useContext(MediaAuthCtx); // signed-in creator → can pick bg/icon photos from their library
   const [bgPick, setBgPick] = useState(false); // background-photo picker open
+  const [stylesOpen, setStylesOpen] = useState(false); // quick-styles popover (theme/font/density)
   const [iconEdit, setIconEdit] = useState(false); // school-icon edit popover
   const [iconPick, setIconPick] = useState(false); // school-icon image picker open
   const schoolIcon = (size) => school.iconImage
@@ -5877,33 +5878,37 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
 
       <div style={{ maxWidth: ts.maxW, margin: "0 auto", padding: "14px 20px 80px", background: schoolBg, borderRadius: 20, minHeight: "100vh", border: `1px solid ${B.border}` }}>
         {!readOnly && (() => {
-          const tsel = { background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.white, fontFamily: "inherit", fontSize: 12.5, padding: "6px 8px", cursor: "pointer" };
-          const tlab = { display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11, color: B.muted, fontWeight: 700 };
+          // Unified toolbar — every control is the same pill: same height, radius, font.
+          const pill = { display: "inline-flex", alignItems: "center", gap: 6, height: 32, background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, padding: "0 12px", cursor: "pointer" };
           const applyVibe = (k) => { const t = TEMPLATES[k]; if (!t) return; onUpdate({ data: { ...school, template: k, theme: t.theme, skin: t.skin, font: t.font, density: t.density, ...(t.progression ? { progression: t.progression } : {}) } }); };
           return (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 0 12px", flexWrap: "wrap", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 0 12px", flexWrap: "wrap", gap: 8 }}>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <label style={tlab}>🗂️ Layout
-                <select value={shell} onChange={e => onUpdate({ data: { ...school, shell: e.target.value, ...(e.target.value === "arcade" ? { progression: "arcade" } : {}) } })} style={tsel}>{SHELLS.map(([k, l]) => <option key={k} value={k}>{l}</option>)}</select>
+              <button onClick={() => setStylesOpen(o => !o)} title="Theme, font & spacing" style={{ ...pill, color: T.hi, borderColor: stylesOpen ? T.ba : B.borderMid }}>🎨 Styles</button>
+              <label style={{ ...pill, gap: 5 }} title="Experience vibe">🪄 Vibe
+                <select value={school.template || ""} onChange={e => e.target.value && applyVibe(e.target.value)} style={{ background: "none", border: "none", color: B.white, fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}><option value="">Auto</option>{Object.entries(TEMPLATES).map(([k, t]) => <option key={k} value={k}>{t.emoji} {t.label}</option>)}</select>
               </label>
-              <label style={tlab}>🎨 Vibe
-                <select value={school.template || ""} onChange={e => e.target.value && applyVibe(e.target.value)} style={tsel}><option value="">Choose…</option>{Object.entries(TEMPLATES).map(([k, t]) => <option key={k} value={k}>{t.emoji} {t.label}</option>)}</select>
+              <label style={{ ...pill, gap: 6 }} title="School background colour">🖌️ Bg
+                <input type="color" value={school.bgColor || pHex} onChange={e => onUpdate({ data: { ...school, bgColor: e.target.value } })} style={{ width: 22, height: 20, border: "none", borderRadius: 5, background: "none", cursor: "pointer", padding: 0 }} />
+                {school.bgColor && <span onClick={() => onUpdate({ data: { ...school, bgColor: undefined } })} style={{ color: B.muted, cursor: "pointer", fontSize: 10.5, fontWeight: 400 }}>reset</span>}
               </label>
-              <label style={{ ...tlab, gap: 4 }} title="School background colour">🖌️ Bg
-                <input type="color" value={school.bgColor || pHex} onChange={e => onUpdate({ data: { ...school, bgColor: e.target.value } })} style={{ width: 26, height: 24, border: `1px solid ${B.borderMid}`, borderRadius: 6, background: "none", cursor: "pointer", padding: 0 }} />
-                {school.bgColor && <button onClick={() => onUpdate({ data: { ...school, bgColor: undefined } })} style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 10.5, fontFamily: "inherit" }}>reset</button>}
-              </label>
-              {media ? <button onClick={() => setBgPick(true)} title="Upload/pick a background photo" style={{ ...tsel, fontWeight: 700 }}>📷 Bg photo</button>
-                : <button onClick={() => { const u = window.prompt("Background image URL (https):", school.bgImage || ""); if (u != null) onUpdate({ data: { ...school, bgImage: u.trim() || undefined } }); }} style={{ ...tsel, fontWeight: 700 }}>📷 Bg photo</button>}
-              {school.bgImage && <label style={{ ...tlab, gap: 4 }} title="Tint the photo so text stays readable"><input type="checkbox" checked={school.bgTint !== false} onChange={e => onUpdate({ data: { ...school, bgTint: e.target.checked } })} /> tint</label>}
-              {school.bgImage && <button onClick={() => onUpdate({ data: { ...school, bgImage: undefined } })} style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 10.5, fontFamily: "inherit" }}>✕ photo</button>}
+              <button onClick={() => { if (media) setBgPick(true); else { const u = window.prompt("Background image URL (https):", school.bgImage || ""); if (u != null) onUpdate({ data: { ...school, bgImage: u.trim() || undefined } }); } }} title="Background photo" style={pill}>📷 Bg photo</button>
+              {school.bgImage && <label style={{ ...pill, gap: 6, fontWeight: 400, fontSize: 12 }} title="Tint the photo so text stays readable"><input type="checkbox" checked={school.bgTint !== false} onChange={e => onUpdate({ data: { ...school, bgTint: e.target.checked } })} /> tint <span onClick={() => onUpdate({ data: { ...school, bgImage: undefined } })} style={{ color: B.muted, cursor: "pointer" }}>✕</span></label>}
             </div>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <button onClick={() => setGamelabOpen(true)} title="Build games here, then drop them into any section with a Game brick" style={{ background: B.surface2, border: `1px solid ${T.ba}`, borderRadius: 8, color: T.hi, padding: "6px 13px", cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit" }}>🎮 Game Lab{(school.games || []).length ? ` (${school.games.length})` : ""}</button>
-              <button data-guide="publish" onClick={() => onPublish(rec)} disabled={publishing} style={{ background: rec.published ? "rgba(74,222,128,0.1)" : "linear-gradient(135deg,#059669,#047857)", border: rec.published ? "1px solid rgba(74,222,128,0.35)" : "none", borderRadius: 8, color: rec.published ? "#4ADE80" : "white", padding: "6px 13px", cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit" }}>
-                {publishing ? "Publishing…" : rec.published ? "✓ Published — copy link" : "🌐 Publish"}
+              <button onClick={() => onOpenMedia?.()} title="Your media library" style={{ ...pill, color: T.hi, borderColor: T.ba }}>🖼 Media</button>
+              <button onClick={() => setGamelabOpen(true)} title="Build games, then drop them in with a Game brick" style={{ ...pill, color: T.hi, borderColor: T.ba }}>🎮 Game Lab{(school.games || []).length ? ` (${school.games.length})` : ""}</button>
+              <button data-guide="publish" onClick={() => onPublish(rec)} disabled={publishing} style={{ ...pill, background: rec.published ? "rgba(74,222,128,0.1)" : "linear-gradient(135deg,#059669,#047857)", border: rec.published ? "1px solid rgba(74,222,128,0.35)" : "none", color: rec.published ? "#4ADE80" : "white" }}>
+                {publishing ? "Publishing…" : rec.published ? "✓ Published" : "🌐 Publish"}
               </button>
             </div>
+            {stylesOpen && (
+              <div style={{ width: "100%", display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center", background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 12, padding: "11px 14px", marginTop: 2 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 7 }}><span style={{ fontSize: 11, color: B.muted, fontWeight: 700 }}>Theme</span>{Object.keys(THEMES).map(k => <button key={k} onClick={() => onUpdate({ data: { ...school, theme: k, palette: undefined } })} title={THEMES[k].label} style={{ width: 22, height: 22, borderRadius: "50%", border: school.theme === k ? `2px solid ${B.white}` : `1px solid ${B.borderMid}`, background: THEMES[k].p, cursor: "pointer" }} />)}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 7 }}><span style={{ fontSize: 11, color: B.muted, fontWeight: 700 }}>Font</span><select value={school.font || "inter"} onChange={e => onUpdate({ data: { ...school, font: e.target.value } })} style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.white, fontFamily: "inherit", fontSize: 12, padding: "5px 8px", cursor: "pointer" }}>{Object.entries(FONTS).map(([k, f]) => <option key={k} value={k}>{f.label}</option>)}</select></div>
+                <div style={{ display: "flex", alignItems: "center", gap: 7 }}><span style={{ fontSize: 11, color: B.muted, fontWeight: 700 }}>Spacing</span>{[["compact", "Compact"], ["cozy", "Cozy"], ["spacious", "Spacious"]].map(([k, l]) => <button key={k} onClick={() => onUpdate({ data: { ...school, density: k } })} style={{ background: (school.density || "cozy") === k ? T.ps : "none", border: `1px solid ${(school.density || "cozy") === k ? T.ba : B.borderMid}`, borderRadius: 7, color: (school.density || "cozy") === k ? T.hi : B.mutedMid, padding: "4px 10px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit", fontWeight: 700 }}>{l}</button>)}</div>
+              </div>
+            )}
           </div>
           );
         })()}
@@ -6151,12 +6156,10 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
                         <button onClick={() => reorderSections(ai, ai - 1)} disabled={ai <= 0} style={{ ...mi, flex: 1, textAlign: "center", opacity: ai <= 0 ? 0.4 : 1 }}>← Move left</button>
                         <button onClick={() => reorderSections(ai, ai + 1)} disabled={ai >= SECTIONS.length - 1} style={{ ...mi, flex: 1, textAlign: "center", opacity: ai >= SECTIONS.length - 1 ? 0.4 : 1 }}>Move right →</button>
                       </div>
-                      <button onClick={() => toggleSticky(activeTab)} style={{ ...mi, width: "100%", marginTop: 6 }}>{sticky ? "📌 Unstick this section" : "📌 Make this section sticky"}</button>
                     </>;
                   })()}
                   <div style={{ height: 1, background: B.border, margin: "10px 0" }} />
                   <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: B.muted, marginBottom: 8 }}>Presets</div>
-                  <button onClick={() => { setAddSecOpen(false); addClass(); }} disabled={addingClass} style={{ ...mi, width: "100%", marginBottom: 6 }}>🏫 Add a class — own teacher + curriculum</button>
                   <button onClick={singleChatPreset} style={{ ...mi, width: "100%" }}>💬 Single centered chat (no tabs)</button>
                   {SECTIONS.length > 1 && <button onClick={() => removeSection(activeTab)} style={{ ...mi, width: "100%", marginTop: 8, color: "#F87171", border: "1px solid rgba(248,113,113,0.3)", background: "rgba(248,113,113,0.06)" }}>🗑 Remove “{(SECTIONS.find(s => s.id === activeTab)?.title) || "this section"}”</button>}
                 </div>
@@ -6217,9 +6220,12 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
             )}
             {/* The class switcher now lives in the top header; here we just note the active class's teacher. */}
             {classes && (() => { const cm = classMentor(school, curClassId); const cc = classes.find(c => c.id === curClassId); return <div style={{ fontSize: 11.5, color: B.muted }}>{cc ? <><span style={{ color: T.hi, fontWeight: 700 }}>{cc.icon} {cc.title}</span>{cm?.name && cm.name !== school.mentor?.name ? <> · teacher: <span style={{ color: T.hi, fontWeight: 700 }}>{cm.name}</span></> : null}</> : null}</div>; })()}
-            {!readOnly && <div style={{ display: "flex", gap: 6, alignItems: "center", justifyContent: "flex-end" }}>
-              <span style={{ fontSize: 11, color: B.muted }}>Layout</span>
-              {[["list", "☰ List"], ["map", "🗺️ Map"], ["arcade", "🎮 Arcade"]].map(([k, l]) => <button key={k} onClick={() => onUpdate({ data: { ...school, progression: k } })} style={{ background: (school.progression || "list") === k ? T.ps : "none", border: `1px solid ${(school.progression || "list") === k ? T.ba : B.borderMid}`, borderRadius: 8, color: (school.progression || "list") === k ? T.hi : B.mutedMid, padding: "5px 11px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 700 }}>{l}</button>)}
+            {!readOnly && <div style={{ display: "flex", gap: 6, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
+              <button onClick={addClass} disabled={addingClass} title="Create a new class (own teacher + curriculum)" style={{ background: "none", border: `1px dashed ${T.ba}`, borderRadius: 8, color: T.hi, padding: "5px 12px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 700, opacity: addingClass ? 0.6 : 1 }}>{addingClass ? <><Spinner color={T.hi} />Building class…</> : "＋ Add a class"}</button>
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <span style={{ fontSize: 11, color: B.muted }}>Layout</span>
+                {[["lms", "🗂️ LMS"], ["cards", "🗃️ Cards"], ["steps", "🪜 Steps"], ["arcade", "🎮 Arcade"]].map(([k, l]) => <button key={k} onClick={() => onUpdate({ data: { ...school, shell: k, ...(k === "arcade" ? { progression: "arcade" } : k === "cards" ? { progression: "list" } : {}) } })} style={{ background: shell === k ? T.ps : "none", border: `1px solid ${shell === k ? T.ba : B.borderMid}`, borderRadius: 8, color: shell === k ? T.hi : B.mutedMid, padding: "5px 11px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 700 }}>{l}</button>)}
+              </div>
             </div>}
             {(school.progression === "arcade" || shell === "arcade") ? (
               <ArcadeRun school={viewSchool} T={T} progress={progress} xp={xp} onEnter={enterLesson} onEdit={setEditingLesson} readOnly={readOnly} />
@@ -7381,10 +7387,10 @@ export default function Senseito() {
             <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 19, fontWeight: 700, letterSpacing: -0.5, color: B.white }}>
               Sensei<span style={{ background: "linear-gradient(135deg,#7C3AED,#06B6D4)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>to</span>
             </div>
-            <div style={{ display: "flex", gap: 7, alignItems: "center" }}>
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <ThemeToggle mode={mode} setMode={setMode} />
               {active && <button onClick={() => setGuideOpen(true)} title="Creator Guide — how to use Senseito" style={{ background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: "#A78BFA", padding: "6px 10px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>🧭</button>}
               {active && <button onClick={() => setSideCollapsed(true)} title="Hide the chat — focus on editing" style={{ background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "6px 10px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>«</button>}
-              <ThemeToggle mode={mode} setMode={setMode} />
             </div>
           </div>
           <button onClick={() => { setView("home"); setSideOpen(false); setScrollHome(true); }} style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "none", background: view === "home" ? "linear-gradient(135deg,#7C3AED,#6D28D9)" : "rgba(124,58,237,0.1)", color: view === "home" ? "white" : "#A78BFA", fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", textAlign: "left", boxShadow: view === "home" ? "0 0 18px rgba(124,58,237,0.25)" : "none" }}>＋ New School</button>
@@ -7448,7 +7454,7 @@ export default function Senseito() {
                 : <Home onCreated={createSchool} session={session} onRequireAuth={() => setAccountOpen(true)} />)
               : view === "home" || !active
               ? <Home onCreated={createSchool} autofocus={scrollHome} onAutofocusDone={() => setScrollHome(false)} session={session} onRequireAuth={() => setAccountOpen(true)} />
-              : <SchoolPage key={active.id} rec={active} onUpdate={(patch) => updateSchool(active.id, patch)} onPublish={publishSchool} publishing={publishing} publicBase={publicBase} token={session?.token} onSetSlug={setCustomSlug} onIterate={applyIterate} iterating={iterating} iterProg={iterProg} justBuilt={active.id === justBuiltId} onRevealSeen={() => setJustBuiltId(null)} onStats={(n) => setStudentsById(m => (m[active.id] === n ? m : { ...m, [active.id]: n }))} guideOpen={guideOpen} onGuideOpen={() => setGuideOpen(true)} onGuideClose={() => setGuideOpen(false)} />}
+              : <SchoolPage key={active.id} rec={active} onUpdate={(patch) => updateSchool(active.id, patch)} onPublish={publishSchool} publishing={publishing} publicBase={publicBase} token={session?.token} onSetSlug={setCustomSlug} onIterate={applyIterate} iterating={iterating} iterProg={iterProg} justBuilt={active.id === justBuiltId} onRevealSeen={() => setJustBuiltId(null)} onStats={(n) => setStudentsById(m => (m[active.id] === n ? m : { ...m, [active.id]: n }))} guideOpen={guideOpen} onGuideOpen={() => setGuideOpen(true)} onGuideClose={() => setGuideOpen(false)} onOpenMedia={() => setView("profile")} />}
           </Boundary>
         </div>
       </div>
