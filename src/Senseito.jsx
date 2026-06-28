@@ -6311,8 +6311,9 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
 // ─────────────────────────────────────────────────────────────
 // HOME
 // ─────────────────────────────────────────────────────────────
-function Home({ onCreated, autofocus, onAutofocusDone }) {
-  const [prompt, setPrompt] = useState("");
+function Home({ onCreated, autofocus, onAutofocusDone, session, onRequireAuth }) {
+  const [prompt, setPrompt] = useState(() => { try { const p = localStorage.getItem("senseito_pending_prompt"); if (p) { localStorage.removeItem("senseito_pending_prompt"); return p; } } catch { } return ""; });
+  const [gated, setGated] = useState(false); // tried to build without an account
   const [focused, setFocused] = useState(false);
   const [phase, setPhase] = useState("idle");
   const [clarifyQ, setClarifyQ] = useState("");
@@ -6392,8 +6393,16 @@ function Home({ onCreated, autofocus, onAutofocusDone }) {
     return [prompt.trim(), attached?.text, extra].filter(Boolean).join("\n\n").trim();
   }
 
+  // Generation requires a creator account. Stash the prompt so it survives the OAuth round-trip.
+  function needsAuth() {
+    if (session) return false;
+    try { if (prompt.trim()) localStorage.setItem("senseito_pending_prompt", prompt); } catch { }
+    setGated(true); onRequireAuth?.(); return true;
+  }
+
   // "Build it yourself" — drop into an empty-but-scaffolded school and assemble it by hand.
   function buildManual() {
+    if (needsAuth()) return;
     const name = prompt.trim().slice(0, 60) || "My School";
     const content = {
       name, emoji: "🏫", description: "", category: "Custom", duration: "", learningPath: "mixed", voicePreset: "sage",
@@ -6408,6 +6417,7 @@ function Home({ onCreated, autofocus, onAutofocusDone }) {
   }
 
   async function build() {
+    if (needsAuth()) return;
     const base = sourceText();
     if (!base) { taRef.current?.focus(); return; }
     if (YT_RE.test(base) && base.length < DNA_THRESHOLD && !attached) {
@@ -6453,6 +6463,12 @@ function Home({ onCreated, autofocus, onAutofocusDone }) {
           <p style={{ fontSize: 15, color: B.muted, maxWidth: 480, margin: "0 auto", lineHeight: 1.72 }}>
             One line is enough. Name any mentor. Paste a book chapter or a YouTube transcript and it teaches THAT. Your mentor won't pass you until you've actually transformed.
           </p>
+        </div>
+      )}
+      {gated && !session && (phase === "idle" || phase === "error") && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", justifyContent: "center", background: "rgba(124,58,237,0.1)", border: "1px solid rgba(124,58,237,0.4)", borderRadius: 12, padding: "11px 16px", marginBottom: 14, fontSize: 13, color: "#C4B5FD" }}>
+          <span>👋 Create a free creator account to build your school — your prompt is saved.</span>
+          <button onClick={() => onRequireAuth?.()} style={{ background: "white", border: "none", borderRadius: 8, color: "#1a1a2e", padding: "6px 14px", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>Sign in / Join</button>
         </div>
       )}
       {(phase === "idle" || phase === "error") && (
@@ -7423,9 +7439,9 @@ export default function Senseito() {
           <Boundary resetKey={view}>
             {view === "profile"
               ? (session ? <ProfileView session={session} profile={profile} onProfile={setProfile} achStats={achStats} schoolCount={schools.length} syncState={syncState} onBack={() => setView("home")} onSignOut={() => { setSession(null); setSchools([]); setSyncState("idle"); setView("home"); }} />
-                : <Home onCreated={createSchool} />)
+                : <Home onCreated={createSchool} session={session} onRequireAuth={() => setAccountOpen(true)} />)
               : view === "home" || !active
-              ? <Home onCreated={createSchool} autofocus={scrollHome} onAutofocusDone={() => setScrollHome(false)} />
+              ? <Home onCreated={createSchool} autofocus={scrollHome} onAutofocusDone={() => setScrollHome(false)} session={session} onRequireAuth={() => setAccountOpen(true)} />
               : <SchoolPage key={active.id} rec={active} onUpdate={(patch) => updateSchool(active.id, patch)} onPublish={publishSchool} publishing={publishing} publicBase={publicBase} token={session?.token} onSetSlug={setCustomSlug} onIterate={applyIterate} iterating={iterating} iterProg={iterProg} justBuilt={active.id === justBuiltId} onRevealSeen={() => setJustBuiltId(null)} onStats={(n) => setStudentsById(m => (m[active.id] === n ? m : { ...m, [active.id]: n }))} guideOpen={guideOpen} onGuideOpen={() => setGuideOpen(true)} onGuideClose={() => setGuideOpen(false)} />}
           </Boundary>
         </div>
