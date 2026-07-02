@@ -3042,15 +3042,24 @@ function LandingSection({ sec, i, total, school, T, editable, onPatch, onMove, o
   const inner = { maxWidth: 880, margin: "0 auto" };
   const h2 = { fontFamily: "'Space Grotesk',sans-serif", fontSize: "clamp(22px,3.5vw,32px)", fontWeight: 800, letterSpacing: -0.6, color: B.white, textAlign: "center", marginBottom: 26 };
   const ctaBtn = { display: "inline-block", background: T.grad, border: "none", borderRadius: 14, color: "#fff", padding: "16px 34px", cursor: "pointer", fontSize: 16, fontWeight: 800, fontFamily: "inherit", boxShadow: `0 10px 34px ${T.pg}`, letterSpacing: 0.2 };
+  const ghostBtn = { display: "inline-block", background: "rgba(255,255,255,0.07)", border: "1px solid rgba(255,255,255,0.3)", borderRadius: 14, color: "#fff", padding: "15px 28px", cursor: "pointer", fontSize: 15, fontWeight: 700, fontFamily: "inherit" };
   const E = (v, save, style, ph) => <EditableText value={v} readOnly={!editable} placeholder={ph} onSave={save} style={style} />;
+  // Buttons can point anywhere: href set → open that URL; empty → default enroll action.
+  const go = (href) => { if (href && /^https?:\/\//i.test(href)) window.open(href, "_blank", "noopener"); else onEnroll(); };
+  const askHref = (cur, save) => { const u = window.prompt("Button link URL (https…) — leave empty for the default enroll action:", cur || ""); if (u === null) return; const v = u.trim(); if (v && !/^https?:\/\//i.test(v)) { alert("Links must start with https://"); return; } save(v || undefined); };
+  const linkChip = (cur, save) => editable && <button onClick={() => askHref(cur, save)} title={cur ? `Links to ${cur}` : "Set a link (default: enroll)"} style={{ background: "rgba(0,0,0,0.35)", border: "1px solid rgba(255,255,255,0.25)", borderRadius: 8, color: cur ? "#67E8F9" : "rgba(255,255,255,0.75)", padding: "4px 9px", cursor: "pointer", fontSize: 10.5, fontFamily: "inherit", verticalAlign: "middle", marginLeft: 8 }}>🔗{cur ? " linked" : ""}</button>;
   let bodyEl = null;
   if (sec.type === "hero") bodyEl = (
     <div style={{ ...inner, textAlign: "center", padding: "26px 0 12px" }}>
       {sec.badge && <div style={{ display: "inline-block", background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.22)", borderRadius: 100, padding: "5px 15px", fontSize: 11.5, fontWeight: 800, letterSpacing: 1.4, textTransform: "uppercase", color: "#fff", marginBottom: 20 }}>{E(sec.badge, v => set({ badge: v }))}</div>}
       <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: "clamp(32px,6vw,54px)", fontWeight: 800, letterSpacing: -1.4, lineHeight: 1.08, color: "#fff", textShadow: "0 2px 24px rgba(0,0,0,0.4)", maxWidth: 760, margin: "0 auto 18px" }}>{E(sec.headline, v => set({ headline: v }))}</div>
       <div style={{ fontSize: 16.5, color: "rgba(255,255,255,0.88)", lineHeight: 1.65, maxWidth: 580, margin: "0 auto 30px" }}>{E(sec.sub, v => set({ sub: v }))}</div>
-      <button onClick={onEnroll} style={ctaBtn}>{E(sec.cta || "Enroll now", v => set({ cta: v }))}</button>
-      {editable && <div style={{ marginTop: 16, display: "flex", gap: 8, justifyContent: "center" }}>
+      <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap", alignItems: "center" }}>
+        <span><button onClick={() => go(sec.href)} style={ctaBtn}>{E(sec.cta || "Enroll now", v => set({ cta: v }))}</button>{linkChip(sec.href, v => set({ href: v }))}</span>
+        {sec.cta2 != null && <span><button onClick={() => go(sec.href2)} style={ghostBtn}>{E(sec.cta2, v => set({ cta2: v }))}</button>{linkChip(sec.href2, v => set({ href2: v }))}{editable && <button onClick={() => set({ cta2: undefined, href2: undefined })} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.6)", cursor: "pointer", fontSize: 11, marginLeft: 4 }}>✕</button>}</span>}
+      </div>
+      {editable && <div style={{ marginTop: 16, display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
+        {sec.cta2 == null && <button onClick={() => set({ cta2: "Learn more" })} style={{ background: "rgba(0,0,0,0.35)", border: "1px solid rgba(255,255,255,0.25)", borderRadius: 8, color: "#fff", padding: "5px 12px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit" }}>＋ Second button</button>}
         <button onClick={onHeroImage} style={{ background: "rgba(0,0,0,0.35)", border: "1px solid rgba(255,255,255,0.25)", borderRadius: 8, color: "#fff", padding: "5px 12px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit" }}>📷 Background photo</button>
         {sec.image && <button onClick={() => set({ image: undefined })} style={{ background: "rgba(0,0,0,0.35)", border: "1px solid rgba(255,255,255,0.25)", borderRadius: 8, color: "#fff", padding: "5px 12px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit" }}>✕ Remove</button>}
       </div>}
@@ -3131,7 +3140,8 @@ function LandingSection({ sec, i, total, school, T, editable, onPatch, onMove, o
           ))}
           {editable && <button onClick={() => set({ bullets: [...(sec.bullets || []), "New benefit"] })} style={{ background: "none", border: `1px dashed ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, cursor: "pointer", fontSize: 12, fontFamily: "inherit", padding: "5px" }}>＋ Add benefit</button>}
         </div>
-        <button onClick={onEnroll} style={{ ...ctaBtn, width: "100%" }}>{E(sec.cta || "Enroll now", v => set({ cta: v }))}</button>
+        <button onClick={() => go(sec.href)} style={{ ...ctaBtn, width: "100%" }}>{E(sec.cta || "Enroll now", v => set({ cta: v }))}</button>
+        {editable && <div style={{ marginTop: 8 }}>{linkChip(sec.href, v => set({ href: v }))}</div>}
         {sec.note && <div style={{ fontSize: 11.5, color: B.muted, marginTop: 12 }}>{E(sec.note, v => set({ note: v }))}</div>}
       </div>
     </div>
@@ -3155,7 +3165,11 @@ function LandingSection({ sec, i, total, school, T, editable, onPatch, onMove, o
     <div style={{ ...inner, textAlign: "center", maxWidth: 620 }}>
       <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: "clamp(24px,4vw,36px)", fontWeight: 800, letterSpacing: -0.8, color: B.white, marginBottom: 12 }}>{E(sec.headline, v => set({ headline: v }))}</div>
       {sec.sub && <div style={{ fontSize: 14.5, color: B.mutedMid, marginBottom: 26 }}>{E(sec.sub, v => set({ sub: v }))}</div>}
-      <button onClick={onEnroll} style={ctaBtn}>{E(sec.cta || "Enroll now", v => set({ cta: v }))}</button>
+      <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap", alignItems: "center" }}>
+        <span><button onClick={() => go(sec.href)} style={ctaBtn}>{E(sec.cta || "Enroll now", v => set({ cta: v }))}</button>{linkChip(sec.href, v => set({ href: v }))}</span>
+        {sec.cta2 != null && <span><button onClick={() => go(sec.href2)} style={ghostBtn}>{E(sec.cta2, v => set({ cta2: v }))}</button>{linkChip(sec.href2, v => set({ href2: v }))}{editable && <button onClick={() => set({ cta2: undefined, href2: undefined })} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.6)", cursor: "pointer", fontSize: 11, marginLeft: 4 }}>✕</button>}</span>}
+        {editable && sec.cta2 == null && <button onClick={() => set({ cta2: "Learn more" })} style={{ background: "rgba(0,0,0,0.3)", border: "1px solid rgba(255,255,255,0.25)", borderRadius: 8, color: "#fff", padding: "5px 12px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit" }}>＋ Button</button>}
+      </div>
     </div>
   );
   else return null;
@@ -5687,6 +5701,7 @@ function SchoolWizard({ school, T, media, published, onUpdate, saveLesson, autho
   const [phase, setPhase] = useState(lessons.length ? "lessons" : "schoolmentor");
   const [li, setLi] = useState(0);
   const [ci, setCi] = useState(0);
+  const [doneL, setDoneL] = useState({}); // lesson index → fully approved
   const [busy, setBusy] = useState(false);
   const [pick, setPick] = useState(null); // media-pick target: "cover" | "reward"
   const lesson = lessons[li] || null;
@@ -5697,6 +5712,7 @@ function SchoolWizard({ school, T, media, published, onUpdate, saveLesson, autho
   function next() {
     if (phase === "lessons") {
       if (ci < WIZ_CARDS.length - 1) return setCi(ci + 1);
+      setDoneL(d => ({ ...d, [li]: true })); // this lesson is fully approved
       if (li < lessons.length - 1) { setLi(li + 1); return setCi(0); }
       return setPhase("schoolmentor");
     }
@@ -5851,8 +5867,28 @@ function SchoolWizard({ school, T, media, published, onUpdate, saveLesson, autho
           <div><div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.5, color: T.hi }}>Set up · {WIZ_PHASE_LABEL[phase]}</div>{sup && <div style={{ fontSize: 12, color: B.mutedMid, marginTop: 2 }}>{sup}</div>}</div>
           <button onClick={onClose} title="Close" style={{ background: "rgba(0,0,0,0.25)", border: "none", borderRadius: 8, color: "#fff", width: 28, height: 28, cursor: "pointer", fontSize: 14 }}>✕</button>
         </div>
-        {/* phase dots */}
-        <div style={{ display: "flex", gap: 4, padding: "10px 18px 0" }}>{WIZ_PHASES.map((p, i) => <div key={p} style={{ flex: 1, height: 4, borderRadius: 2, background: i < phaseIdx ? "#4ADE80" : i === phaseIdx ? T.p : B.surface3, transition: "background 0.3s" }} />)}</div>
+        {/* phase dots + live in-phase progress */}
+        <div style={{ display: "flex", gap: 4, padding: "10px 18px 0" }}>{WIZ_PHASES.map((p, i) => <div key={p} title={WIZ_PHASE_LABEL[p]} style={{ flex: 1, height: 4, borderRadius: 2, background: i < phaseIdx ? "#4ADE80" : i === phaseIdx ? T.p : B.surface3, transition: "background 0.3s" }} />)}</div>
+        {phase === "lessons" && lessons.length > 0 && (
+          <div style={{ padding: "10px 18px 0" }}>
+            {/* every lesson as a clickable chip — jump anywhere, ✓ = approved */}
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+              {lessons.map((l, k) => {
+                const on = k === li;
+                return <button key={l.id || k} onClick={() => { setLi(k); setCi(0); }} title={l.title} style={{ display: "inline-flex", alignItems: "center", gap: 5, maxWidth: 150, background: on ? T.ps : doneL[k] ? "rgba(74,222,128,0.08)" : B.surface2, border: `1px solid ${on ? T.ba : doneL[k] ? "rgba(74,222,128,0.35)" : B.borderMid}`, borderRadius: 100, color: on ? T.hi : doneL[k] ? "#4ADE80" : B.mutedMid, padding: "4px 11px", cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>
+                  <span>{doneL[k] ? "✓" : k + 1}</span><span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{l.title}</span>
+                </button>;
+              })}
+            </div>
+            {/* fine-grained progress across ALL lesson cards, so the bar visibly moves every Approve */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <div style={{ flex: 1, height: 5, borderRadius: 3, background: B.surface3, overflow: "hidden" }}>
+                <div style={{ width: `${Math.round(((li * WIZ_CARDS.length + ci + 1) / (lessons.length * WIZ_CARDS.length)) * 100)}%`, height: "100%", background: T.grad, borderRadius: 3, transition: "width 0.35s ease" }} />
+              </div>
+              <span style={{ fontSize: 10.5, color: B.muted, whiteSpace: "nowrap" }}>card {ci + 1}/{WIZ_CARDS.length} · lesson {li + 1}/{lessons.length}</span>
+            </div>
+          </div>
+        )}
         <div key={stepKey} style={{ padding: "16px 18px 6px", display: "flex", flexDirection: "column", gap: 12, animation: "sxRise 0.32s ease both", minHeight: 180 }}>
           <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 17, fontWeight: 800, color: B.white }}>{heading}</div>
           {body}
@@ -5891,6 +5927,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const media = useContext(MediaAuthCtx); // signed-in creator → can pick bg/icon photos from their library
   const [bgPick, setBgPick] = useState(false); // background-photo picker open
   const [stylesOpen, setStylesOpen] = useState(false); // quick-styles popover (theme/font/density)
+  const [bgOpen, setBgOpen] = useState(false); // background popover (color / photo / tint)
   const [iconEdit, setIconEdit] = useState(false); // school-icon edit popover
   const [iconPick, setIconPick] = useState(false); // school-icon image picker open
   const schoolIcon = (size) => school.iconImage
@@ -6324,37 +6361,51 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
 
       <div style={{ maxWidth: ts.maxW, margin: "0 auto", padding: "14px 20px 80px", background: schoolBg, borderRadius: 20, minHeight: "100vh", border: `1px solid ${B.border}` }}>
         {!readOnly && (() => {
-          // Unified toolbar — every control is the same pill: same height, radius, font.
-          const pill = { display: "inline-flex", alignItems: "center", gap: 6, height: 32, background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, padding: "0 12px", cursor: "pointer" };
+          // Professional toolbar — one quiet bar, ghost buttons, grouped by purpose,
+          // exactly ONE filled action on each end (Set up · Publish).
+          const ghost = (on) => ({ display: "inline-flex", alignItems: "center", gap: 6, height: 30, background: on ? "rgba(255,255,255,0.06)" : "transparent", border: "none", borderRadius: 8, color: on ? B.white : B.mutedMid, fontFamily: "inherit", fontSize: 12.5, fontWeight: 600, padding: "0 11px", cursor: "pointer", whiteSpace: "nowrap", transition: "background 0.15s, color 0.15s" });
+          const hover = { onMouseEnter: e => { e.currentTarget.style.background = "rgba(255,255,255,0.06)"; e.currentTarget.style.color = "var(--text)"; }, onMouseLeave: e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--mutedMid)"; } };
+          const sep = <div style={{ width: 1, height: 18, background: B.borderMid, margin: "0 5px", flexShrink: 0 }} />;
           const applyVibe = (k) => { const t = TEMPLATES[k]; if (!t) return; onUpdate({ data: { ...school, template: k, theme: t.theme, skin: t.skin, font: t.font, density: t.density, ...(t.progression ? { progression: t.progression } : {}) } }); };
           return (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 0 12px", flexWrap: "wrap", gap: 8 }}>
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <button onClick={() => setWizardOpen(true)} title="Guided setup — review every lesson, your mentor, tools, design & publish" style={{ ...pill, background: T.grad, border: "none", color: "#fff" }}>🪄 Set up</button>
-              <button onClick={() => setStylesOpen(o => !o)} title="Theme, font & spacing" style={{ ...pill, color: T.hi, borderColor: stylesOpen ? T.ba : B.borderMid }}>🎨 Styles</button>
-              <label style={{ ...pill, gap: 5 }} title="Experience vibe">🪄 Vibe
-                <select value={school.template || ""} onChange={e => e.target.value && applyVibe(e.target.value)} style={{ background: "none", border: "none", color: B.white, fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}><option value="">Auto</option>{Object.entries(TEMPLATES).map(([k, t]) => <option key={k} value={k}>{t.emoji} {t.label}</option>)}</select>
+          <div style={{ padding: "14px 0 12px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 2, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: 6, flexWrap: "wrap", boxShadow: "0 6px 24px rgba(0,0,0,0.18)" }}>
+              <button onClick={() => setWizardOpen(true)} title="Guided setup — review every lesson, your mentor, tools, design & publish" style={{ display: "inline-flex", alignItems: "center", gap: 6, height: 30, background: T.grad, border: "none", borderRadius: 9, color: "#fff", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, padding: "0 14px", cursor: "pointer", boxShadow: `0 4px 14px ${T.pg}`, whiteSpace: "nowrap" }}>🪄 Set up</button>
+              {sep}
+              <button onClick={() => { setStylesOpen(o => !o); setBgOpen(false); }} title="Theme, font & spacing" style={ghost(stylesOpen)} {...(stylesOpen ? {} : hover)}>🎨 Styles</button>
+              <label title="Experience vibe" style={{ ...ghost(false), gap: 4 }} {...hover}>🪩 Vibe
+                <select value={school.template || ""} onChange={e => e.target.value && applyVibe(e.target.value)} style={{ background: "none", border: "none", color: "inherit", fontFamily: "inherit", fontSize: 12.5, fontWeight: 600, cursor: "pointer", maxWidth: 118 }}><option value="">Auto</option>{Object.entries(TEMPLATES).map(([k, t]) => <option key={k} value={k}>{t.emoji} {t.label}</option>)}</select>
               </label>
-              <label style={{ ...pill, gap: 6 }} title="School background colour">🖌️ Bg
-                <input type="color" value={school.bgColor || pHex} onChange={e => onUpdate({ data: { ...school, bgColor: e.target.value } })} style={{ width: 22, height: 20, border: "none", borderRadius: 5, background: "none", cursor: "pointer", padding: 0 }} />
-                {school.bgColor && <span onClick={() => onUpdate({ data: { ...school, bgColor: undefined } })} style={{ color: B.muted, cursor: "pointer", fontSize: 10.5, fontWeight: 400 }}>reset</span>}
-              </label>
-              <button onClick={() => { if (media) setBgPick(true); else { const u = window.prompt("Background image URL (https):", school.bgImage || ""); if (u != null) onUpdate({ data: { ...school, bgImage: u.trim() || undefined } }); } }} title="Background photo" style={pill}>📷 Bg photo</button>
-              {school.bgImage && <label style={{ ...pill, gap: 6, fontWeight: 400, fontSize: 12 }} title="Tint the photo so text stays readable"><input type="checkbox" checked={school.bgTint !== false} onChange={e => onUpdate({ data: { ...school, bgTint: e.target.checked } })} /> tint <span onClick={() => onUpdate({ data: { ...school, bgImage: undefined } })} style={{ color: B.muted, cursor: "pointer" }}>✕</span></label>}
-            </div>
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <button onClick={() => setLandingOpen(true)} title="Design a high-converting landing page for this school" style={{ ...pill, color: T.hi, borderColor: T.ba }}>🚀 Landing{school.landing?.sections?.length && school.landing?.on !== false ? " ·🟢" : ""}</button>
-              <button onClick={() => onOpenMedia?.()} title="Your media library" style={{ ...pill, color: T.hi, borderColor: T.ba }}>🖼 Media</button>
-              <button onClick={() => setGamelabOpen(true)} title="Build games, then drop them in with a Game brick" style={{ ...pill, color: T.hi, borderColor: T.ba }}>🎮 Game Lab{(school.games || []).length ? ` (${school.games.length})` : ""}</button>
-              <button data-guide="publish" onClick={() => onPublish(rec)} disabled={publishing} style={{ ...pill, background: rec.published ? "rgba(74,222,128,0.1)" : "linear-gradient(135deg,#059669,#047857)", border: rec.published ? "1px solid rgba(74,222,128,0.35)" : "none", color: rec.published ? "#4ADE80" : "white" }}>
-                {publishing ? "Publishing…" : rec.published ? "✓ Published" : "🌐 Publish"}
+              <button onClick={() => { setBgOpen(o => !o); setStylesOpen(false); }} title="Background — colour, photo, tint" style={ghost(bgOpen)} {...(bgOpen ? {} : hover)}>🖼️ Background</button>
+              {sep}
+              <button onClick={() => setLandingOpen(true)} title="Design a high-converting landing page" style={ghost(false)} {...hover}>🚀 Landing{school.landing?.sections?.length && school.landing?.on !== false ? <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#4ADE80", display: "inline-block" }} /> : null}</button>
+              <button onClick={() => onOpenMedia?.()} title="Your media library" style={ghost(false)} {...hover}>📁 Media</button>
+              <button onClick={() => setGamelabOpen(true)} title="Build games, then drop them in with a Game brick" style={ghost(false)} {...hover}>🎮 Game Lab{(school.games || []).length ? ` · ${school.games.length}` : ""}</button>
+              <div style={{ flex: 1, minWidth: 6 }} />
+              <button data-guide="publish" onClick={() => onPublish(rec)} disabled={publishing} style={{ display: "inline-flex", alignItems: "center", gap: 6, height: 30, background: rec.published ? "rgba(74,222,128,0.12)" : "linear-gradient(135deg,#059669,#047857)", border: rec.published ? "1px solid rgba(74,222,128,0.35)" : "none", borderRadius: 9, color: rec.published ? "#4ADE80" : "#fff", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, padding: "0 14px", cursor: "pointer", whiteSpace: "nowrap" }}>
+                {publishing ? "Publishing…" : rec.published ? "✓ Published" : "Publish"}
               </button>
             </div>
             {stylesOpen && (
-              <div style={{ width: "100%", display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center", background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 12, padding: "11px 14px", marginTop: 2 }}>
+              <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center", background: B.surface, border: `1px solid ${B.border}`, borderRadius: 12, padding: "12px 15px", marginTop: 8, animation: "fadeUp 0.2s ease" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 7 }}><span style={{ fontSize: 11, color: B.muted, fontWeight: 700 }}>Theme</span>{Object.keys(THEMES).map(k => <button key={k} onClick={() => onUpdate({ data: { ...school, theme: k, palette: undefined } })} title={THEMES[k].label} style={{ width: 22, height: 22, borderRadius: "50%", border: school.theme === k ? `2px solid ${B.white}` : `1px solid ${B.borderMid}`, background: THEMES[k].p, cursor: "pointer" }} />)}</div>
                 <div style={{ display: "flex", alignItems: "center", gap: 7 }}><span style={{ fontSize: 11, color: B.muted, fontWeight: 700 }}>Font</span><select value={school.font || "inter"} onChange={e => onUpdate({ data: { ...school, font: e.target.value } })} style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.white, fontFamily: "inherit", fontSize: 12, padding: "5px 8px", cursor: "pointer" }}>{Object.entries(FONTS).map(([k, f]) => <option key={k} value={k}>{f.label}</option>)}</select></div>
                 <div style={{ display: "flex", alignItems: "center", gap: 7 }}><span style={{ fontSize: 11, color: B.muted, fontWeight: 700 }}>Spacing</span>{[["compact", "Compact"], ["cozy", "Cozy"], ["spacious", "Spacious"]].map(([k, l]) => <button key={k} onClick={() => onUpdate({ data: { ...school, density: k } })} style={{ background: (school.density || "cozy") === k ? T.ps : "none", border: `1px solid ${(school.density || "cozy") === k ? T.ba : B.borderMid}`, borderRadius: 7, color: (school.density || "cozy") === k ? T.hi : B.mutedMid, padding: "4px 10px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit", fontWeight: 700 }}>{l}</button>)}</div>
+              </div>
+            )}
+            {bgOpen && (
+              <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center", background: B.surface, border: `1px solid ${B.border}`, borderRadius: 12, padding: "12px 15px", marginTop: 8, animation: "fadeUp 0.2s ease" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 7 }}><span style={{ fontSize: 11, color: B.muted, fontWeight: 700 }}>Colour</span>
+                  <input type="color" value={school.bgColor || pHex} onChange={e => onUpdate({ data: { ...school, bgColor: e.target.value } })} style={{ width: 26, height: 24, border: `1px solid ${B.borderMid}`, borderRadius: 6, background: "none", cursor: "pointer", padding: 0 }} />
+                  {school.bgColor && <button onClick={() => onUpdate({ data: { ...school, bgColor: undefined } })} style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>reset</button>}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 7 }}><span style={{ fontSize: 11, color: B.muted, fontWeight: 700 }}>Photo</span>
+                  <button onClick={() => { if (media) setBgPick(true); else { const u = window.prompt("Background image URL (https):", school.bgImage || ""); if (u != null) onUpdate({ data: { ...school, bgImage: u.trim() || undefined } }); } }} style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.white, padding: "5px 11px", cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>📷 Choose</button>
+                  {school.bgImage && <>
+                    <label style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, color: B.mutedMid }}><input type="checkbox" checked={school.bgTint !== false} onChange={e => onUpdate({ data: { ...school, bgTint: e.target.checked } })} /> tint for readability</label>
+                    <button onClick={() => onUpdate({ data: { ...school, bgImage: undefined } })} style={{ background: "none", border: "none", color: "#F87171", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit" }}>✕ remove</button>
+                  </>}
+                </div>
               </div>
             )}
           </div>
