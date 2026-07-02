@@ -1210,7 +1210,7 @@ function getSections(school) {
 //  arcade = gamified single-run screen.
 function shellOf(school) {
   const s = school?.shell;
-  if (s === "lms" || s === "cards" || s === "arcade") return s;
+  if (s === "lms" || s === "cards" || s === "arcade" || s === "steps") return s;
   if (school?.progression === "arcade") return "arcade";
   if (["corporate", "academy"].includes(school?.template)) return "lms";
   return "cards";
@@ -6961,7 +6961,6 @@ function Home({ onCreated, autofocus, onAutofocusDone, session, onRequireAuth })
           </div>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8, marginTop: 10, paddingTop: 10, borderTop: `1px solid ${B.border}` }}>
             <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center" }}>
-              {CHIPS.map(c => <button key={c.key} onClick={() => setPrompt(CHIP_PROMPTS[c.key])} style={{ background: "rgba(124,58,237,0.09)", border: "1px solid rgba(124,58,237,0.28)", borderRadius: 100, padding: "3px 10px", fontSize: 11, color: "#F0ABFC", cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" }}>{c.label}</button>)}
               <label style={{ background: "rgba(6,182,212,0.09)", border: "1px solid rgba(6,182,212,0.3)", borderRadius: 100, padding: "3px 10px", fontSize: 11, color: "#67E8F9", cursor: "pointer", whiteSpace: "nowrap" }}>{attaching ? "Reading…" : "📎 Attach PDF/book"}<input type="file" accept=".pdf,.txt,.md,.markdown,text/*,application/pdf" onChange={onFile} style={{ display: "none" }} /></label>
             </div>
             <button onClick={() => build()} style={{ background: "linear-gradient(135deg,#7C3AED,#6D28D9)", border: "none", borderRadius: 10, padding: "10px 20px", color: "white", fontFamily: "inherit", fontSize: 14, fontWeight: 700, cursor: "pointer", boxShadow: "0 0 20px rgba(124,58,237,0.35)", whiteSpace: "nowrap" }}>⚡ Build School</button>
@@ -6974,25 +6973,32 @@ function Home({ onCreated, autofocus, onAutofocusDone, session, onRequireAuth })
           <button onClick={buildManual} style={{ background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 100, color: "#A78BFA", padding: "6px 14px", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>✍️ Build it yourself manually →</button>
         </div>
       )}
-      {(phase === "idle" || phase === "error") && (
-        <div style={{ marginTop: 12 }}>
-          <button onClick={() => setShowStruct(s => !s)} style={{ background: "none", border: "none", color: B.muted, fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>{showStruct ? "▾" : "▸"} Structure (optional) — or let the AI decide everything</button>
-          {showStruct && (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 10, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 12, padding: "12px 14px" }}>
-              {[
-                ["layout", "Layout", [["auto", "Auto"], ...Object.entries(LAYOUTS).map(([k, v]) => [k, v.label])]],
-                ["depth", "Depth", [["auto", "Auto"], ["short", "Short"], ["standard", "Standard"], ["deep", "Deep"]]],
-                ["interactivity", "Interactivity", [["auto", "Auto"], ["light", "Light"], ["standard", "Standard"], ["hands", "Hands-on"]]],
-              ].map(([key, label, opts]) => (
-                <div key={key} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                  <span style={{ fontSize: 10, color: B.muted, textTransform: "uppercase", letterSpacing: 1 }}>{label}</span>
-                  <select value={struct[key]} onChange={e => setStruct(s => ({ ...s, [key]: e.target.value }))} style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.white, fontFamily: "inherit", fontSize: 12, padding: "6px 9px", cursor: "pointer" }}>
-                    {opts.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                  </select>
-                </div>
-              ))}
-            </div>
-          )}
+      {phase === "idle" && (
+        <div style={{ marginTop: 64 }}>
+          <div style={{ textAlign: "center", marginBottom: 6 }}>
+            <div style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: 2.5, color: "#A78BFA" }}>Use cases</div>
+            <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: "clamp(20px,3.6vw,28px)", fontWeight: 800, letterSpacing: -0.6, color: B.white, marginTop: 6 }}>What will you teach?</div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))", gap: 12, marginTop: 22 }}>
+            {[
+              ["life", "🧠", "Life Coaching", "Break limiting beliefs and design an ideal life — with journaling missions."],
+              ["fitness", "💪", "Fitness", "A body-transformation program with a tough-love coach and real missions."],
+              ["business", "🚀", "Business", "Zero to first revenue — pitch simulations and real client role-plays."],
+              ["mindset", "✨", "Mindset", "Neuroscience-backed identity work with a calm, surgical mentor."],
+              ["relationships", "❤️", "Relationships", "Attachment, boundaries and hard conversations — practised safely."],
+              ["productivity", "🎯", "Productivity", "A deep-work school built on flow science and daily output tracking."],
+            ].map(([key, icon, title, desc]) => (
+              <button key={key} onClick={() => { setPrompt(CHIP_PROMPTS[key]); setTimeout(() => { taRef.current?.focus(); taRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }); }, 40); }}
+                style={{ textAlign: "left", background: B.surface, border: `1px solid ${B.border}`, borderRadius: 18, padding: "20px 18px", cursor: "pointer", fontFamily: "inherit", transition: "transform 0.15s, border-color 0.2s, box-shadow 0.2s" }}
+                onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-3px)"; e.currentTarget.style.borderColor = "rgba(124,58,237,0.45)"; e.currentTarget.style.boxShadow = "0 12px 34px rgba(124,58,237,0.16)"; }}
+                onMouseLeave={e => { e.currentTarget.style.transform = "none"; e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.boxShadow = "none"; }}>
+                <div style={{ width: 42, height: 42, borderRadius: 12, background: "rgba(124,58,237,0.1)", border: "1px solid rgba(124,58,237,0.28)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, marginBottom: 12 }}>{icon}</div>
+                <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 15.5, fontWeight: 700, color: B.white, marginBottom: 5 }}>{title}</div>
+                <div style={{ fontSize: 12.5, color: B.mutedMid, lineHeight: 1.55 }}>{desc}</div>
+                <div style={{ fontSize: 12, color: "#A78BFA", fontWeight: 700, marginTop: 12 }}>Try this →</div>
+              </button>
+            ))}
+          </div>
         </div>
       )}
       {phase === "thinking" && (
@@ -8136,8 +8142,9 @@ export default function Senseito() {
         ) : (
         <div style={{ flex: 1, overflowY: "auto", padding: "12px 10px" }}>
           <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.5, color: B.muted, padding: "0 8px", marginBottom: 8 }}>Your Schools</div>
-          {schools.length === 0 && <div style={{ fontSize: 12, color: B.muted, padding: "14px 8px", lineHeight: 1.6 }}>No schools yet.<br />Build your first one →</div>}
-          {schools.map(r => {
+          {!session && <div style={{ fontSize: 12, color: B.muted, padding: "14px 8px", lineHeight: 1.6 }}>Sign in to see your schools.<br /><button onClick={() => setAccountOpen(true)} style={{ marginTop: 8, background: "rgba(124,58,237,0.1)", border: "1px solid rgba(124,58,237,0.35)", borderRadius: 8, color: "#A78BFA", padding: "6px 12px", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>Sign in / Join</button></div>}
+          {session && schools.length === 0 && <div style={{ fontSize: 12, color: B.muted, padding: "14px 8px", lineHeight: 1.6 }}>No schools yet.<br />Build your first one →</div>}
+          {session && schools.map(r => {
             const T = themeFor(r.data);
             const total = r.data.semesters?.reduce((a, s) => a + (s.lessons?.length || 0), 0) || 0;
             const done = Object.values(r.progress || {}).filter(v => v === "passed").length;
