@@ -3007,6 +3007,241 @@ function ProgressSkin({ code, pct, T }) {
   return <div style={{ position: "relative", width: "100%", maxWidth: 320, height: 72, marginLeft: "auto" }}><MentorWidget code={filled} T={T} fill interactive={false} /></div>;
 }
 
+// ── LANDING PAGE — a high-converting, per-school landing generated as STRUCTURED
+// sections (reliable one-shot), rendered natively so every word is hand-editable
+// and CTA buttons actually work. school.landing = { on, sections:[...] }.
+const LANDING_SYS = (school) => `You are a world-class direct-response copywriter + landing page designer. Design a HIGH-CONVERTING landing page for this online school as JSON.
+Return ONLY JSON: { "sections": [ ... ] } — 6 to 9 sections, in a deliberate persuasive order (hook → problem → transformation → proof of substance → teacher → price → objections → final push). Every school should get a DIFFERENT structure and voice that fits ITS audience — never a template feel.
+Section shapes (use these EXACTLY; pick which to include and their order, hero MUST be first and cta MUST be last):
+- { "type":"hero", "badge":"<tiny eyebrow label>", "headline":"<punchy, outcome-first, max 9 words>", "sub":"<1-2 sentences, the promise>", "cta":"<button text>" }
+- { "type":"pain", "title":"...", "items":[3-4 of {"icon":"<emoji>","title":"...","body":"<1-2 sentences naming a real pain>"}] }
+- { "type":"outcomes", "title":"...", "items":[3-4 of {"icon":"<emoji>","title":"...","body":"<the after-state>"}] }
+- { "type":"curriculum", "title":"...", "sub":"<one line>" }  (the app fills the lessons automatically)
+- { "type":"mentor", "title":"...", "body":"<why this mentor, 2-3 sentences>" }  (the app shows the mentor)
+- { "type":"testimonials", "title":"...", "items":[2-3 of {"name":"<placeholder like 'Student name'>","quote":"<EXAMPLE quote the creator will replace — make it plausible for this school>"}] }
+- { "type":"pricing", "title":"...", "price":"<e.g. $49 or Free>", "period":"<e.g. one-time / per month or empty>", "bullets":[3-5 short value bullets], "cta":"<button text>", "note":"<small reassurance line>" }
+- { "type":"faq", "title":"...", "items":[3-4 of {"q":"...","a":"..."}] }
+- { "type":"cta", "headline":"<final push, max 10 words>", "sub":"<one line of urgency/identity>", "cta":"<button text>" }
+Write like a human who deeply gets this exact audience. Specific > generic. No hype-spam, no "unlock your potential" filler. Output ONLY the JSON.`;
+async function genLanding(school, hint) {
+  const lessons = (school.semesters || []).flatMap(s => s.lessons || []).map(l => l.title).slice(0, 12).join("; ");
+  const ctx = `SCHOOL: ${school.name}\nTAGLINE: ${school.tagline || ""}\nDESCRIPTION: ${flattenText(school.description) || ""}\nTRANSFORMATION: ${flattenText(school.transformation) || ""}\nMENTOR: ${school.mentor?.name} — ${school.mentor?.personality || ""}\nLESSONS: ${lessons}\nDURATION: ${school.duration || ""}\nPRICE: ${school.price || "not set — suggest one that fits, or Free"}${hint ? `\n\nCREATOR'S DIRECTION (honor this): ${hint}` : ""}`;
+  const out = await apiJSON(LANDING_SYS(school), [{ role: "user", content: ctx }], 3500, "sonnet");
+  const secs = Array.isArray(out?.sections) ? out.sections : null;
+  if (!secs || !secs.length) throw new Error("Couldn't design the page — try again.");
+  return secs.filter(s => s && s.type).map(s => ({ ...s, id: uid() }));
+}
+
+// One landing section, rendered beautifully in the school's palette. Editable inline for creators.
+function LandingSection({ sec, i, total, school, T, editable, onPatch, onMove, onDelete, onEnroll, onHeroImage }) {
+  const set = (patch) => onPatch({ ...sec, ...patch });
+  const setItem = (j, patch) => set({ items: (sec.items || []).map((x, k) => k === j ? { ...x, ...patch } : x) });
+  const alt = i % 2 === 1; // alternate band background
+  const wrap = { position: "relative", padding: "56px 24px", background: sec.type === "hero" ? (sec.image ? `linear-gradient(rgba(6,6,14,0.55),rgba(6,6,14,0.72)), url("${sec.image}") center/cover` : (T.heroGrad || T.gr)) : sec.type === "cta" ? T.gr : alt ? B.surface : "transparent", borderBottom: `1px solid ${B.border}` };
+  const inner = { maxWidth: 880, margin: "0 auto" };
+  const h2 = { fontFamily: "'Space Grotesk',sans-serif", fontSize: "clamp(22px,3.5vw,32px)", fontWeight: 800, letterSpacing: -0.6, color: B.white, textAlign: "center", marginBottom: 26 };
+  const ctaBtn = { display: "inline-block", background: T.grad, border: "none", borderRadius: 14, color: "#fff", padding: "16px 34px", cursor: "pointer", fontSize: 16, fontWeight: 800, fontFamily: "inherit", boxShadow: `0 10px 34px ${T.pg}`, letterSpacing: 0.2 };
+  const E = (v, save, style, ph) => <EditableText value={v} readOnly={!editable} placeholder={ph} onSave={save} style={style} />;
+  let bodyEl = null;
+  if (sec.type === "hero") bodyEl = (
+    <div style={{ ...inner, textAlign: "center", padding: "26px 0 12px" }}>
+      {sec.badge && <div style={{ display: "inline-block", background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.22)", borderRadius: 100, padding: "5px 15px", fontSize: 11.5, fontWeight: 800, letterSpacing: 1.4, textTransform: "uppercase", color: "#fff", marginBottom: 20 }}>{E(sec.badge, v => set({ badge: v }))}</div>}
+      <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: "clamp(32px,6vw,54px)", fontWeight: 800, letterSpacing: -1.4, lineHeight: 1.08, color: "#fff", textShadow: "0 2px 24px rgba(0,0,0,0.4)", maxWidth: 760, margin: "0 auto 18px" }}>{E(sec.headline, v => set({ headline: v }))}</div>
+      <div style={{ fontSize: 16.5, color: "rgba(255,255,255,0.88)", lineHeight: 1.65, maxWidth: 580, margin: "0 auto 30px" }}>{E(sec.sub, v => set({ sub: v }))}</div>
+      <button onClick={onEnroll} style={ctaBtn}>{E(sec.cta || "Enroll now", v => set({ cta: v }))}</button>
+      {editable && <div style={{ marginTop: 16, display: "flex", gap: 8, justifyContent: "center" }}>
+        <button onClick={onHeroImage} style={{ background: "rgba(0,0,0,0.35)", border: "1px solid rgba(255,255,255,0.25)", borderRadius: 8, color: "#fff", padding: "5px 12px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit" }}>📷 Background photo</button>
+        {sec.image && <button onClick={() => set({ image: undefined })} style={{ background: "rgba(0,0,0,0.35)", border: "1px solid rgba(255,255,255,0.25)", borderRadius: 8, color: "#fff", padding: "5px 12px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit" }}>✕ Remove</button>}
+      </div>}
+    </div>
+  );
+  else if (sec.type === "pain" || sec.type === "outcomes") bodyEl = (
+    <div style={inner}>
+      <div style={h2}>{E(sec.title, v => set({ title: v }))}</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(215px,1fr))", gap: 14 }}>
+        {(sec.items || []).map((it, j) => (
+          <div key={j} style={{ position: "relative", background: alt ? B.surface2 : B.surface, border: `1px solid ${sec.type === "outcomes" ? T.ba : B.border}`, borderRadius: 16, padding: "20px 18px" }}>
+            {editable && <button onClick={() => set({ items: sec.items.filter((_, k) => k !== j) })} style={{ position: "absolute", top: 6, right: 8, background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 12 }}>✕</button>}
+            <div style={{ fontSize: 26, marginBottom: 10 }}>{E(it.icon, v => setItem(j, { icon: v }))}</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: B.white, marginBottom: 6 }}>{E(it.title, v => setItem(j, { title: v }))}</div>
+            <div style={{ fontSize: 13, color: B.mutedMid, lineHeight: 1.6 }}>{E(it.body, v => setItem(j, { body: v }))}</div>
+          </div>
+        ))}
+        {editable && <button onClick={() => set({ items: [...(sec.items || []), { icon: "✨", title: "New point", body: "Describe it…" }] })} style={{ border: `1px dashed ${B.borderMid}`, borderRadius: 16, background: "none", color: B.mutedMid, cursor: "pointer", fontSize: 13, fontFamily: "inherit", minHeight: 100 }}>＋ Add</button>}
+      </div>
+    </div>
+  );
+  else if (sec.type === "curriculum") { const ls = (school.semesters || []).flatMap(s => s.lessons || []); bodyEl = (
+    <div style={inner}>
+      <div style={h2}>{E(sec.title || "What's inside", v => set({ title: v }))}</div>
+      {sec.sub && <div style={{ textAlign: "center", fontSize: 14, color: B.mutedMid, marginTop: -16, marginBottom: 24 }}>{E(sec.sub, v => set({ sub: v }))}</div>}
+      <div style={{ display: "flex", flexDirection: "column", gap: 9, maxWidth: 640, margin: "0 auto" }}>
+        {ls.slice(0, 8).map((l, j) => (
+          <div key={j} style={{ display: "flex", gap: 13, alignItems: "center", background: alt ? B.surface2 : B.surface, border: `1px solid ${B.border}`, borderRadius: 13, padding: "13px 16px" }}>
+            <div style={{ width: 32, height: 32, borderRadius: "50%", background: T.ps, border: `1px solid ${T.ba}`, color: T.hi, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, flexShrink: 0, fontFamily: "'Space Grotesk',sans-serif" }}>{j + 1}</div>
+            <div style={{ minWidth: 0 }}><div style={{ fontSize: 14, fontWeight: 700, color: B.white }}>{l.title}</div>{l.concept && <div style={{ fontSize: 12, color: B.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{flattenText(l.concept).slice(0, 90)}</div>}</div>
+          </div>
+        ))}
+        {ls.length > 8 && <div style={{ textAlign: "center", fontSize: 13, color: T.hi, fontWeight: 700 }}>＋ {ls.length - 8} more lessons inside</div>}
+      </div>
+    </div>
+  ); }
+  else if (sec.type === "mentor") bodyEl = (
+    <div style={{ ...inner, maxWidth: 640 }}>
+      <div style={h2}>{E(sec.title || `Meet ${school.mentor?.name}`, v => set({ title: v }))}</div>
+      <div style={{ display: "flex", gap: 18, alignItems: "flex-start", background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 18, padding: 22 }}>
+        <div style={{ width: 58, height: 58, borderRadius: "50%", background: T.grad, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, fontWeight: 800, color: "#fff", flexShrink: 0 }}>{(school.mentor?.name || "M")[0].toUpperCase()}</div>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 17, fontWeight: 700, color: B.white, marginBottom: 6 }}>{school.mentor?.name}</div>
+          <div style={{ fontSize: 13.5, color: B.mutedMid, lineHeight: 1.65 }}>{E(sec.body, v => set({ body: v }))}</div>
+          {school.mentor?.sampleLine && <div style={{ fontSize: 13, color: T.hi, fontStyle: "italic", marginTop: 10 }}>“{school.mentor.sampleLine}”</div>}
+        </div>
+      </div>
+    </div>
+  );
+  else if (sec.type === "testimonials") bodyEl = (
+    <div style={inner}>
+      <div style={h2}>{E(sec.title, v => set({ title: v }))}</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(230px,1fr))", gap: 14 }}>
+        {(sec.items || []).map((it, j) => (
+          <div key={j} style={{ position: "relative", background: alt ? B.surface2 : B.surface, border: `1px solid ${B.border}`, borderRadius: 16, padding: "20px 18px" }}>
+            {editable && <button onClick={() => set({ items: sec.items.filter((_, k) => k !== j) })} style={{ position: "absolute", top: 6, right: 8, background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 12 }}>✕</button>}
+            <div style={{ fontSize: 13.5, color: B.white, lineHeight: 1.65, fontStyle: "italic", marginBottom: 12 }}>“{E(it.quote, v => setItem(j, { quote: v }))}”</div>
+            <div style={{ fontSize: 12, color: T.hi, fontWeight: 700 }}>— {E(it.name, v => setItem(j, { name: v }))}</div>
+          </div>
+        ))}
+        {editable && <button onClick={() => set({ items: [...(sec.items || []), { name: "Student name", quote: "Their words…" }] })} style={{ border: `1px dashed ${B.borderMid}`, borderRadius: 16, background: "none", color: B.mutedMid, cursor: "pointer", fontSize: 13, fontFamily: "inherit", minHeight: 90 }}>＋ Add</button>}
+      </div>
+      {editable && <div style={{ textAlign: "center", fontSize: 11, color: B.muted, marginTop: 12 }}>⚠ These are AI-written examples — replace them with real student quotes before publishing.</div>}
+    </div>
+  );
+  else if (sec.type === "pricing") bodyEl = (
+    <div style={{ ...inner, maxWidth: 460 }}>
+      <div style={h2}>{E(sec.title || "Join today", v => set({ title: v }))}</div>
+      <div style={{ background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 22, padding: "30px 26px", textAlign: "center", boxShadow: `0 20px 60px ${T.pg}` }}>
+        <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 44, fontWeight: 800, color: B.white, letterSpacing: -1 }}>{E(sec.price || "Free", v => set({ price: v }))}</div>
+        {sec.period != null && <div style={{ fontSize: 12.5, color: B.muted, marginBottom: 16 }}>{E(sec.period, v => set({ period: v }), null, "one-time")}</div>}
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, textAlign: "left", margin: "16px 0 22px" }}>
+          {(sec.bullets || []).map((bl, j) => (
+            <div key={j} style={{ display: "flex", gap: 9, alignItems: "flex-start", fontSize: 13.5, color: B.mutedMid }}>
+              <span style={{ color: "#4ADE80", fontWeight: 800 }}>✓</span><span style={{ flex: 1 }}>{E(bl, v => set({ bullets: sec.bullets.map((x, k) => k === j ? v : x) }))}</span>
+              {editable && <button onClick={() => set({ bullets: sec.bullets.filter((_, k) => k !== j) })} style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 11 }}>✕</button>}
+            </div>
+          ))}
+          {editable && <button onClick={() => set({ bullets: [...(sec.bullets || []), "New benefit"] })} style={{ background: "none", border: `1px dashed ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, cursor: "pointer", fontSize: 12, fontFamily: "inherit", padding: "5px" }}>＋ Add benefit</button>}
+        </div>
+        <button onClick={onEnroll} style={{ ...ctaBtn, width: "100%" }}>{E(sec.cta || "Enroll now", v => set({ cta: v }))}</button>
+        {sec.note && <div style={{ fontSize: 11.5, color: B.muted, marginTop: 12 }}>{E(sec.note, v => set({ note: v }))}</div>}
+      </div>
+    </div>
+  );
+  else if (sec.type === "faq") bodyEl = (
+    <div style={{ ...inner, maxWidth: 620 }}>
+      <div style={h2}>{E(sec.title || "Questions", v => set({ title: v }))}</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+        {(sec.items || []).map((it, j) => (
+          <div key={j} style={{ position: "relative", background: alt ? B.surface2 : B.surface, border: `1px solid ${B.border}`, borderRadius: 13, padding: "15px 18px" }}>
+            {editable && <button onClick={() => set({ items: sec.items.filter((_, k) => k !== j) })} style={{ position: "absolute", top: 6, right: 8, background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 12 }}>✕</button>}
+            <div style={{ fontSize: 14, fontWeight: 700, color: B.white, marginBottom: 5 }}>{E(it.q, v => setItem(j, { q: v }))}</div>
+            <div style={{ fontSize: 13, color: B.mutedMid, lineHeight: 1.6 }}>{E(it.a, v => setItem(j, { a: v }))}</div>
+          </div>
+        ))}
+        {editable && <button onClick={() => set({ items: [...(sec.items || []), { q: "A question?", a: "The answer." }] })} style={{ background: "none", border: `1px dashed ${B.borderMid}`, borderRadius: 12, color: B.mutedMid, cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", padding: "9px" }}>＋ Add question</button>}
+      </div>
+    </div>
+  );
+  else if (sec.type === "cta") bodyEl = (
+    <div style={{ ...inner, textAlign: "center", maxWidth: 620 }}>
+      <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: "clamp(24px,4vw,36px)", fontWeight: 800, letterSpacing: -0.8, color: B.white, marginBottom: 12 }}>{E(sec.headline, v => set({ headline: v }))}</div>
+      {sec.sub && <div style={{ fontSize: 14.5, color: B.mutedMid, marginBottom: 26 }}>{E(sec.sub, v => set({ sub: v }))}</div>}
+      <button onClick={onEnroll} style={ctaBtn}>{E(sec.cta || "Enroll now", v => set({ cta: v }))}</button>
+    </div>
+  );
+  else return null;
+  return (
+    <div style={wrap}>
+      {editable && (
+        <div style={{ position: "absolute", top: 8, right: 10, display: "flex", gap: 5, zIndex: 5, background: "rgba(0,0,0,0.4)", borderRadius: 9, padding: 3 }}>
+          <button onClick={() => onMove(-1)} disabled={i === 0} title="Move up" style={{ background: "none", border: "none", color: i === 0 ? "rgba(255,255,255,0.3)" : "#fff", cursor: "pointer", fontSize: 12, padding: "3px 6px" }}>↑</button>
+          <button onClick={() => onMove(1)} disabled={i === total - 1} title="Move down" style={{ background: "none", border: "none", color: i === total - 1 ? "rgba(255,255,255,0.3)" : "#fff", cursor: "pointer", fontSize: 12, padding: "3px 6px" }}>↓</button>
+          <button onClick={onDelete} title="Delete section" style={{ background: "none", border: "none", color: "#F87171", cursor: "pointer", fontSize: 12, padding: "3px 6px" }}>✕</button>
+        </div>
+      )}
+      {bodyEl}
+    </div>
+  );
+}
+
+const LANDING_ADDABLE = [["pain", "😖 Pain points"], ["outcomes", "🌟 Outcomes"], ["curriculum", "📚 Curriculum"], ["mentor", "🎓 Mentor"], ["testimonials", "💬 Testimonials"], ["pricing", "💳 Pricing"], ["faq", "❓ FAQ"]];
+function LandingSections({ school, sections, T, editable, onSections, onEnroll, onHeroImage }) {
+  const move = (i, d) => { const arr = [...sections]; const j = i + d; if (j < 0 || j >= arr.length) return; const [m] = arr.splice(i, 1); arr.splice(j, 0, m); onSections(arr); };
+  return (
+    <div style={{ borderRadius: 18, overflow: "hidden", border: `1px solid ${B.border}` }}>
+      {sections.map((sec, i) => (
+        <LandingSection key={sec.id || i} sec={sec} i={i} total={sections.length} school={school} T={T} editable={editable}
+          onPatch={ns => onSections(sections.map((x, k) => k === i ? ns : x))}
+          onMove={d => move(i, d)} onDelete={() => onSections(sections.filter((_, k) => k !== i))}
+          onEnroll={onEnroll} onHeroImage={onHeroImage} />
+      ))}
+      {editable && (
+        <div style={{ padding: 14, display: "flex", gap: 7, flexWrap: "wrap", justifyContent: "center", background: B.surface }}>
+          <span style={{ fontSize: 11.5, color: B.muted, alignSelf: "center", fontWeight: 700 }}>Add a section:</span>
+          {LANDING_ADDABLE.map(([t, l]) => <button key={t} onClick={() => {
+            const blank = { pain: { type: "pain", title: "Sound familiar?", items: [{ icon: "😖", title: "A real pain", body: "Describe it…" }] }, outcomes: { type: "outcomes", title: "What changes", items: [{ icon: "🌟", title: "An outcome", body: "Describe it…" }] }, curriculum: { type: "curriculum", title: "What's inside", sub: "" }, mentor: { type: "mentor", title: `Meet ${school.mentor?.name || "your mentor"}`, body: school.mentor?.personality || "" }, testimonials: { type: "testimonials", title: "What students say", items: [{ name: "Student name", quote: "Their words…" }] }, pricing: { type: "pricing", title: "Join today", price: "Free", bullets: ["Full access"], cta: "Enroll now", note: "" }, faq: { type: "faq", title: "Questions", items: [{ q: "A question?", a: "The answer." }] } }[t];
+            const arr = [...sections]; arr.splice(Math.max(0, arr.length - 1), 0, { ...blank, id: uid() }); onSections(arr); // insert before the final CTA
+          }} style={{ background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, padding: "6px 11px", cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>{l}</button>)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// THE LANDING STUDIO — creator-only full-screen editor: generate → hand-edit → turn on.
+function LandingStudio({ school, T, media, publicUrl, onUpdate, onClose }) {
+  const landing = school.landing || {};
+  const sections = landing.sections || [];
+  const [busy, setBusy] = useState(false);
+  const [hint, setHint] = useState("");
+  const [err, setErr] = useState("");
+  const [pickHero, setPickHero] = useState(false);
+  const setLanding = (patch) => onUpdate({ data: { ...school, landing: { ...landing, ...patch } } });
+  async function generate() {
+    if (busy) return; setBusy(true); setErr("");
+    try { const secs = await genLanding(school, hint.trim() || undefined); setLanding({ sections: secs, on: landing.on !== false }); setHint(""); }
+    catch (e) { setErr(e.message || "Generation failed — try again."); }
+    setBusy(false);
+  }
+  const setHeroImage = (url) => setLanding({ sections: sections.map(s => s.type === "hero" ? { ...s, image: url } : s) });
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 260, background: "var(--bg)", overflowY: "auto" }}>
+      <div style={{ position: "sticky", top: 0, zIndex: 10, background: "var(--surface)", borderBottom: `1px solid ${B.borderMid}`, padding: "10px 16px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 15, fontWeight: 800, color: B.white, marginRight: 6 }}>🚀 Landing page</div>
+        <input value={hint} onChange={e => setHint(e.target.value)} onKeyDown={e => { if (e.key === "Enter") generate(); }} placeholder={sections.length ? 'Direction for a redesign… e.g. "more playful, lead with the pain"' : 'Optional direction… e.g. "target busy parents, urgent tone"'} style={{ flex: "1 1 240px", background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, fontFamily: "inherit", fontSize: 12.5, padding: "8px 11px" }} />
+        <button onClick={generate} disabled={busy} style={{ background: T.grad, border: "none", borderRadius: 9, color: "#fff", padding: "8px 16px", cursor: "pointer", fontSize: 12.5, fontWeight: 800, fontFamily: "inherit", opacity: busy ? 0.6 : 1 }}>{busy ? <><Spinner color="#fff" />Designing…</> : sections.length ? "↻ Regenerate" : "✨ Generate"}</button>
+        <label style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, color: landing.on !== false && sections.length ? "#4ADE80" : B.muted, fontWeight: 700, cursor: "pointer" }}>
+          <input type="checkbox" checked={landing.on !== false && !!sections.length} disabled={!sections.length} onChange={e => setLanding({ on: e.target.checked })} /> Live on your public link
+        </label>
+        {publicUrl && <a href={publicUrl} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: T.hi, textDecoration: "none", fontWeight: 700 }}>↗ View</a>}
+        <button onClick={onClose} style={{ marginLeft: "auto", background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.mutedMid, padding: "8px 14px", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>✓ Done</button>
+      </div>
+      {err && <div style={{ maxWidth: 900, margin: "12px auto 0", padding: "0 16px", color: "#F87171", fontSize: 12.5 }}>{err}</div>}
+      <div style={{ maxWidth: 960, margin: "18px auto 80px", padding: "0 16px" }}>
+        {sections.length ? (
+          <LandingSections school={school} sections={sections} T={T} editable onSections={secs => setLanding({ sections: secs })} onEnroll={() => { }} onHeroImage={() => { if (media) setPickHero(true); else { const u = window.prompt("Hero background URL (https):", ""); if (u != null) setHeroImage(u.trim() || undefined); } }} />
+        ) : (
+          <div style={{ textAlign: "center", padding: "80px 20px", border: `1px dashed ${B.borderMid}`, borderRadius: 20 }}>
+            <div style={{ fontSize: 40, marginBottom: 12 }}>🚀</div>
+            <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 19, fontWeight: 800, color: B.white, marginBottom: 8 }}>Design a landing page for {school.name}</div>
+            <div style={{ fontSize: 13.5, color: B.mutedMid, maxWidth: 440, margin: "0 auto 20px", lineHeight: 1.65 }}>One click and Senseito writes a high-converting page for your exact audience — hero, pains, outcomes, curriculum, your mentor, pricing, FAQ. Then click any word to change it.</div>
+            <button onClick={generate} disabled={busy} style={{ background: T.grad, border: "none", borderRadius: 12, color: "#fff", padding: "13px 28px", cursor: "pointer", fontSize: 14.5, fontWeight: 800, fontFamily: "inherit", boxShadow: `0 8px 26px ${T.pg}`, opacity: busy ? 0.6 : 1 }}>{busy ? <><Spinner color="#fff" />Designing your page…</> : "✨ Generate my landing page"}</button>
+          </div>
+        )}
+      </div>
+      {pickHero && media && <MediaPicker token={media.token} userId={media.userId} imagesOnly onPick={m => setHeroImage(m.url)} onClose={() => setPickHero(false)} />}
+    </div>
+  );
+}
+
 function SignaturePanel({ school, T, canEdit, onUpdate }) {
   const soul = school.soul || null;
   const [busy, setBusy] = useState(false); // "regen" | "iter" | false
@@ -5703,6 +5938,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const SECTIONS = getSections(school).filter(s => s.kind !== "gamelab");
   const [gamelabOpen, setGamelabOpen] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [landingOpen, setLandingOpen] = useState(false);
   const [tab, setTab] = useState(() => SECTIONS[0]?.id || "mentor");
   const [addSecOpen, setAddSecOpen] = useState(false);
   const [bodyAddOpen, setBodyAddOpen] = useState(false);
@@ -6044,6 +6280,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
       <SchoolEffects effect={school.effect} T={T} />
       <Toast toast={toast} />
       {!readOnly && reveal && <SchoolReveal school={school} T={T} onClose={() => { setReveal(false); onRevealSeen?.(); }} onExplore={() => { setReveal(false); onRevealSeen?.(); setWizardOpen(true); }} onTour={() => { setReveal(false); onRevealSeen?.(); openGuide(); }} />}
+      {!readOnly && landingOpen && <LandingStudio school={school} T={T} media={media} publicUrl={rec.published && rec.published_slug ? `${publicBase}/s/${rec.published_slug}` : null} onUpdate={onUpdate} onClose={() => setLandingOpen(false)} />}
       {!readOnly && wizardOpen && <SchoolWizard school={school} T={T} media={media} published={!!rec.published}
         onUpdate={onUpdate} saveLesson={saveLesson} authorBlock={(type, ctx) => authorBlock(ctx || {}, type, "")}
         addFeatureSection={addFeatureSection} addSection={addSection} hasKind={hasKind}
@@ -6105,6 +6342,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
               {school.bgImage && <label style={{ ...pill, gap: 6, fontWeight: 400, fontSize: 12 }} title="Tint the photo so text stays readable"><input type="checkbox" checked={school.bgTint !== false} onChange={e => onUpdate({ data: { ...school, bgTint: e.target.checked } })} /> tint <span onClick={() => onUpdate({ data: { ...school, bgImage: undefined } })} style={{ color: B.muted, cursor: "pointer" }}>✕</span></label>}
             </div>
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <button onClick={() => setLandingOpen(true)} title="Design a high-converting landing page for this school" style={{ ...pill, color: T.hi, borderColor: T.ba }}>🚀 Landing{school.landing?.sections?.length && school.landing?.on !== false ? " ·🟢" : ""}</button>
               <button onClick={() => onOpenMedia?.()} title="Your media library" style={{ ...pill, color: T.hi, borderColor: T.ba }}>🖼 Media</button>
               <button onClick={() => setGamelabOpen(true)} title="Build games, then drop them in with a Game brick" style={{ ...pill, color: T.hi, borderColor: T.ba }}>🎮 Game Lab{(school.games || []).length ? ` (${school.games.length})` : ""}</button>
               <button data-guide="publish" onClick={() => onPublish(rec)} disabled={publishing} style={{ ...pill, background: rec.published ? "rgba(74,222,128,0.1)" : "linear-gradient(135deg,#059669,#047857)", border: rec.published ? "1px solid rgba(74,222,128,0.35)" : "none", color: rec.published ? "#4ADE80" : "white" }}>
@@ -7036,6 +7274,7 @@ function PublicSchool({ slug }) {
   const [rec, setRec] = useState(null);
   const [status, setStatus] = useState("loading");
   const [stud, setStud] = useState(null); // signed-in student { token, user }
+  const [peek, setPeek] = useState(false); // landing shown → school preview behind a toggle
   const [mode, setMode] = useThemeMode();
   const lsKey = `senseito_progress_${slug}`;
   const saveT = useRef(null);
@@ -7108,6 +7347,10 @@ function PublicSchool({ slug }) {
   const signIn = () => { const redirect = encodeURIComponent(window.location.href.split("#")[0]); window.location.href = `${SUPA_URL}/auth/v1/authorize?provider=google&redirect_to=${redirect}`; };
   const T = themeFor(rec.data);
   const merged = { ...rec, ...localState };
+  // Landing page first for visitors who aren't signed in; the school itself sits behind a peek.
+  const landing = rec.data.landing;
+  const showLanding = !stud && landing?.on !== false && (landing?.sections || []).length > 0;
+  const toEnroll = () => { try { document.getElementById("sx-enroll")?.scrollIntoView({ behavior: "smooth", block: "center" }); } catch { } };
   return (
     <div className={mode === "light" ? "light" : undefined} style={{ background: B.bg, minHeight: "100vh", color: B.white, fontFamily: fontStack(rec.data) }}>
       <GlobalStyle />
@@ -7120,10 +7363,17 @@ function PublicSchool({ slug }) {
           <a href="/" style={{ fontSize: 12.5, color: "#A78BFA", textDecoration: "none", border: "1px solid rgba(124,58,237,0.35)", borderRadius: 8, padding: "6px 13px", fontWeight: 600 }}>Build your own →</a>
         </div>
       </div>
+      {showLanding && (
+        <div style={{ maxWidth: 980, margin: "18px auto 0", padding: "0 16px" }}>
+          <LandingSections school={rec.data} sections={landing.sections} T={T} editable={false} onSections={() => { }} onEnroll={toEnroll} />
+        </div>
+      )}
       {stud
         ? <div style={{ maxWidth: 860, margin: "16px auto 0", padding: "0 20px" }}><div style={{ background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.3)", borderRadius: 14, padding: "12px 18px", fontSize: 13, color: "#6EE7B7", fontWeight: 600 }}>✓ Enrolled as {stud.user.email} — your progress saves automatically across devices.</div></div>
-        : <EnrollCard schoolId={rec.id} mentorName={rec.data?.mentor?.name} T={T} onSignIn={signIn} />}
-      <Boundary><SchoolPage rec={merged} readOnly onUpdate={(patch) => setLocalState(s => ({ ...s, ...patch }))} /></Boundary>
+        : <div id="sx-enroll"><EnrollCard schoolId={rec.id} mentorName={rec.data?.mentor?.name} T={T} onSignIn={signIn} /></div>}
+      {showLanding && !peek
+        ? <div style={{ textAlign: "center", padding: "10px 0 60px" }}><button onClick={() => setPeek(true)} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 100, color: B.mutedMid, padding: "9px 20px", cursor: "pointer", fontSize: 13, fontFamily: "inherit", fontWeight: 700 }}>👀 Peek inside the school</button></div>
+        : <Boundary><SchoolPage rec={merged} readOnly onUpdate={(patch) => setLocalState(s => ({ ...s, ...patch }))} /></Boundary>}
     </div>
   );
 }
