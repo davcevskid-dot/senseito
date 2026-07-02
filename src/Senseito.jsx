@@ -77,6 +77,22 @@ async function deleteMedia(path, token) {
   });
   if (!res.ok) { const t = await res.text().catch(() => ""); throw new Error(`Delete ${res.status}${t ? `: ${t.slice(0, 140)}` : ""}`); }
 }
+// ── AI image generation → straight into the creator's media library. ──
+// The OpenAI key lives ONLY in the "image-gen" edge function (server-side).
+async function genImageToMedia(prompt, token, userId, size) {
+  const res = await fetch(`${SUPA_URL}/functions/v1/image-gen`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", apikey: SUPA_KEY, Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ prompt, size }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data.error || !data.b64) throw new Error(data.error || "Image generation failed");
+  const bin = atob(data.b64); const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  const file = new File([arr], `ai-${Date.now()}.png`, { type: "image/png" });
+  return uploadMedia(file, token, userId);
+}
+
 async function loadProfile(token, userId) {
   try { const rows = await supaFetch(`/rest/v1/profiles?id=eq.${userId}&select=*`, { token }); return (rows && rows[0]) || null; } catch { return null; }
 }
@@ -7112,9 +7128,18 @@ function MediaPicker({ token, userId, imagesOnly = false, onPick, onClose }) {
   const [items, setItems] = useState(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [genPrompt, setGenPrompt] = useState("");
+  const [genBusy, setGenBusy] = useState(false);
   const fileRef = useRef(null);
   const refresh = () => listMedia(token, userId).then(setItems).catch(e => { setErr(e.message); setItems([]); });
   useEffect(() => { refresh(); }, []); // eslint-disable-line
+  async function generate() {
+    const p = genPrompt.trim(); if (!p || genBusy) return;
+    setGenBusy(true); setErr("");
+    try { const m = await genImageToMedia(p, token, userId); setGenPrompt(""); await refresh(); onPick(m); onClose(); }
+    catch (e) { setErr(e.message); }
+    setGenBusy(false);
+  }
   async function onFiles(e) {
     const files = [...(e.target.files || [])]; e.target.value = ""; if (!files.length) return;
     setBusy(true); setErr("");
@@ -7135,6 +7160,10 @@ function MediaPicker({ token, userId, imagesOnly = false, onPick, onClose }) {
           <input ref={fileRef} type="file" multiple accept={imagesOnly ? "image/*" : undefined} onChange={onFiles} style={{ display: "none" }} />
         </div>
         {err && <div style={{ padding: "8px 18px", fontSize: 12, color: "#F87171" }}>{err}</div>}
+        <div style={{ display: "flex", gap: 7, padding: "10px 18px", borderBottom: `1px solid ${B.border}`, background: T.ps }}>
+          <input value={genPrompt} onChange={e => setGenPrompt(e.target.value)} onKeyDown={e => { if (e.key === "Enter") generate(); }} placeholder='✨ Or generate one… e.g. "warm watercolor of a sunrise over mountains"' disabled={genBusy} style={{ flex: 1, background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, fontFamily: "inherit", fontSize: 12.5, padding: "8px 11px" }} />
+          <button onClick={generate} disabled={genBusy || !genPrompt.trim()} style={{ background: T.grad, border: "none", borderRadius: 9, color: "#fff", padding: "8px 14px", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", opacity: genBusy || !genPrompt.trim() ? 0.6 : 1 }}>{genBusy ? <><Spinner color="#fff" />Painting…</> : "✨ Generate"}</button>
+        </div>
         <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
           {items === null ? <div style={{ fontSize: 13, color: B.muted, textAlign: "center", padding: 30 }}>Loading your media…</div>
             : shown.length === 0 ? <div style={{ fontSize: 13, color: B.muted, textAlign: "center", padding: 30, lineHeight: 1.6 }}>No {imagesOnly ? "images" : "files"} yet.<br />Hit <b style={{ color: T.hi }}>⬆ Upload</b> to add some.</div>
@@ -7413,8 +7442,17 @@ function ProfileView({ session, profile, onProfile, achStats, schoolCount, syncS
   const [busy, setBusy] = useState(false);
   const [avatarBusy, setAvatarBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [genPrompt, setGenPrompt] = useState("");
+  const [genBusy, setGenBusy] = useState(false);
   const fileRef = useRef(null);
   const avatarRef = useRef(null);
+  async function generate() {
+    const p = genPrompt.trim(); if (!p || genBusy) return;
+    setGenBusy(true); setErr("");
+    try { await genImageToMedia(p, session.token, userId); setGenPrompt(""); await refresh(); }
+    catch (e) { setErr(e.message); }
+    setGenBusy(false);
+  }
   const refresh = () => listMedia(session.token, userId).then(setItems).catch(e => { setErr(e.message); setItems([]); });
   useEffect(() => { if (userId) refresh(); }, [userId]); // eslint-disable-line
   const used = (items || []).reduce((a, m) => a + (m.size || 0), 0);
@@ -7479,6 +7517,10 @@ function ProfileView({ session, profile, onProfile, achStats, schoolCount, syncS
           </div>
           <button onClick={() => fileRef.current?.click()} disabled={busy} style={{ background: T.grad, border: "none", borderRadius: 10, color: "#fff", padding: "9px 15px", cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit", opacity: busy ? 0.6 : 1 }}>{busy ? "Uploading…" : "⬆ Upload files"}</button>
           <input ref={fileRef} type="file" multiple onChange={onUpload} style={{ display: "none" }} />
+        </div>
+        <div style={{ display: "flex", gap: 7, marginBottom: 14 }}>
+          <input value={genPrompt} onChange={e => setGenPrompt(e.target.value)} onKeyDown={e => { if (e.key === "Enter") generate(); }} placeholder='✨ Generate an image with AI… e.g. "minimal line-art logo of a mountain sunrise"' disabled={genBusy} style={{ flex: 1, background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, fontFamily: "inherit", fontSize: 12.5, padding: "9px 12px" }} />
+          <button onClick={generate} disabled={genBusy || !genPrompt.trim()} style={{ background: T.grad, border: "none", borderRadius: 9, color: "#fff", padding: "9px 15px", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", opacity: genBusy || !genPrompt.trim() ? 0.6 : 1, whiteSpace: "nowrap" }}>{genBusy ? <><Spinner color="#fff" />Painting…</> : "✨ Generate"}</button>
         </div>
         {err && <div style={{ fontSize: 12, color: "#F87171", marginBottom: 10 }}>{err}</div>}
         {items === null ? <div style={{ fontSize: 13, color: B.muted, padding: 24, textAlign: "center" }}>Loading…</div>
