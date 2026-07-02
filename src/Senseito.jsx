@@ -5155,7 +5155,7 @@ function StatChip({ icon, value, label, T, delay }) {
 }
 
 // THE REVEAL — a calm, proud unveiling (no confetti): proof → mentor → what's next.
-function SchoolReveal({ school, T, onClose, onTour }) {
+function SchoolReveal({ school, T, onClose, onTour, onExplore }) {
   const st = schoolWowStats(school);
   const fallback = school.mentor?.sampleLine
     ? `I'm ${st.mentor}. ${school.mentor.sampleLine}`
@@ -5239,8 +5239,8 @@ function SchoolReveal({ school, T, onClose, onTour }) {
 
           {/* CTAs */}
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 2 }}>
-            <button onClick={onClose} style={{ flex: "2 1 200px", background: T.grad, border: "none", borderRadius: 12, color: "#fff", padding: "13px", cursor: "pointer", fontSize: 14, fontWeight: 800, fontFamily: "inherit", boxShadow: `0 8px 26px ${T.pg}` }}>Explore your school →</button>
-            <button onClick={onTour} style={{ flex: "1 1 150px", background: B.surface2, border: `1px solid ${T.ba}`, borderRadius: 12, color: T.hi, padding: "13px", cursor: "pointer", fontSize: 13.5, fontWeight: 700, fontFamily: "inherit" }}>🪄 Set up your school</button>
+            <button onClick={onExplore} style={{ flex: "2 1 200px", background: T.grad, border: "none", borderRadius: 12, color: "#fff", padding: "13px", cursor: "pointer", fontSize: 14, fontWeight: 800, fontFamily: "inherit", boxShadow: `0 8px 26px ${T.pg}` }}>Explore your school →</button>
+            <button onClick={onTour} style={{ flex: "1 1 150px", background: B.surface2, border: `1px solid ${T.ba}`, borderRadius: 12, color: T.hi, padding: "13px", cursor: "pointer", fontSize: 13.5, fontWeight: 700, fontFamily: "inherit" }}>🧭 Take a quick tour</button>
           </div>
         </div>
       </div>
@@ -5257,7 +5257,7 @@ const GUIDE_STEPS = [
 ];
 
 // THE CREATOR GUIDE — spotlight walkthrough + its own contextual AI chat.
-function CreatorGuide({ school, T, onClose }) {
+function CreatorGuide({ school, T, onClose, onSetup, onPublish }) {
   const steps = GUIDE_STEPS;
   const [i, setI] = useState(0);
   const [rect, setRect] = useState(null);
@@ -5389,7 +5389,12 @@ function CreatorGuide({ school, T, onClose }) {
               {steps.map((_, k) => <div key={k} style={{ width: k === i ? 16 : 6, height: 6, borderRadius: 3, background: k === i ? T.p : B.borderMid, transition: "width 0.2s" }} />)}
             </div>
             {i > 0 && <button onClick={() => setI(i - 1)} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.mutedMid, padding: "7px 13px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 700 }}>Back</button>}
-            <button onClick={() => (last ? onClose() : setI(i + 1))} style={{ background: T.grad, border: "none", borderRadius: 9, color: "#fff", padding: "7px 16px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 800 }}>{last ? "Done ✓" : "Next →"}</button>
+            {last
+              ? <>
+                  <button onClick={() => { onClose(); onSetup?.(); }} style={{ background: T.grad, border: "none", borderRadius: 9, color: "#fff", padding: "7px 14px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 800 }}>🪄 Set up</button>
+                  <button onClick={() => { onClose(); onPublish?.(); }} style={{ background: "rgba(74,222,128,0.12)", border: "1px solid rgba(74,222,128,0.35)", borderRadius: 9, color: "#4ADE80", padding: "7px 14px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 800 }}>🌐 Publish</button>
+                </>
+              : <button onClick={() => setI(i + 1)} style={{ background: T.grad, border: "none", borderRadius: 9, color: "#fff", padding: "7px 16px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 800 }}>Next →</button>}
           </div>
         </div>
       </div>
@@ -5627,7 +5632,7 @@ function SchoolWizard({ school, T, media, published, onUpdate, saveLesson, autho
   );
 }
 
-function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, publicBase, token, onSetSlug, onIterate, iterating = false, iterProg = { pct: 0, label: "" }, justBuilt = false, onRevealSeen, onStats, guideOpen = false, onGuideOpen, onGuideClose, onOpenMedia }) {
+function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, publicBase, token, onSetSlug, onIterate, iterating = false, iterProg = { pct: 0, label: "" }, justBuilt = false, onRevealSeen, onStats, guideOpen = false, onGuideOpen, onGuideClose, onOpenMedia, addClassNonce = 0 }) {
   const school = rec.data;
   const T = themeFor(school);
   const sk = skinCfg(school.skin, T);
@@ -5812,6 +5817,8 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const viewSchool = classes ? { ...school, semesters: viewSemesters } : school;
 
   // Create a whole new class (own teacher + curriculum) grounded in the same school subject.
+  const addClassRef = useRef(addClassNonce);
+  useEffect(() => { if (addClassNonce !== addClassRef.current) { addClassRef.current = addClassNonce; addClass(); } }, [addClassNonce]); // eslint-disable-line
   async function addClass() {
     const prompt = window.prompt('New class — what should it teach? e.g. "Brotherhood: building a circle of men who hold you accountable"');
     if (!prompt || !prompt.trim() || addingClass) return;
@@ -6036,13 +6043,13 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
     <div style={{ position: "relative", fontFamily: fontStack(school) }}>
       <SchoolEffects effect={school.effect} T={T} />
       <Toast toast={toast} />
-      {!readOnly && reveal && <SchoolReveal school={school} T={T} onClose={() => { setReveal(false); onRevealSeen?.(); }} onTour={() => { setReveal(false); onRevealSeen?.(); setWizardOpen(true); }} />}
+      {!readOnly && reveal && <SchoolReveal school={school} T={T} onClose={() => { setReveal(false); onRevealSeen?.(); }} onExplore={() => { setReveal(false); onRevealSeen?.(); setWizardOpen(true); }} onTour={() => { setReveal(false); onRevealSeen?.(); openGuide(); }} />}
       {!readOnly && wizardOpen && <SchoolWizard school={school} T={T} media={media} published={!!rec.published}
         onUpdate={onUpdate} saveLesson={saveLesson} authorBlock={(type, ctx) => authorBlock(ctx || {}, type, "")}
         addFeatureSection={addFeatureSection} addSection={addSection} hasKind={hasKind}
         onIterate={applyIteration} onPublish={() => onPublish(rec)} openGameLab={() => setGamelabOpen(true)}
         onClose={() => setWizardOpen(false)} />}
-      {!readOnly && guideOpen && <CreatorGuide school={school} T={T} onClose={() => onGuideClose?.()} />}
+      {!readOnly && guideOpen && <CreatorGuide school={school} T={T} onClose={() => onGuideClose?.()} onSetup={() => setWizardOpen(true)} onPublish={() => onPublish(rec)} />}
       {bgPick && media && <MediaPicker token={media.token} userId={media.userId} imagesOnly onPick={m => onUpdate(bgPick === "hero" ? { data: { ...school, heroImage: m.url, heroTint: school.heroTint !== false } } : { data: { ...school, bgImage: m.url, bgTint: school.bgTint !== false } })} onClose={() => setBgPick(false)} />}
       {iconPick && media && <MediaPicker token={media.token} userId={media.userId} imagesOnly onPick={m => onUpdate({ data: { ...school, iconImage: m.url } })} onClose={() => setIconPick(false)} />}
       {!readOnly && iconEdit && (
@@ -6380,6 +6387,12 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
             })()}
           </div>)}
           <div key={activeTab} className="sx-stagger" style={{ flex: 1, minWidth: 0, width: "100%", display: "flex", flexDirection: "column", gap: dens, ...(SECTIONS.find(s => s.id === activeTab)?.sticky ? { position: "sticky", top: 64, alignSelf: "flex-start", maxHeight: "calc(100vh - 80px)", overflowY: "auto" } : {}) }}>
+          {activeTab === "lessons" && !readOnly && (
+            <div style={{ display: "flex", gap: 6, alignItems: "center", justifyContent: "flex-end", flexWrap: "wrap" }}>
+              <span style={{ fontSize: 11, color: B.muted }}>Layout</span>
+              {[["lms", "🗂️ LMS"], ["cards", "🗃️ Cards"], ["steps", "🪜 Steps"], ["arcade", "🎮 Arcade"]].map(([k, l]) => <button key={k} onClick={() => onUpdate({ data: { ...school, shell: k, ...(k === "arcade" ? { progression: "arcade" } : k === "cards" ? { progression: "list" } : {}) } })} style={{ background: shell === k ? T.ps : "none", border: `1px solid ${shell === k ? T.ba : B.borderMid}`, borderRadius: 8, color: shell === k ? T.hi : B.mutedMid, padding: "5px 11px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 700 }}>{l}</button>)}
+            </div>
+          )}
           {activeTab === "lessons" && (stepsShell ? (activeLesson ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -6433,13 +6446,6 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
             )}
             {/* The class switcher now lives in the top header; here we just note the active class's teacher. */}
             {classes && (() => { const cm = classMentor(school, curClassId); const cc = classes.find(c => c.id === curClassId); return <div style={{ fontSize: 11.5, color: B.muted }}>{cc ? <><span style={{ color: T.hi, fontWeight: 700 }}>{cc.icon} {cc.title}</span>{cm?.name && cm.name !== school.mentor?.name ? <> · teacher: <span style={{ color: T.hi, fontWeight: 700 }}>{cm.name}</span></> : null}</> : null}</div>; })()}
-            {!readOnly && <div style={{ display: "flex", gap: 6, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
-              <button onClick={addClass} disabled={addingClass} title="Create a new class (own teacher + curriculum)" style={{ background: "none", border: `1px dashed ${T.ba}`, borderRadius: 8, color: T.hi, padding: "5px 12px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 700, opacity: addingClass ? 0.6 : 1 }}>{addingClass ? <><Spinner color={T.hi} />Building class…</> : "＋ Add a class"}</button>
-              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                <span style={{ fontSize: 11, color: B.muted }}>Layout</span>
-                {[["lms", "🗂️ LMS"], ["cards", "🗃️ Cards"], ["steps", "🪜 Steps"], ["arcade", "🎮 Arcade"]].map(([k, l]) => <button key={k} onClick={() => onUpdate({ data: { ...school, shell: k, ...(k === "arcade" ? { progression: "arcade" } : k === "cards" ? { progression: "list" } : {}) } })} style={{ background: shell === k ? T.ps : "none", border: `1px solid ${shell === k ? T.ba : B.borderMid}`, borderRadius: 8, color: shell === k ? T.hi : B.mutedMid, padding: "5px 11px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 700 }}>{l}</button>)}
-              </div>
-            </div>}
             {(school.progression === "arcade" || shell === "arcade") ? (
               <ArcadeRun school={viewSchool} T={T} progress={progress} xp={xp} onEnter={enterLesson} onEdit={setEditingLesson} readOnly={readOnly} />
             ) : school.progression === "map" ? (
@@ -7218,6 +7224,7 @@ export default function Senseito() {
   const [scrollHome, setScrollHome] = useState(false); // set by "New School" → Home scrolls to the create chat
   const [guideOpen, setGuideOpen] = useState(false); // Creator Guide (opened from the 🧭 button by the theme toggle)
   const [sideCollapsed, setSideCollapsed] = useState(false); // hide the Senseito chat sidebar to focus on manual editing
+  const [addClassNonce, setAddClassNonce] = useState(0); // sidebar "add class" trigger (addClass lives in SchoolPage)
   const [profile, setProfile] = useState(null); // { avatar_url, display_name }
   const [studentsById, setStudentsById] = useState({}); // per-school enrolled counts (from published analytics)
   const [achQueue, setAchQueue] = useState([]); // achievements waiting to be celebrated
@@ -7606,7 +7613,10 @@ export default function Senseito() {
               {active && <button onClick={() => setSideCollapsed(true)} title="Hide the chat — focus on editing" style={{ background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "6px 10px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>«</button>}
             </div>
           </div>
-          <button onClick={() => { setView("home"); setSideOpen(false); setScrollHome(true); }} style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "none", background: view === "home" ? "linear-gradient(135deg,#7C3AED,#6D28D9)" : "rgba(124,58,237,0.1)", color: view === "home" ? "white" : "#A78BFA", fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", textAlign: "left", boxShadow: view === "home" ? "0 0 18px rgba(124,58,237,0.25)" : "none" }}>＋ New School</button>
+          {active
+            ? <button onClick={() => setAddClassNonce(n => n + 1)} title="Create a new class (its own teacher + curriculum) in this school" style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "1px dashed rgba(124,58,237,0.5)", background: "rgba(124,58,237,0.1)", color: "#A78BFA", fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", textAlign: "left" }}>＋ Add a class</button>
+            : <button onClick={() => { setView("home"); setSideOpen(false); setScrollHome(true); }} style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "none", background: view === "home" ? "linear-gradient(135deg,#7C3AED,#6D28D9)" : "rgba(124,58,237,0.1)", color: view === "home" ? "white" : "#A78BFA", fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", textAlign: "left", boxShadow: view === "home" ? "0 0 18px rgba(124,58,237,0.25)" : "none" }}>＋ New School</button>}
+          {active && <button onClick={() => { setView("home"); setSideOpen(false); setScrollHome(true); }} style={{ width: "100%", marginTop: 6, padding: "7px 14px", borderRadius: 10, border: "none", background: "none", color: B.muted, fontFamily: "inherit", fontSize: 12, cursor: "pointer", textAlign: "left" }}>＋ New School</button>}
         </div>
         {active ? (
           <Boundary resetKey={view} fallback={() => <div style={{ flex: 1, padding: 16, fontSize: 12, color: B.muted }}>Chat hit an error. <button onClick={() => setView("home")} style={{ background: "none", border: "none", color: "#A78BFA", cursor: "pointer", fontFamily: "inherit", fontSize: 12 }}>← Back to schools</button></div>}>
@@ -7667,7 +7677,7 @@ export default function Senseito() {
                 : <Home onCreated={createSchool} session={session} onRequireAuth={() => setAccountOpen(true)} />)
               : view === "home" || !active
               ? <Home onCreated={createSchool} autofocus={scrollHome} onAutofocusDone={() => setScrollHome(false)} session={session} onRequireAuth={() => setAccountOpen(true)} />
-              : <SchoolPage key={active.id} rec={active} onUpdate={(patch) => updateSchool(active.id, patch)} onPublish={publishSchool} publishing={publishing} publicBase={publicBase} token={session?.token} onSetSlug={setCustomSlug} onIterate={applyIterate} iterating={iterating} iterProg={iterProg} justBuilt={active.id === justBuiltId} onRevealSeen={() => setJustBuiltId(null)} onStats={(n) => setStudentsById(m => (m[active.id] === n ? m : { ...m, [active.id]: n }))} guideOpen={guideOpen} onGuideOpen={() => setGuideOpen(true)} onGuideClose={() => setGuideOpen(false)} onOpenMedia={() => setView("profile")} />}
+              : <SchoolPage key={active.id} rec={active} onUpdate={(patch) => updateSchool(active.id, patch)} onPublish={publishSchool} publishing={publishing} publicBase={publicBase} token={session?.token} onSetSlug={setCustomSlug} onIterate={applyIterate} iterating={iterating} iterProg={iterProg} justBuilt={active.id === justBuiltId} onRevealSeen={() => setJustBuiltId(null)} onStats={(n) => setStudentsById(m => (m[active.id] === n ? m : { ...m, [active.id]: n }))} guideOpen={guideOpen} onGuideOpen={() => setGuideOpen(true)} onGuideClose={() => setGuideOpen(false)} onOpenMedia={() => setView("profile")} addClassNonce={addClassNonce} />}
           </Boundary>
         </div>
       </div>
