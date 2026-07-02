@@ -1167,6 +1167,7 @@ const SECTION_META = {
   tools: { title: "Tools", icon: "🛠️" },
   dashboard: { title: "Dashboard", icon: "🧭" },
   gamelab: { title: "Game Lab", icon: "🎮" },
+  community: { title: "Community", icon: "💬" },
 };
 // Starting layouts the creator can pick (or "auto" = let the AI decide).
 const LAYOUTS = {
@@ -5867,7 +5868,7 @@ function SchoolWizard({ school, T, media, published, onUpdate, saveLesson, autho
   );
 }
 
-function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, publicBase, token, onSetSlug, onIterate, iterating = false, iterProg = { pct: 0, label: "" }, justBuilt = false, onRevealSeen, onStats, guideOpen = false, onGuideOpen, onGuideClose, onOpenMedia, addClassNonce = 0 }) {
+function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, publicBase, token, onSetSlug, onIterate, iterating = false, iterProg = { pct: 0, label: "" }, justBuilt = false, onRevealSeen, onStats, guideOpen = false, onGuideOpen, onGuideClose, onOpenMedia, addClassNonce = 0, viewer = null, onSignIn }) {
   const school = rec.data;
   const T = themeFor(school);
   const sk = skinCfg(school.skin, T);
@@ -6599,6 +6600,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
                     {!hasKind("lessons") && <button onClick={() => addSection("lessons")} style={mi}>📚 Lessons</button>}
                     {!hasKind("mentor") && <button onClick={() => addSection("mentor")} style={mi}>🎓 Mentor chat</button>}
                     {!hasKind("tools") && <button onClick={() => addSection("tools")} style={mi}>🛠️ Tools</button>}
+                    {!hasKind("community") && <button onClick={() => addSection("community")} style={mi}>💬 Community — discussion board</button>}
                     <button onClick={() => addFeatureSection("library", "library", "Library", "📚")} style={mi}>📚 Library — files & links</button>
                     <button onClick={() => addFeatureSection("events", "events", "Events", "📅")} style={mi}>📅 Events — lives & RSVP</button>
                     <button onClick={() => addFeatureSection("showroom", "showroom", "Showroom", "🎬")} style={mi}>🎬 Showroom — slide deck</button>
@@ -6760,6 +6762,9 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
           </>))}
           {activeTab === "mentor" && <MentorOffice school={school} T={T} chat={rec.mentorChat || []} onChat={(msgs) => onUpdate({ mentorChat: msgs })} bus={bus} onIngest={ingestOutput} progress={progress} onUpdate={onUpdate} readOnly={readOnly} />}
           {activeTab === "tools" && <ToolsSection rec={rec} T={T} onUpdate={onUpdate} buildTool={buildTool} buildingTool={buildingTool} readOnly={readOnly} onReloadIdeas={reloadIdeas} onEditTool={editTool} />}
+          {SECTIONS.filter(s => s.kind === "community").map(sec => activeTab === sec.id
+            ? <CommunityBoard key={sec.id} school={school} schoolId={rec.id} T={T} viewer={viewer} onSignIn={onSignIn} isCreator={!readOnly} />
+            : null)}
           {SECTIONS.filter(s => s.kind === "dashboard").map(sec => activeTab === sec.id
             ? <DashboardSection key={sec.id} section={sec} rec={rec} T={T} onUpdate={onUpdate} readOnly={readOnly} school={school} onIngest={ingestOutput} />
             : null)}
@@ -7092,6 +7097,257 @@ function MediaPicker({ token, userId, imagesOnly = false, onPick, onClose }) {
   );
 }
 
+// ─────────────────────────────────────────────────────────────
+// COMMUNITY — per-school discussion board + DMs + friends.
+// Signed-in only for posting; DMs/friends are account-level (cross-school).
+// ─────────────────────────────────────────────────────────────
+const viewerName = (v) => v?.user?.user_metadata?.full_name || (v?.user?.email || "").split("@")[0] || "Someone";
+const openDM = (userId, name) => { try { window.dispatchEvent(new CustomEvent("sx-dm", { detail: { userId, name } })); } catch { } };
+async function fetchProfiles(ids, token) {
+  const uniq = [...new Set(ids)].filter(Boolean);
+  if (!uniq.length) return {};
+  try {
+    const rows = await supaFetch(`/rest/v1/profiles?id=in.(${uniq.join(",")})&select=id,display_name,avatar_url`, token ? { token } : {});
+    const map = {}; (rows || []).forEach(r => { map[r.id] = r; }); return map;
+  } catch { return {}; }
+}
+
+function Avatar({ name, url, size = 30, T }) {
+  return url
+    ? <img src={url} alt="" style={{ width: size, height: size, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />
+    : <div style={{ width: size, height: size, borderRadius: "50%", background: T?.grad || "linear-gradient(135deg,#7C3AED,#06B6D4)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: size * 0.42, fontWeight: 800, color: "#fff", flexShrink: 0 }}>{(name || "?")[0].toUpperCase()}</div>;
+}
+
+function CommunityBoard({ school, schoolId, T, viewer, onSignIn, isCreator }) {
+  const [posts, setPosts] = useState(null);
+  const [profiles, setProfiles] = useState({});
+  const [draft, setDraft] = useState("");
+  const [replyTo, setReplyTo] = useState(null);
+  const [replyDraft, setReplyDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const me = viewer?.user?.id;
+  async function load() {
+    try {
+      const rows = await supaFetch(`/rest/v1/community_posts?school_id=eq.${encodeURIComponent(schoolId)}&order=created_at.asc&limit=500`, viewer ? { token: viewer.token } : {});
+      setPosts(rows || []);
+      setProfiles(await fetchProfiles((rows || []).map(r => r.author_id), viewer?.token));
+    } catch { setPosts([]); }
+  }
+  useEffect(() => { load(); const id = setInterval(load, 20000); return () => clearInterval(id); }, [schoolId]); // eslint-disable-line
+  async function post(body, parent_id = null) {
+    const t = body.trim(); if (!t || !viewer || busy) return;
+    setBusy(true);
+    try {
+      await supaFetch(`/rest/v1/community_posts`, { method: "POST", token: viewer.token, headers: { Prefer: "return=minimal" }, body: [{ school_id: schoolId, author_id: me, author_name: viewerName(viewer), body: t.slice(0, 3000), parent_id }] });
+      setDraft(""); setReplyTo(null); setReplyDraft(""); await load();
+    } catch { }
+    setBusy(false);
+  }
+  const patch = async (id, body) => { try { await supaFetch(`/rest/v1/community_posts?id=eq.${id}`, { method: "PATCH", token: viewer.token, headers: { Prefer: "return=minimal" }, body }); await load(); } catch { } };
+  const del = async (id) => { if (!window.confirm("Delete this post?")) return; try { await supaFetch(`/rest/v1/community_posts?id=eq.${id}`, { method: "DELETE", token: viewer.token }); await load(); } catch { } };
+  async function befriend(uid_) { try { await supaFetch(`/rest/v1/friends`, { method: "POST", token: viewer.token, headers: { Prefer: "return=minimal,resolution=ignore-duplicates" }, body: [{ requester: me, addressee: uid_ }] }); alert("Friend request sent ✓"); } catch { } }
+  const tops = (posts || []).filter(p => !p.parent_id).sort((a, b) => (b.pinned - a.pinned) || (new Date(b.created_at) - new Date(a.created_at)));
+  const repliesOf = (id) => (posts || []).filter(p => p.parent_id === id);
+  const nameOf = (p) => profiles[p.author_id]?.display_name || p.author_name || "Member";
+  const ago = (d) => { const s = (Date.now() - new Date(d)) / 1000; return s < 3600 ? `${Math.max(1, Math.round(s / 60))}m` : s < 86400 ? `${Math.round(s / 3600)}h` : `${Math.round(s / 86400)}d`; };
+  const chipBtn = { background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 11, fontFamily: "inherit", padding: "2px 5px" };
+  const PostCard = ({ p, isReply }) => (
+    <div style={{ display: "flex", gap: 10, background: isReply ? "transparent" : B.surface, border: isReply ? "none" : `1px solid ${p.pinned ? T.ba : B.border}`, borderRadius: 14, padding: isReply ? "8px 0 0" : "13px 15px" }}>
+      <Avatar name={nameOf(p)} url={profiles[p.author_id]?.avatar_url} size={isReply ? 26 : 32} T={T} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 12.5, fontWeight: 700, color: B.white }}>{nameOf(p)}</span>
+          {p.pinned && <span style={{ fontSize: 10, color: T.hi, fontWeight: 700 }}>📌 Pinned</span>}
+          <span style={{ fontSize: 10.5, color: B.muted }}>{ago(p.created_at)}</span>
+          <span style={{ marginLeft: "auto", display: "flex", gap: 2 }}>
+            {viewer && p.author_id !== me && <><button onClick={() => openDM(p.author_id, nameOf(p))} title="Message" style={chipBtn}>💬</button><button onClick={() => befriend(p.author_id)} title="Add friend" style={chipBtn}>＋👤</button></>}
+            {viewer && p.author_id === me && !isReply && <button onClick={() => patch(p.id, { pinned: !p.pinned })} title={p.pinned ? "Unpin" : "Pin"} style={chipBtn}>📌</button>}
+            {viewer && p.author_id === me && <button onClick={() => del(p.id)} title="Delete" style={{ ...chipBtn, color: "#F87171" }}>✕</button>}
+          </span>
+        </div>
+        <div style={{ fontSize: 13, color: B.white, lineHeight: 1.6, marginTop: 3, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{p.body}</div>
+        {!isReply && <>
+          {repliesOf(p.id).map(r => <PostCard key={r.id} p={r} isReply />)}
+          {viewer && (replyTo === p.id ? (
+            <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+              <input autoFocus value={replyDraft} onChange={e => setReplyDraft(e.target.value)} onKeyDown={e => { if (e.key === "Enter") post(replyDraft, p.id); }} placeholder="Reply…" style={{ flex: 1, background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, fontFamily: "inherit", fontSize: 12.5, padding: "7px 10px" }} />
+              <button onClick={() => post(replyDraft, p.id)} disabled={busy || !replyDraft.trim()} style={{ background: T.p, border: "none", borderRadius: 9, color: "#fff", padding: "7px 12px", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>↑</button>
+            </div>
+          ) : <button onClick={() => { setReplyTo(p.id); setReplyDraft(""); }} style={{ ...chipBtn, marginTop: 5, color: T.hi, fontWeight: 700 }}>↩ Reply</button>)}
+        </>}
+      </div>
+    </div>
+  );
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      {viewer ? (
+        <div style={{ display: "flex", gap: 10, background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 14, padding: "13px 15px" }}>
+          <Avatar name={viewerName(viewer)} size={32} T={T} />
+          <div style={{ flex: 1, display: "flex", gap: 8 }}>
+            <textarea value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); post(draft); } }} rows={2} placeholder={isCreator ? "Start a discussion — ask your students a question…" : "Share with the community…"} style={{ flex: 1, background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 10, color: B.white, fontFamily: "inherit", fontSize: 13, lineHeight: 1.5, padding: "8px 11px", resize: "none" }} />
+            <button onClick={() => post(draft)} disabled={busy || !draft.trim()} style={{ background: T.grad, border: "none", borderRadius: 10, color: "#fff", padding: "0 16px", cursor: "pointer", fontSize: 13, fontWeight: 800, fontFamily: "inherit", opacity: busy || !draft.trim() ? 0.5 : 1, alignSelf: "stretch" }}>Post</button>
+          </div>
+        </div>
+      ) : (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, justifyContent: "center", background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: "14px 16px", fontSize: 13, color: B.mutedMid }}>
+          Join the conversation — <button onClick={onSignIn} style={{ background: T.grad, border: "none", borderRadius: 9, color: "#fff", padding: "7px 14px", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>Sign in</button>
+        </div>
+      )}
+      {posts === null ? <div style={{ textAlign: "center", color: B.muted, fontSize: 13, padding: 20 }}>Loading the board…</div>
+        : tops.length === 0 ? <div style={{ textAlign: "center", color: B.muted, fontSize: 13, padding: 26, border: `1px dashed ${B.borderMid}`, borderRadius: 14 }}>No posts yet — {isCreator ? "start the first discussion topic." : "be the first to say hi 👋"}</div>
+        : tops.map(p => <PostCard key={p.id} p={p} />)}
+    </div>
+  );
+}
+
+// MESSENGER DOCK — a fast, Messenger-style DM panel (conversations + thread),
+// account-level: works across schools; polls while open.
+function MessengerDock({ viewer }) {
+  const me = viewer.user.id;
+  const T = { p: "#7C3AED", grad: "linear-gradient(135deg,#7C3AED,#06B6D4)", ps: "rgba(124,58,237,0.09)", ba: "rgba(124,58,237,0.4)", hi: "#C4B5FD", pg: "rgba(124,58,237,0.18)" };
+  const [open, setOpen] = useState(false);
+  const [convos, setConvos] = useState([]); // [{id,name,avatar,last,unread,pending,friend}]
+  const [act, setAct] = useState(null);     // { userId, name }
+  const [msgs, setMsgs] = useState([]);
+  const [input, setInput] = useState("");
+  const [unreadTotal, setUnreadTotal] = useState(0);
+  const bottom = useRef(null);
+  const actRef = useRef(null); actRef.current = act;
+  async function loadConvos() {
+    try {
+      const [rows, frs] = await Promise.all([
+        supaFetch(`/rest/v1/messages?or=(from_id.eq.${me},to_id.eq.${me})&order=created_at.desc&limit=300`, { token: viewer.token }),
+        supaFetch(`/rest/v1/friends?or=(requester.eq.${me},addressee.eq.${me})`, { token: viewer.token }),
+      ]);
+      const partners = new Map(); // id → { last, unread }
+      (rows || []).forEach(m => {
+        const p = m.from_id === me ? m.to_id : m.from_id;
+        if (!partners.has(p)) partners.set(p, { last: m.body, lastAt: m.created_at, unread: 0 });
+        if (m.to_id === me && !m.read_at) partners.get(p).unread++;
+      });
+      const friendState = {};
+      (frs || []).forEach(f => { const p = f.requester === me ? f.addressee : f.requester; friendState[p] = f; if (!partners.has(p)) partners.set(p, { last: f.status === "pending" ? "New friend request" : "Say hi 👋", lastAt: f.created_at, unread: 0 }); });
+      const profs = await fetchProfiles([...partners.keys()], viewer.token);
+      const list = [...partners.entries()].map(([id, v]) => ({ id, ...v, name: profs[id]?.display_name || "Member", avatar: profs[id]?.avatar_url, fr: friendState[id] })).sort((a, b) => new Date(b.lastAt) - new Date(a.lastAt));
+      setConvos(list); setUnreadTotal(list.reduce((a, c) => a + c.unread, 0));
+    } catch { }
+  }
+  async function loadThread(p) {
+    try {
+      const rows = await supaFetch(`/rest/v1/messages?or=(and(from_id.eq.${me},to_id.eq.${p}),and(from_id.eq.${p},to_id.eq.${me}))&order=created_at.asc&limit=200`, { token: viewer.token });
+      setMsgs(rows || []);
+      await supaFetch(`/rest/v1/messages?to_id=eq.${me}&from_id=eq.${p}&read_at=is.null`, { method: "PATCH", token: viewer.token, headers: { Prefer: "return=minimal" }, body: { read_at: new Date().toISOString() } });
+    } catch { }
+  }
+  useEffect(() => { loadConvos(); const id = setInterval(() => { loadConvos(); if (actRef.current) loadThread(actRef.current.userId); }, open ? 4000 : 30000); return () => clearInterval(id); }, [open]); // eslint-disable-line
+  useEffect(() => {
+    const h = (e) => { setOpen(true); const d = e.detail || {}; setAct({ userId: d.userId, name: d.name || "Member" }); loadThread(d.userId); };
+    window.addEventListener("sx-dm", h); return () => window.removeEventListener("sx-dm", h);
+  }, []); // eslint-disable-line
+  useEffect(() => { bottom.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs.length, open, act]);
+  async function send() {
+    const t = input.trim(); if (!t || !act) return; setInput("");
+    setMsgs(m => [...m, { id: "tmp" + Date.now(), from_id: me, to_id: act.userId, body: t, created_at: new Date().toISOString() }]);
+    try { await supaFetch(`/rest/v1/messages`, { method: "POST", token: viewer.token, headers: { Prefer: "return=minimal" }, body: [{ from_id: me, to_id: act.userId, body: t.slice(0, 2000) }] }); loadThread(act.userId); } catch { }
+  }
+  const accept = async (fr) => { try { await supaFetch(`/rest/v1/friends?id=eq.${fr.id}`, { method: "PATCH", token: viewer.token, headers: { Prefer: "return=minimal" }, body: { status: "accepted" } }); loadConvos(); } catch { } };
+  return (<>
+    <button onClick={() => setOpen(o => !o)} title="Messages" style={{ position: "fixed", bottom: 20, right: 86, zIndex: 340, width: 52, height: 52, borderRadius: "50%", background: T.grad, border: "none", color: "#fff", fontSize: 20, cursor: "pointer", boxShadow: `0 8px 28px ${T.pg}` }}>
+      {open ? "✕" : "💬"}{!open && unreadTotal > 0 && <span style={{ position: "absolute", top: -3, right: -3, background: "#EF4444", color: "#fff", borderRadius: 100, fontSize: 10.5, fontWeight: 800, padding: "2px 6px" }}>{unreadTotal}</span>}
+    </button>
+    {open && (
+      <div style={{ position: "fixed", bottom: 82, right: 20, zIndex: 340, width: 356, maxWidth: "94vw", height: 480, maxHeight: "74vh", background: "var(--surface)", border: `1px solid ${T.ba}`, borderRadius: 18, display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 24px 70px rgba(0,0,0,0.55)", animation: "fadeUp 0.2s ease", fontFamily: "'Inter',sans-serif" }}>
+        <div style={{ padding: "11px 15px", borderBottom: `1px solid ${B.border}`, background: "var(--surface2)", display: "flex", alignItems: "center", gap: 8 }}>
+          {act && <button onClick={() => setAct(null)} style={{ background: "none", border: "none", color: B.mutedMid, cursor: "pointer", fontSize: 14, padding: 0 }}>←</button>}
+          <span style={{ fontSize: 13.5, fontWeight: 800, color: B.white }}>{act ? act.name : "Messages"}</span>
+        </div>
+        {!act ? (
+          <div style={{ flex: 1, overflowY: "auto", padding: 8 }}>
+            {convos.length === 0 && <div style={{ textAlign: "center", color: B.muted, fontSize: 12.5, padding: 26, lineHeight: 1.6 }}>No conversations yet.<br />Message someone from a community board.</div>}
+            {convos.map(c => (
+              <div key={c.id} onClick={() => { setAct({ userId: c.id, name: c.name }); loadThread(c.id); }} style={{ display: "flex", gap: 10, alignItems: "center", padding: "9px 10px", borderRadius: 11, cursor: "pointer" }}
+                onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.04)"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
+                <Avatar name={c.name} url={c.avatar} size={36} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 13, fontWeight: c.unread ? 800 : 600, color: B.white }}>{c.name}{c.fr?.status === "accepted" && <span style={{ fontSize: 10, color: "#4ADE80", marginLeft: 6 }}>friends</span>}</div>
+                  <div style={{ fontSize: 11.5, color: c.unread ? B.white : B.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.last}</div>
+                </div>
+                {c.unread > 0 && <span style={{ background: T.p, color: "#fff", borderRadius: 100, fontSize: 10, fontWeight: 800, padding: "2px 7px" }}>{c.unread}</span>}
+                {c.fr?.status === "pending" && c.fr.addressee === me && <button onClick={e => { e.stopPropagation(); accept(c.fr); }} style={{ background: "rgba(74,222,128,0.14)", border: "1px solid rgba(74,222,128,0.4)", borderRadius: 8, color: "#4ADE80", padding: "4px 9px", cursor: "pointer", fontSize: 10.5, fontWeight: 800, fontFamily: "inherit" }}>Accept</button>}
+              </div>
+            ))}
+          </div>
+        ) : (<>
+          <div style={{ flex: 1, overflowY: "auto", padding: "12px 13px", display: "flex", flexDirection: "column", gap: 7 }}>
+            {msgs.map(m => { const mine = m.from_id === me; return (
+              <div key={m.id} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start" }}>
+                <div style={{ maxWidth: "78%", background: mine ? T.grad : "var(--surface2)", border: mine ? "none" : `1px solid ${B.border}`, borderRadius: mine ? "16px 16px 4px 16px" : "16px 16px 16px 4px", padding: "8px 12px", fontSize: 13, lineHeight: 1.5, color: mine ? "#fff" : B.white, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{m.body}</div>
+              </div>
+            ); })}
+            <div ref={bottom} />
+          </div>
+          <div style={{ padding: "10px 11px", borderTop: `1px solid ${B.border}`, display: "flex", gap: 7 }}>
+            <input value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); send(); } }} placeholder="Message…" autoFocus style={{ flex: 1, background: "var(--surface3)", border: `1px solid ${B.borderMid}`, borderRadius: 100, color: B.white, fontFamily: "inherit", fontSize: 13, padding: "9px 14px" }} />
+            <button onClick={send} disabled={!input.trim()} style={{ background: T.grad, border: "none", borderRadius: "50%", width: 38, height: 38, color: "#fff", fontSize: 15, fontWeight: 800, cursor: "pointer", opacity: input.trim() ? 1 : 0.5 }}>↑</button>
+          </div>
+        </>)}
+      </div>
+    )}
+  </>);
+}
+
+// Friends card (Profile) — pending requests + accepted friends, cross-school.
+function FriendsCard({ session }) {
+  const me = session.user.id;
+  const [rows, setRows] = useState(null);
+  const [profs, setProfs] = useState({});
+  const load = async () => {
+    try {
+      const frs = await supaFetch(`/rest/v1/friends?or=(requester.eq.${me},addressee.eq.${me})&order=created_at.desc`, { token: session.token });
+      setRows(frs || []);
+      setProfs(await fetchProfiles((frs || []).map(f => f.requester === me ? f.addressee : f.requester), session.token));
+    } catch { setRows([]); }
+  };
+  useEffect(() => { load(); }, []); // eslint-disable-line
+  const nameOf = (id) => profs[id]?.display_name || "Member";
+  const act = async (f, body) => { try { await supaFetch(`/rest/v1/friends?id=eq.${f.id}`, body ? { method: "PATCH", token: session.token, headers: { Prefer: "return=minimal" }, body } : { method: "DELETE", token: session.token }); load(); } catch { } };
+  if (rows === null) return null;
+  const pending = rows.filter(f => f.status === "pending" && f.addressee === me);
+  const sent = rows.filter(f => f.status === "pending" && f.requester === me);
+  const friends = rows.filter(f => f.status === "accepted");
+  return (
+    <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 18, padding: 20, marginBottom: 18 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, color: B.muted, marginBottom: 12 }}>👥 Friends <span style={{ color: B.mutedMid }}>({friends.length})</span> — across all your schools</div>
+      {pending.map(f => (
+        <div key={f.id} style={{ display: "flex", alignItems: "center", gap: 10, background: "rgba(124,58,237,0.07)", border: "1px solid rgba(124,58,237,0.3)", borderRadius: 11, padding: "9px 12px", marginBottom: 7 }}>
+          <Avatar name={nameOf(f.requester)} url={profs[f.requester]?.avatar_url} size={30} />
+          <span style={{ flex: 1, fontSize: 13, color: B.white }}><b>{nameOf(f.requester)}</b> wants to be friends</span>
+          <button onClick={() => act(f, { status: "accepted" })} style={{ background: "rgba(74,222,128,0.14)", border: "1px solid rgba(74,222,128,0.4)", borderRadius: 8, color: "#4ADE80", padding: "5px 12px", cursor: "pointer", fontSize: 11.5, fontWeight: 800, fontFamily: "inherit" }}>Accept</button>
+          <button onClick={() => act(f)} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.muted, padding: "5px 10px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit" }}>✕</button>
+        </div>
+      ))}
+      {friends.length === 0 && pending.length === 0 && <div style={{ fontSize: 12.5, color: B.muted, padding: "6px 0" }}>No friends yet — add people from any school's community board.</div>}
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {friends.map(f => { const other = f.requester === me ? f.addressee : f.requester; return (
+          <div key={f.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 4px" }}>
+            <Avatar name={nameOf(other)} url={profs[other]?.avatar_url} size={30} />
+            <span style={{ flex: 1, fontSize: 13, fontWeight: 600, color: B.white }}>{nameOf(other)}</span>
+            <button onClick={() => openDM(other, nameOf(other))} style={{ background: "rgba(124,58,237,0.1)", border: "1px solid rgba(124,58,237,0.35)", borderRadius: 8, color: "#C4B5FD", padding: "5px 12px", cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit" }}>💬 Message</button>
+            <button onClick={() => act(f)} title="Remove friend" style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 12 }}>✕</button>
+          </div>
+        ); })}
+        {sent.map(f => (
+          <div key={f.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "7px 4px", opacity: 0.65 }}>
+            <Avatar name={nameOf(f.addressee)} url={profs[f.addressee]?.avatar_url} size={30} />
+            <span style={{ flex: 1, fontSize: 13, color: B.mutedMid }}>{nameOf(f.addressee)} — request sent…</span>
+            <button onClick={() => act(f)} style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 12 }}>✕</button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // The creator's Profile — avatar, media library ("Filebase"), achievements.
 function ProfileView({ session, profile, onProfile, achStats, schoolCount, syncState, onBack, onSignOut }) {
   const T = { ...THEMES.violet, grad: "linear-gradient(135deg,#7C3AED,#06B6D4)" };
@@ -7153,6 +7409,9 @@ function ProfileView({ session, profile, onProfile, achStats, schoolCount, syncS
         <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, color: B.muted, marginBottom: 13 }}>🏆 Achievements <span style={{ color: B.mutedMid }}>({unlocked.length}/{ACHIEVEMENTS.length})</span></div>
         <AchievementsGrid unlockedIds={unlocked} />
       </div>
+
+      {/* Friends — cross-school, with requests + DM */}
+      <FriendsCard session={session} />
 
       {/* Media library */}
       <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 18, padding: 20 }}>
@@ -7373,7 +7632,8 @@ function PublicSchool({ slug }) {
         : <div id="sx-enroll"><EnrollCard schoolId={rec.id} mentorName={rec.data?.mentor?.name} T={T} onSignIn={signIn} /></div>}
       {showLanding && !peek
         ? <div style={{ textAlign: "center", padding: "10px 0 60px" }}><button onClick={() => setPeek(true)} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 100, color: B.mutedMid, padding: "9px 20px", cursor: "pointer", fontSize: 13, fontFamily: "inherit", fontWeight: 700 }}>👀 Peek inside the school</button></div>
-        : <Boundary><SchoolPage rec={merged} readOnly onUpdate={(patch) => setLocalState(s => ({ ...s, ...patch }))} /></Boundary>}
+        : <Boundary><SchoolPage rec={merged} readOnly onUpdate={(patch) => setLocalState(s => ({ ...s, ...patch }))} viewer={stud} onSignIn={signIn} /></Boundary>}
+      {stud && <MessengerDock viewer={stud} />}
     </div>
   );
 }
@@ -7842,6 +8102,7 @@ export default function Senseito() {
       {accountOpen && <AccountModal session={session} syncState={syncState} schoolCount={schools.length} achStats={achStats} onSignOut={() => { setSession(null); setSchools([]); setSyncState("idle"); setAccountOpen(false); }} onClose={() => setAccountOpen(false)} />}
       {/* Achievement celebration — waits politely until any fresh-build reveal is done. */}
       {achQueue.length > 0 && justBuiltId === null && <AchievementOverlay ach={achQueue[0]} onClose={() => setAchQueue(q => q.slice(1))} />}
+      {session && <MessengerDock viewer={{ token: session.token, user: session.user }} />}
 
       <Toast toast={aToast} />
       {undo && (
@@ -7927,7 +8188,7 @@ export default function Senseito() {
                 : <Home onCreated={createSchool} session={session} onRequireAuth={() => setAccountOpen(true)} />)
               : view === "home" || !active
               ? <Home onCreated={createSchool} autofocus={scrollHome} onAutofocusDone={() => setScrollHome(false)} session={session} onRequireAuth={() => setAccountOpen(true)} />
-              : <SchoolPage key={active.id} rec={active} onUpdate={(patch) => updateSchool(active.id, patch)} onPublish={publishSchool} publishing={publishing} publicBase={publicBase} token={session?.token} onSetSlug={setCustomSlug} onIterate={applyIterate} iterating={iterating} iterProg={iterProg} justBuilt={active.id === justBuiltId} onRevealSeen={() => setJustBuiltId(null)} onStats={(n) => setStudentsById(m => (m[active.id] === n ? m : { ...m, [active.id]: n }))} guideOpen={guideOpen} onGuideOpen={() => setGuideOpen(true)} onGuideClose={() => setGuideOpen(false)} onOpenMedia={() => setView("profile")} addClassNonce={addClassNonce} />}
+              : <SchoolPage key={active.id} rec={active} onUpdate={(patch) => updateSchool(active.id, patch)} onPublish={publishSchool} publishing={publishing} publicBase={publicBase} token={session?.token} onSetSlug={setCustomSlug} onIterate={applyIterate} iterating={iterating} iterProg={iterProg} justBuilt={active.id === justBuiltId} onRevealSeen={() => setJustBuiltId(null)} onStats={(n) => setStudentsById(m => (m[active.id] === n ? m : { ...m, [active.id]: n }))} guideOpen={guideOpen} onGuideOpen={() => setGuideOpen(true)} onGuideClose={() => setGuideOpen(false)} onOpenMedia={() => setView("profile")} addClassNonce={addClassNonce} viewer={session ? { token: session.token, user: session.user } : null} onSignIn={() => setAccountOpen(true)} />}
           </Boundary>
         </div>
       </div>
