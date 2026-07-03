@@ -7632,7 +7632,6 @@ function PublicSchool({ slug }) {
   const [rec, setRec] = useState(null);
   const [status, setStatus] = useState("loading");
   const [stud, setStud] = useState(null); // signed-in student { token, user }
-  const [peek, setPeek] = useState(false); // landing shown → school preview behind a toggle
   const [mode, setMode] = useThemeMode();
   const lsKey = `senseito_progress_${slug}`;
   const saveT = useRef(null);
@@ -7717,21 +7716,36 @@ function PublicSchool({ slug }) {
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <ThemeToggle mode={mode} setMode={setMode} />
           {stud ? <span style={{ fontSize: 12, color: "#6EE7B7" }}>☁️ {stud.user.email}</span>
-            : <button onClick={signIn} style={{ fontSize: 12.5, color: "#67E8F9", background: "rgba(6,182,212,0.09)", border: "1px solid rgba(6,182,212,0.3)", borderRadius: 8, padding: "6px 12px", fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>Sign in to save progress</button>}
+            : <button onClick={signIn} style={{ fontSize: 12.5, color: "#67E8F9", background: "rgba(6,182,212,0.09)", border: "1px solid rgba(6,182,212,0.3)", borderRadius: 8, padding: "6px 12px", fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>Enroll — sign in</button>}
           <a href="/" style={{ fontSize: 12.5, color: "#A78BFA", textDecoration: "none", border: "1px solid rgba(124,58,237,0.35)", borderRadius: 8, padding: "6px 13px", fontWeight: 600 }}>Build your own →</a>
         </div>
       </div>
-      {showLanding && (
+      {/* HARD ENROLL GATE — the school itself (lessons, mentor, tools, community) only renders
+          for signed-in students. Visitors see the landing (or a compact intro) + the enroll card. */}
+      {!stud && showLanding && (
         <div style={{ maxWidth: 980, margin: "18px auto 0", padding: "0 16px" }}>
           <LandingSections school={rec.data} sections={landing.sections} T={T} editable={false} onSections={() => { }} onEnroll={toEnroll} />
         </div>
       )}
+      {!stud && !showLanding && (() => { const s = rec.data; const total = (s.semesters || []).reduce((a, x) => a + (x.lessons?.length || 0), 0); return (
+        <div style={{ maxWidth: 640, margin: "26px auto 0", padding: "0 20px" }}>
+          <div style={{ background: T.heroGrad || T.gr, border: `1px solid ${T.ba}`, borderRadius: 20, padding: "34px 28px", textAlign: "center" }}>
+            <div style={{ fontSize: 44, marginBottom: 10 }}>{s.emoji || "🏫"}</div>
+            <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: "clamp(24px,5vw,34px)", fontWeight: 800, letterSpacing: -0.8, color: "#fff", marginBottom: 8 }}>{s.name}</div>
+            {s.tagline && <div style={{ fontSize: 14.5, color: "rgba(255,255,255,0.9)", fontStyle: "italic", marginBottom: 12 }}>{s.tagline}</div>}
+            {flattenText(s.description) && <div style={{ fontSize: 13.5, color: "rgba(255,255,255,0.82)", lineHeight: 1.7, maxWidth: 480, margin: "0 auto 16px" }}>{flattenText(s.description)}</div>}
+            <div style={{ display: "flex", gap: 18, justifyContent: "center", flexWrap: "wrap", fontSize: 12.5, color: "rgba(255,255,255,0.85)", fontWeight: 600 }}>
+              {total > 0 && <span>📚 {total} lessons</span>}
+              {s.mentor?.name && <span>🎓 Mentor: {s.mentor.name}</span>}
+              {s.duration && <span>⏳ {s.duration}</span>}
+            </div>
+          </div>
+        </div>
+      ); })()}
       {stud
         ? <div style={{ maxWidth: 860, margin: "16px auto 0", padding: "0 20px" }}><div style={{ background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.3)", borderRadius: 14, padding: "12px 18px", fontSize: 13, color: "#6EE7B7", fontWeight: 600 }}>✓ Enrolled as {stud.user.email} — your progress saves automatically across devices.</div></div>
         : <div id="sx-enroll"><EnrollCard schoolId={rec.id} mentorName={rec.data?.mentor?.name} T={T} onSignIn={signIn} /></div>}
-      {showLanding && !peek
-        ? <div style={{ textAlign: "center", padding: "10px 0 60px" }}><button onClick={() => setPeek(true)} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 100, color: B.mutedMid, padding: "9px 20px", cursor: "pointer", fontSize: 13, fontFamily: "inherit", fontWeight: 700 }}>👀 Peek inside the school</button></div>
-        : <Boundary><SchoolPage rec={merged} readOnly onUpdate={(patch) => setLocalState(s => ({ ...s, ...patch }))} viewer={stud} onSignIn={signIn} /></Boundary>}
+      {stud && <Boundary><SchoolPage rec={merged} readOnly onUpdate={(patch) => setLocalState(s => ({ ...s, ...patch }))} viewer={stud} onSignIn={signIn} /></Boundary>}
       {stud && <MessengerDock viewer={stud} />}
     </div>
   );
