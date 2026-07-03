@@ -888,6 +888,8 @@ DECIDE which of three modes this message is:
 - "progression": "list" | "map" | "arcade" — how the lessons section is laid out. "map" = a Duolingo-style winding path of lesson nodes ("make the lessons a map/journey/path"). "arcade" = a gamified single "run" screen with an XP/streak HUD that auto-advances to the next lesson as you clear each ("make it a game", "arcade mode", "play it like a game", "one continuous game"). (Add-anywhere — works on any theme.)
 - "effect": an ambient animated background effect for the whole school — one of ${EFFECT_KEYS.join(", ")}. Use when the user asks for atmosphere/vibes ("add an aurora effect", "make it feel cosmic/starry" → starfield, "add a glow", "floating embers/sparks" → embers, "subtle grid", "flowing gradient" → mesh). Set "effect": "none" to remove it.
 - "navStyle": "pills" | "topbar" | "chunky" | "minimal" | "soft" | "sidebar" — override the section navigation style independently of the theme. "sidebar" = a left vertical nav with content beside it (two-column).
+- "lessonGrid": { "cols": 1|2|3 } — how lesson cards are laid out in the lessons section. Use for "lessons as square cards", "3 in a row", "grid of lessons" (cols 3), "two columns" (2). Set { "cols": 1 } to restore the full-width rows. (Creators can also widen ONE card to span 2 columns with the ⤢ button on the card — mention that if they ask to resize a single lesson.)
+- "tabScale": number 0.8–1.4 — size of the section tabs/nav. Use for "make the tabs bigger/smaller" (1 = default).
 - "navGrad": a CSS gradient string for the navigation/sidebar background, e.g. "linear-gradient(180deg,#ef4444,#3b82f6)". Use for "make the sidebar a red→blue gradient". "" to clear.
 - "currency": { "word":"<what the points/XP are called, e.g. Energy, Coins, Sparks, Insight>", "icon":"<single emoji>" }. Use for "rename XP to …", "call points coins", "make XP energy". Set "currency": null to reset to "XP".
 - "gamification": patch object — include ONLY the keys being changed: { "xpPerLesson": <number>, "streakEvery": <number>, "streakXp": <number> (every streakEvery passed lessons grants +streakXp bonus — THIS IS WIRED, use for "add a streak bonus"), "completionReward": "<text>", "badges": [{ "icon":"<emoji>", "title":"...", "rule": {"type":"lessons"|"xp","n":<threshold>} }] (FULL replacement list — badges unlock automatically when the rule is met; use for "add/change badges", "make badges harder") }. Use for anything about XP amounts, streaks, badges or rewards.
@@ -4579,6 +4581,35 @@ function DashboardSection({ section, rec, T, onUpdate, readOnly, school, onInges
 // ─────────────────────────────────────────────────────────────
 // LESSON ROW
 // ─────────────────────────────────────────────────────────────
+// Compact square-ish lesson card — used when the creator asks for a lesson GRID
+// ("lessons as square cards, 3 in a row"). A lesson can span 2 columns (lesson.span).
+function LessonCardSq({ lesson, idx, T, progress, onEnter, onEdit, onToggleSpan, readOnly }) {
+  const tm = TM[lesson.type] || TM.Dialogue;
+  const st = progress[lesson.number] || "locked";
+  const locked = !lesson.open && st === "locked" && (idx > 0 || readOnly);
+  return (
+    <div style={{ gridColumn: lesson.span === 2 ? "span 2" : undefined, background: B.surface, border: `1px solid ${st === "passed" ? "rgba(74,222,128,0.3)" : st === "active" ? T.ba : B.border}`, borderRadius: 16, overflow: "hidden", display: "flex", flexDirection: "column", opacity: locked && readOnly ? 0.55 : 1, boxShadow: st === "active" ? `0 0 20px ${T.pg}` : "none", animation: "fadeUp 0.4s ease backwards", animationDelay: `${Math.min(idx, 8) * 40}ms` }}>
+      {lesson.cover
+        ? <img src={lesson.cover} alt="" style={{ width: "100%", height: 88, objectFit: "cover", objectPosition: lesson.coverPos || "center" }} />
+        : <div style={{ height: 62, background: T.gr, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, borderBottom: `1px solid ${B.border}` }}>{tm.icon}</div>}
+      <div style={{ padding: "11px 13px 13px", flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
+          <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", color: st === "passed" ? "#4ADE80" : T.p }}>{st === "passed" ? "✓ Done" : `Lesson ${lesson.number || idx + 1}`}</span>
+          {!readOnly && <span style={{ display: "flex", gap: 4 }}>
+            <button onClick={() => onToggleSpan?.(lesson)} title={lesson.span === 2 ? "Shrink to 1 column" : "Make this card wider (2 columns)"} style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 11, padding: 2 }}>{lesson.span === 2 ? "⇥" : "⤢"}</button>
+            <button onClick={() => onEdit(lesson)} title="Edit lesson" style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 11, padding: 2 }}>✎</button>
+          </span>}
+        </div>
+        <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 14, fontWeight: 700, color: B.white, lineHeight: 1.3, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{lesson.title}</div>
+        <div style={{ flex: 1 }} />
+        <button onClick={() => onEnter(lesson)} disabled={locked} style={{ width: "100%", padding: "8px 0", borderRadius: 9, fontSize: 12, fontWeight: 700, fontFamily: "inherit", cursor: locked ? "not-allowed" : "pointer", border: "none", background: st === "passed" ? "rgba(74,222,128,0.12)" : locked ? B.surface3 : T.grad, color: st === "passed" ? "#4ADE80" : locked ? B.muted : "#fff" }}>
+          {st === "passed" ? "Review" : st === "active" ? "Continue →" : locked ? "🔒 Locked" : "Begin →"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function LessonRow({ lesson, idx, T, progress, onEnter, onEdit, onToggleLock, readOnly, mentorName, games = [], school }) {
   const tm = TM[lesson.type] || TM.Dialogue;
   const state = progress[lesson.number] || "locked";
@@ -5900,13 +5931,22 @@ function SchoolWizard({ school, T, media, published, onUpdate, saveLesson, autho
         <div style={{ display: "flex", gap: 4, padding: "10px 18px 0" }}>{WIZ_PHASES.map((p, i) => <div key={p} title={WIZ_PHASE_LABEL[p]} style={{ flex: 1, height: 4, borderRadius: 2, background: i < phaseIdx ? "#4ADE80" : i === phaseIdx ? T.p : B.surface3, transition: "background 0.3s" }} />)}</div>
         {phase === "lessons" && lessons.length > 0 && (
           <div style={{ padding: "10px 18px 0" }}>
-            {/* every lesson as a clickable chip — jump anywhere, ✓ = approved */}
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+            {/* every lesson as a proper card — jump anywhere, ✓ = approved */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(108px,1fr))", gap: 8, marginBottom: 10, maxHeight: 172, overflowY: "auto", paddingRight: 2 }}>
               {lessons.map((l, k) => {
-                const on = k === li;
-                return <button key={l.id || k} onClick={() => { setLi(k); setCi(0); }} title={l.title} style={{ display: "inline-flex", alignItems: "center", gap: 5, maxWidth: 150, background: on ? T.ps : doneL[k] ? "rgba(74,222,128,0.08)" : B.surface2, border: `1px solid ${on ? T.ba : doneL[k] ? "rgba(74,222,128,0.35)" : B.borderMid}`, borderRadius: 100, color: on ? T.hi : doneL[k] ? "#4ADE80" : B.mutedMid, padding: "4px 11px", cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>
-                  <span>{doneL[k] ? "✓" : k + 1}</span><span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{l.title}</span>
-                </button>;
+                const on = k === li; const done = doneL[k]; const tm = TM[l.type] || TM.Dialogue;
+                return (
+                  <button key={l.id || k} onClick={() => { setLi(k); setCi(0); }} title={l.title} style={{ position: "relative", textAlign: "left", background: on ? T.ps : B.surface2, border: `1.5px solid ${on ? T.p : done ? "rgba(74,222,128,0.4)" : B.border}`, borderRadius: 12, padding: 0, cursor: "pointer", fontFamily: "inherit", overflow: "hidden", boxShadow: on ? `0 4px 16px ${T.pg}` : "none", transition: "border-color 0.15s, box-shadow 0.15s" }}>
+                    {l.cover
+                      ? <img src={l.cover} alt="" style={{ width: "100%", height: 40, objectFit: "cover", display: "block", opacity: on ? 1 : 0.85 }} />
+                      : <div style={{ height: 32, background: on ? T.gr : B.surface3, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15 }}>{tm.icon}</div>}
+                    <div style={{ padding: "7px 9px 9px" }}>
+                      <div style={{ fontSize: 9, fontWeight: 800, letterSpacing: 0.8, textTransform: "uppercase", color: done ? "#4ADE80" : on ? T.hi : B.muted, marginBottom: 3 }}>{done ? "✓ Approved" : `Lesson ${k + 1}`}</div>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: on ? B.white : B.mutedMid, lineHeight: 1.3, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", minHeight: 28 }}>{l.title}</div>
+                    </div>
+                    {done && <span style={{ position: "absolute", top: 4, right: 6, width: 17, height: 17, borderRadius: "50%", background: "rgba(74,222,128,0.9)", color: "#052", fontSize: 10, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center" }}>✓</span>}
+                  </button>
+                );
               })}
             </div>
             {/* fine-grained progress across ALL lesson cards, so the bar visibly moves every Approve */}
@@ -6641,8 +6681,8 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
           )}
           {/* Tabs + section content — two-column when navStyle is "sidebar" */}
           <div style={{ display: "flex", flexDirection: sidebar ? "row" : "column", gap: sidebar ? 16 : dens, alignItems: "flex-start" }}>
-          {!stepsShell && (<div style={{ position: "sticky", top: 10, zIndex: 80, ...(sidebar ? { width: 200, flexShrink: 0 } : { width: "100%" }) }}>
-            <div data-guide="tabs" style={nv.bar}>
+          {!stepsShell && (<div style={{ position: "sticky", top: 10, zIndex: 80, ...(sidebar ? { width: Math.round(200 * (school.tabScale || 1)), flexShrink: 0 } : { width: "100%" }) }}>
+            <div data-guide="tabs" style={{ ...nv.bar, zoom: school.tabScale || 1 }}>
               {TABS.map(([k, l], ti) => (
                 <button key={k} draggable={!readOnly}
                   onDragStart={() => { dragIdx.current = ti; }}
@@ -6791,7 +6831,16 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
                     {!readOnly && <button onClick={() => deleteSemester(si)} title="Delete this part/semester" style={{ background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.3)", borderRadius: 8, color: "#F87171", padding: "4px 9px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit", fontWeight: 700 }}>🗑 Delete part</button>}
                   </div>
                 </div>
-                {sem.lessons?.map((l, li) => <LessonRow key={li} lesson={l} idx={(school.semesters || []).slice(0, si).reduce((a, s2) => a + (s2.lessons?.length || 0), 0) + li} T={T} progress={progress} mentorName={school.mentor?.name} games={school.games || []} school={school} onEnter={enterLesson} onEdit={setEditingLesson} onToggleLock={toggleLock} readOnly={readOnly} />)}
+                {(() => {
+                  const cols = Math.min(3, Math.max(1, school.lessonGrid?.cols || 1));
+                  const baseIdx = (school.semesters || []).slice(0, si).reduce((a, s2) => a + (s2.lessons?.length || 0), 0);
+                  if (cols > 1) return (
+                    <div style={{ display: "grid", gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))`, gap: 12 }}>
+                      {sem.lessons?.map((l, li) => <LessonCardSq key={li} lesson={l} idx={baseIdx + li} T={T} progress={progress} onEnter={enterLesson} onEdit={setEditingLesson} onToggleSpan={(ls) => saveLesson(ls.number, { span: ls.span === 2 ? 1 : 2 })} readOnly={readOnly} />)}
+                    </div>
+                  );
+                  return sem.lessons?.map((l, li) => <LessonRow key={li} lesson={l} idx={baseIdx + li} T={T} progress={progress} mentorName={school.mentor?.name} games={school.games || []} school={school} onEnter={enterLesson} onEdit={setEditingLesson} onToggleLock={toggleLock} readOnly={readOnly} />);
+                })()}
                 {/* Per-part add-lesson controls */}
                 {!readOnly && (
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -8228,7 +8277,7 @@ export default function Senseito() {
   function applyDesign(rec, d) {
     if (!d || typeof d !== "object") return false;
     const cur = rec.data; const patch = {};
-    for (const k of ["theme", "skin", "density", "font", "fontScale", "cover", "coverPos", "minimal", "progression", "navStyle", "navGrad", "effect"]) if (k in d) patch[k] = d[k];
+    for (const k of ["theme", "skin", "density", "font", "fontScale", "cover", "coverPos", "minimal", "progression", "navStyle", "navGrad", "effect", "lessonGrid", "tabScale"]) if (k in d) patch[k] = d[k];
     if (d.template && TEMPLATES[d.template]) { const t = TEMPLATES[d.template]; patch.template = d.template; patch.theme = t.theme; patch.skin = t.skin; patch.font = t.font; patch.density = t.density; }
     if ("palette" in d) patch.palette = d.palette === null ? undefined : { ...(cur.palette || {}), ...(d.palette || {}) };
     if ("hero" in d) patch.hero = d.hero === null ? undefined : { ...(cur.hero || {}), ...(d.hero || {}) };
