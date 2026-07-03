@@ -5784,32 +5784,36 @@ const WIZ_PHASE_LABEL = { lessons: "Check your lessons", schoolmentor: "Say hi t
 function SchoolWizard({ school, T, media, published, onUpdate, saveLesson, authorBlock, addFeatureSection, addSection, hasKind, onIterate, onPublish, openGameLab, onClose }) {
   const lessons = (school.semesters || []).flatMap(s => s.lessons || []);
   const [phase, setPhase] = useState(lessons.length ? "lessons" : "schoolmentor");
-  const [li, setLi] = useState(0);
+  const [li, setLi] = useState(null); // null = the lesson PICKER; a number = setting up that lesson
   const [ci, setCi] = useState(0);
-  const [doneL, setDoneL] = useState({}); // lesson index → fully approved
+  const [doneL, setDoneL] = useState({}); // lesson index → fully approved (green outline)
   const [busy, setBusy] = useState(false);
   const [pick, setPick] = useState(null); // media-pick target: "cover" | "reward"
-  const lesson = lessons[li] || null;
+  const picker = phase === "lessons" && li === null;
+  const lesson = li == null ? null : lessons[li] || null;
   const setL = (patch) => lesson && saveLesson(lesson.number, patch);
   const phaseIdx = WIZ_PHASES.indexOf(phase);
   const otherLessons = lessons.filter(l => l.id && l.id !== lesson?.id);
+  const approvedCount = lessons.filter((_, k) => doneL[k]).length;
+  const allApproved = lessons.length > 0 && approvedCount === lessons.length;
 
   function next() {
     if (phase === "lessons") {
+      if (li === null) return setPhase("schoolmentor"); // picker's Continue / Skip → Phase 2
       if (ci < WIZ_CARDS.length - 1) return setCi(ci + 1);
-      setDoneL(d => ({ ...d, [li]: true })); // this lesson is fully approved
-      if (li < lessons.length - 1) { setLi(li + 1); return setCi(0); }
-      return setPhase("schoolmentor");
+      setDoneL(d => ({ ...d, [li]: true })); // fully approved → back to the picker
+      setLi(null); setCi(0);
+      return;
     }
     if (phaseIdx < WIZ_PHASES.length - 1) setPhase(WIZ_PHASES[phaseIdx + 1]); else onClose();
   }
   function back() {
     if (phase === "lessons") {
+      if (li === null) return;
       if (ci > 0) return setCi(ci - 1);
-      if (li > 0) { setLi(li - 1); return setCi(WIZ_CARDS.length - 1); }
-      return;
+      setLi(null); setCi(0); return; // first card → back to the picker
     }
-    if (phaseIdx > 1) setPhase(WIZ_PHASES[phaseIdx - 1]); else { setPhase("lessons"); setLi(Math.max(0, lessons.length - 1)); setCi(WIZ_CARDS.length - 1); }
+    if (phaseIdx > 1) setPhase(WIZ_PHASES[phaseIdx - 1]); else { setPhase("lessons"); setLi(null); setCi(0); }
   }
   async function authorInto(type, replaceIdx) {
     if (!lesson) return; setBusy(true);
@@ -5829,7 +5833,32 @@ function SchoolWizard({ school, T, media, published, onUpdate, saveLesson, autho
 
   // ── card title + body ──
   let heading = "", sup = "", body = null;
-  if (phase === "lessons" && lesson) {
+  if (picker) {
+    heading = "📚 Choose a lesson to set up";
+    sup = `${approvedCount} of ${lessons.length} approved${allApproved ? " — all done! 🎉" : ""}`;
+    body = (<>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(136px,1fr))", gap: 10, maxHeight: 330, overflowY: "auto", paddingRight: 2 }}>
+        {lessons.map((l, k) => {
+          const done = doneL[k]; const tm = TM[l.type] || TM.Dialogue;
+          return (
+            <button key={l.id || k} onClick={() => { setLi(k); setCi(0); }} title={done ? `${l.title} — approved (open to revisit)` : l.title} style={{ position: "relative", textAlign: "left", background: B.surface2, border: done ? "2px solid #4ADE80" : `1.5px solid ${B.borderMid}`, borderRadius: 14, padding: 0, cursor: "pointer", fontFamily: "inherit", overflow: "hidden", boxShadow: done ? "0 0 16px rgba(74,222,128,0.18)" : "none", transition: "border-color 0.15s, box-shadow 0.15s, transform 0.12s" }}
+              onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-2px)"; }} onMouseLeave={e => { e.currentTarget.style.transform = "none"; }}>
+              {l.cover
+                ? <img src={l.cover} alt="" style={{ width: "100%", height: 52, objectFit: "cover", display: "block" }} />
+                : <div style={{ height: 44, background: T.gr, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 19 }}>{tm.icon}</div>}
+              <div style={{ padding: "8px 10px 11px" }}>
+                <div style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: 0.9, textTransform: "uppercase", color: done ? "#4ADE80" : T.hi, marginBottom: 4 }}>{done ? "✓ Approved" : `Lesson ${k + 1}`}</div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: B.white, lineHeight: 1.35, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", minHeight: 32 }}>{l.title}</div>
+                <div style={{ fontSize: 10.5, color: done ? "#4ADE80" : B.muted, fontWeight: 700, marginTop: 6 }}>{done ? "Revisit →" : "Set up →"}</div>
+              </div>
+              {done && <span style={{ position: "absolute", top: 5, right: 7, width: 19, height: 19, borderRadius: "50%", background: "#4ADE80", color: "#0a2513", fontSize: 11, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center" }}>✓</span>}
+            </button>
+          );
+        })}
+      </div>
+      <div style={{ fontSize: 11.5, color: B.muted, textAlign: "center" }}>{allApproved ? "Every lesson is approved — continue to meet your mentor." : "Open each lesson to review it — approved ones turn green. Or skip ahead any time."}</div>
+    </>);
+  } else if (phase === "lessons" && lesson) {
     sup = `Lesson ${li + 1} of ${lessons.length} · ${lesson.title}`;
     const card = WIZ_CARDS[ci];
     if (card === "basics") {
@@ -5943,7 +5972,11 @@ function SchoolWizard({ school, T, media, published, onUpdate, saveLesson, autho
     </>);
   }
 
-  const atStart = phase === "lessons" && li === 0 && ci === 0;
+  const atStart = picker;
+  const primaryLabel = picker
+    ? (allApproved ? "Continue to Phase 2 →" : "Skip lessons — go to Phase 2 →")
+    : phase === "lessons" ? (ci === WIZ_CARDS.length - 1 ? "✓ Approve lesson" : "Approve →")
+    : "Next →";
   const stepKey = `${phase}-${li}-${ci}`;
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 250, background: "rgba(2,2,8,0.72)", backdropFilter: "blur(7px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "max(24px,5vh) 16px 40px", overflowY: "auto" }}>
@@ -5954,32 +5987,14 @@ function SchoolWizard({ school, T, media, published, onUpdate, saveLesson, autho
         </div>
         {/* phase dots + live in-phase progress */}
         <div style={{ display: "flex", gap: 4, padding: "10px 18px 0" }}>{WIZ_PHASES.map((p, i) => <div key={p} title={WIZ_PHASE_LABEL[p]} style={{ flex: 1, height: 4, borderRadius: 2, background: i < phaseIdx ? "#4ADE80" : i === phaseIdx ? T.p : B.surface3, transition: "background 0.3s" }} />)}</div>
-        {phase === "lessons" && lessons.length > 0 && (
+        {phase === "lessons" && lesson && (
           <div style={{ padding: "10px 18px 0" }}>
-            {/* every lesson as a proper card — jump anywhere, ✓ = approved */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(108px,1fr))", gap: 8, marginBottom: 10, maxHeight: 172, overflowY: "auto", paddingRight: 2 }}>
-              {lessons.map((l, k) => {
-                const on = k === li; const done = doneL[k]; const tm = TM[l.type] || TM.Dialogue;
-                return (
-                  <button key={l.id || k} onClick={() => { setLi(k); setCi(0); }} title={l.title} style={{ position: "relative", textAlign: "left", background: on ? T.ps : B.surface2, border: `1.5px solid ${on ? T.p : done ? "rgba(74,222,128,0.4)" : B.border}`, borderRadius: 12, padding: 0, cursor: "pointer", fontFamily: "inherit", overflow: "hidden", boxShadow: on ? `0 4px 16px ${T.pg}` : "none", transition: "border-color 0.15s, box-shadow 0.15s" }}>
-                    {l.cover
-                      ? <img src={l.cover} alt="" style={{ width: "100%", height: 40, objectFit: "cover", display: "block", opacity: on ? 1 : 0.85 }} />
-                      : <div style={{ height: 32, background: on ? T.gr : B.surface3, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15 }}>{tm.icon}</div>}
-                    <div style={{ padding: "7px 9px 9px" }}>
-                      <div style={{ fontSize: 9, fontWeight: 800, letterSpacing: 0.8, textTransform: "uppercase", color: done ? "#4ADE80" : on ? T.hi : B.muted, marginBottom: 3 }}>{done ? "✓ Approved" : `Lesson ${k + 1}`}</div>
-                      <div style={{ fontSize: 11, fontWeight: 700, color: on ? B.white : B.mutedMid, lineHeight: 1.3, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", minHeight: 28 }}>{l.title}</div>
-                    </div>
-                    {done && <span style={{ position: "absolute", top: 4, right: 6, width: 17, height: 17, borderRadius: "50%", background: "rgba(74,222,128,0.9)", color: "#052", fontSize: 10, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center" }}>✓</span>}
-                  </button>
-                );
-              })}
-            </div>
-            {/* fine-grained progress across ALL lesson cards, so the bar visibly moves every Approve */}
+            {/* fine-grained progress through THIS lesson's setup cards */}
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <div style={{ flex: 1, height: 5, borderRadius: 3, background: B.surface3, overflow: "hidden" }}>
-                <div style={{ width: `${Math.round(((li * WIZ_CARDS.length + ci + 1) / (lessons.length * WIZ_CARDS.length)) * 100)}%`, height: "100%", background: T.grad, borderRadius: 3, transition: "width 0.35s ease" }} />
+                <div style={{ width: `${Math.round(((ci + 1) / WIZ_CARDS.length) * 100)}%`, height: "100%", background: T.grad, borderRadius: 3, transition: "width 0.35s ease" }} />
               </div>
-              <span style={{ fontSize: 10.5, color: B.muted, whiteSpace: "nowrap" }}>card {ci + 1}/{WIZ_CARDS.length} · lesson {li + 1}/{lessons.length}</span>
+              <span style={{ fontSize: 10.5, color: B.muted, whiteSpace: "nowrap" }}>step {ci + 1}/{WIZ_CARDS.length}</span>
             </div>
           </div>
         )}
@@ -5990,7 +6005,9 @@ function SchoolWizard({ school, T, media, published, onUpdate, saveLesson, autho
         <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "12px 18px 16px" }}>
           {!atStart && <button onClick={back} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 10, color: B.mutedMid, padding: "9px 15px", cursor: "pointer", fontSize: 13, fontFamily: "inherit", fontWeight: 700 }}>← Back</button>}
           <div style={{ flex: 1 }} />
-          {phase !== "publish" && <button onClick={next} style={{ background: T.grad, border: "none", borderRadius: 10, color: "#fff", padding: "9px 20px", cursor: "pointer", fontSize: 13.5, fontFamily: "inherit", fontWeight: 800, boxShadow: `0 6px 18px ${T.pg}` }}>{phase === "lessons" ? "Approve →" : "Next →"}</button>}
+          {phase !== "publish" && <button onClick={next} style={picker && !allApproved
+            ? { background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 10, color: B.mutedMid, padding: "9px 18px", cursor: "pointer", fontSize: 13, fontFamily: "inherit", fontWeight: 700 }
+            : { background: T.grad, border: "none", borderRadius: 10, color: "#fff", padding: "9px 20px", cursor: "pointer", fontSize: 13.5, fontFamily: "inherit", fontWeight: 800, boxShadow: `0 6px 18px ${T.pg}` }}>{primaryLabel}</button>}
         </div>
       </div>
       {pick && media && <MediaPicker token={media.token} userId={media.userId} imagesOnly={pick === "cover"} onPick={m => { if (pick === "cover") setL({ cover: m.url }); else if (pick === "reward") setL({ reward: { file: { url: m.url, name: m.name } } }); }} onClose={() => setPick(null)} />}
