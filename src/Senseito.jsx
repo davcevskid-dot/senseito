@@ -895,6 +895,7 @@ DECIDE which of three modes this message is:
 - "gamification": patch object — include ONLY the keys being changed: { "xpPerLesson": <number>, "streakEvery": <number>, "streakXp": <number> (every streakEvery passed lessons grants +streakXp bonus — THIS IS WIRED, use for "add a streak bonus"), "completionReward": "<text>", "badges": [{ "icon":"<emoji>", "title":"...", "rule": {"type":"lessons"|"xp","n":<threshold>} }] (FULL replacement list — badges unlock automatically when the rule is met; use for "add/change badges", "make badges harder") }. Use for anything about XP amounts, streaks, badges or rewards.
 - "progressSkin": "<a short description of a bespoke PROGRESS-bar metaphor that fits the subject, e.g. 'a shoelace that tightens', 'a rocket climbing toward a planet', 'a plant that grows', 'a jar filling up'>", OR "default" to restore the plain bar. Use whenever they ask to change the progress bar / completion meter / loading bar / how progress looks.
 - "soul": "<a short description of a bespoke animated 'signature' centerpiece for the hero — e.g. 'a glowing constellation of the key ideas', 'an animated crest', 'drifting particles that form the topic'>", OR "remove" to take it away. A hidden delight — use ONLY when they explicitly ask for a hero/signature visual, a 'soul', or something special/animated at the top.
+- "genImage": { "prompt":"<a rich visual description to GENERATE an AI image from — expand their idea into a great image prompt>", "target":"cover"|"background"|"hero" } — use when they ask you to CREATE/generate an image ("generate a cover of…", "make me a background photo of a forest"). target: cover = the big banner image, background = the page background photo, hero = behind the title. The image is generated and placed automatically.
 IMPORTANT: "brand" is ONLY a company logo + nav links bar. A picture/illustration the user wants INSIDE the page body is NOT brand and NOT a cover — it's a content image: handle that as an "action" ("add an image brick of … to the dashboard/lesson"), not a design field.
 - "hero": { "emoji":false, "tagline":false, "description":false, "off":true } — set a key false to hide that piece; "off":true = minimal title-only header. (For "just a chat, no title/description" set hero.off true.)
 - "overlay": { "type":"mentorFab", "greeting":"<short>" } to add a floating chat bubble, or null to remove.
@@ -2821,13 +2822,25 @@ function ReadingPlainBlock({ data = {}, onOutput, T, disabled }) {
 }
 
 // ── 26. Video Embed ──
-function VideoEmbedBlock({ data = {}, onOutput, T, disabled }) {
+function VideoEmbedBlock({ data = {}, onOutput, T, disabled, canEdit, onEditData }) {
+  const media = useContext(MediaAuthCtx);
+  const [pick, setPick] = useState(false);
   const [passed, setPassed] = useState(false);
   function embedUrl(u = "") { const yt = u.match(/(?:youtube\.com\/(?:watch\?v=|shorts\/)|youtu\.be\/)([\w-]+)/); if (yt) return `https://www.youtube.com/embed/${yt[1]}`; const loom = u.match(/loom\.com\/share\/([\w-]+)/); if (loom) return `https://www.loom.com/embed/${loom[1]}`; return u; }
+  const isFile = /\.(mp4|webm|mov|m4v|ogv)(\?|$)/i.test(data.url || ""); // uploaded video files play natively
   return (<BlockShell type="video_embed" passed={passed} sub={data.title}>
-    <div style={{ position: "relative", paddingTop: "56.25%", borderRadius: 10, overflow: "hidden", border: `1px solid ${B.border}`, marginBottom: 10 }}>
-      <iframe title={data.title || "video"} src={embedUrl(data.url)} allowFullScreen style={{ position: "absolute", inset: 0, width: "100%", height: "100%", border: "none" }} />
+    <div style={{ position: "relative", paddingTop: "56.25%", borderRadius: 10, overflow: "hidden", border: `1px solid ${B.border}`, marginBottom: 10, background: "#000" }}>
+      {isFile
+        ? <video src={data.url} controls style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }} />
+        : <iframe title={data.title || "video"} src={embedUrl(data.url)} allowFullScreen style={{ position: "absolute", inset: 0, width: "100%", height: "100%", border: "none" }} />}
     </div>
+    {canEdit && (
+      <div style={{ display: "flex", gap: 7, marginBottom: 10, flexWrap: "wrap" }}>
+        {media && <button onClick={() => setPick(true)} style={{ background: "rgba(124,58,237,0.1)", border: "1px solid rgba(124,58,237,0.35)", borderRadius: 8, color: "#C4B5FD", padding: "6px 13px", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>🎞 From my media</button>}
+        <button onClick={() => { const u = window.prompt("Video URL (YouTube / Loom / file):", data.url || ""); if (u != null) onEditData?.({ ...data, url: u.trim() }); }} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "6px 13px", cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>🔗 URL</button>
+      </div>
+    )}
+    {pick && media && <MediaPicker token={media.token} userId={media.userId} onPick={m => onEditData?.({ ...data, url: m.url })} onClose={() => setPick(false)} />}
     {!passed && <button onClick={() => { setPassed(true); onOutput?.({ type: "video_embed", watched: true, passed: true }); }} disabled={disabled} style={pBtn(T)}>Mark watched ✓</button>}
   </BlockShell>);
 }
@@ -2883,12 +2896,24 @@ function CalloutBlock({ data = {}, T }) {
     </div>
   </div>);
 }
-function ImageBlock({ data = {} }) {
+function ImageBlock({ data = {}, canEdit, onEditData }) {
+  const media = useContext(MediaAuthCtx);
+  const [pick, setPick] = useState(false);
   const url = (data.url || "").trim();
-  if (!/^https:\/\//i.test(url)) return <div style={{ border: `1px dashed ${B.borderMid}`, borderRadius: 12, padding: "22px 16px", textAlign: "center", color: B.mutedMid, fontSize: 13 }}>🖼️ Add an image URL via the chat or this brick’s ✨ Tweak.</div>;
+  const controls = canEdit && (
+    <div style={{ display: "flex", gap: 7, justifyContent: "center", marginTop: url ? 8 : 12, flexWrap: "wrap" }}>
+      {media && <button onClick={() => setPick(true)} style={{ background: "rgba(124,58,237,0.1)", border: "1px solid rgba(124,58,237,0.35)", borderRadius: 8, color: "#C4B5FD", padding: "6px 13px", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>✨ Pick or generate</button>}
+      <button onClick={() => { const u = window.prompt("Image URL (https):", url); if (u != null) onEditData?.({ ...data, url: u.trim() }); }} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "6px 13px", cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>🔗 URL</button>
+      {url && <button onClick={() => onEditData?.({ ...data, url: "" })} style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>✕</button>}
+    </div>
+  );
   return (<figure style={{ margin: 0 }}>
-    <img src={url} alt={data.caption || ""} style={{ width: "100%", borderRadius: 12, display: "block", border: `1px solid ${B.border}` }} />
+    {/^https:\/\//i.test(url)
+      ? <img src={url} alt={data.caption || ""} style={{ width: "100%", borderRadius: 12, display: "block", border: `1px solid ${B.border}` }} />
+      : <div style={{ border: `1px dashed ${B.borderMid}`, borderRadius: 12, padding: "22px 16px", textAlign: "center", color: B.mutedMid, fontSize: 13 }}>🖼️ {canEdit ? "Pick a photo from your media, generate one with AI, or paste a URL." : "Image coming soon."}</div>}
     {data.caption && <figcaption style={{ fontSize: 12, color: B.muted, marginTop: 6, textAlign: "center" }}>{data.caption}</figcaption>}
+    {controls}
+    {pick && media && <MediaPicker token={media.token} userId={media.userId} imagesOnly onPick={m => onEditData?.({ ...data, url: m.url })} onClose={() => setPick(false)} />}
   </figure>);
 }
 function CtaButtonBlock({ data = {}, T }) {
@@ -8332,6 +8357,15 @@ export default function Senseito() {
             setIterProg({ pct: 40, label: "Designing your progress visual…" });
             try { const code = await genProgressSkin(rec.data, String(d.progressSkin)); if (code) { mergeData({ progressSkin: { code } }); showAToast("✓ New progress visual", "ok"); } else showAToast("Couldn't build that — kept the current bar", "err"); } catch { }
           }
+        }
+        // AI image generation → placed straight into the right slot (cover / background / hero).
+        if (d.genImage?.prompt && session) {
+          setIterProg({ pct: 40, label: "Painting your image…" });
+          try {
+            const m = await genImageToMedia(String(d.genImage.prompt), session.token, session.user.id, d.genImage.target === "cover" ? "1536x1024" : "1024x1024");
+            const t = d.genImage.target === "background" ? { bgImage: m.url, bgTint: rec.data.bgTint !== false } : d.genImage.target === "hero" ? { heroImage: m.url, heroTint: rec.data.heroTint !== false } : { cover: m.url };
+            mergeData(t); showAToast("✓ Image generated & placed (also saved to your media)", "ok");
+          } catch (e) { pushMsg({ role: "assistant", content: `✕ Image generation failed: ${e.message}` }); }
         }
         // Signature "soul" centerpiece — a hidden delight summoned only on request.
         if ("soul" in d && d.soul) {
