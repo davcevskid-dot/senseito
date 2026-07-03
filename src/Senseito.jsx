@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo, useContext, createContext, Component } from "react";
+import { createClient } from "@supabase/supabase-js";
 
 // Signed-in creator's auth ({ token, userId }) — lets deep blocks open the media library.
 const MediaAuthCtx = createContext(null);
@@ -7188,6 +7189,14 @@ function MediaPicker({ token, userId, imagesOnly = false, onPick, onClose }) {
 // Signed-in only for posting; DMs/friends are account-level (cross-school).
 // ─────────────────────────────────────────────────────────────
 const viewerName = (v) => v?.user?.user_metadata?.full_name || (v?.user?.email || "").split("@")[0] || "Someone";
+// One shared realtime client (websocket) — auth'd with the viewer's token so RLS-filtered
+// pushes (DMs) arrive instantly instead of on the next poll.
+let _sbClient = null;
+function sbRealtime(token) {
+  if (!_sbClient) _sbClient = createClient(SUPA_URL, SUPA_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
+  try { _sbClient.realtime.setAuth(token); } catch { }
+  return _sbClient;
+}
 const openDM = (userId, name) => { try { window.dispatchEvent(new CustomEvent("sx-dm", { detail: { userId, name } })); } catch { } };
 async function fetchProfiles(ids, token) {
   const uniq = [...new Set(ids)].filter(Boolean);
@@ -7247,8 +7256,8 @@ function CommunityBoard({ school, schoolId, T, viewer, onSignIn, isCreator }) {
           <span style={{ fontSize: 10.5, color: B.muted }}>{ago(p.created_at)}</span>
           <span style={{ marginLeft: "auto", display: "flex", gap: 2 }}>
             {viewer && p.author_id !== me && <><button onClick={() => openDM(p.author_id, nameOf(p))} title="Message" style={chipBtn}>💬</button><button onClick={() => befriend(p.author_id)} title="Add friend" style={chipBtn}>＋👤</button></>}
-            {viewer && p.author_id === me && !isReply && <button onClick={() => patch(p.id, { pinned: !p.pinned })} title={p.pinned ? "Unpin" : "Pin"} style={chipBtn}>📌</button>}
-            {viewer && p.author_id === me && <button onClick={() => del(p.id)} title="Delete" style={{ ...chipBtn, color: "#F87171" }}>✕</button>}
+            {viewer && (p.author_id === me || isCreator) && !isReply && <button onClick={() => patch(p.id, { pinned: !p.pinned })} title={p.pinned ? "Unpin" : "Pin as topic"} style={chipBtn}>📌</button>}
+            {viewer && (p.author_id === me || isCreator) && <button onClick={() => del(p.id)} title={p.author_id === me ? "Delete" : "Remove (moderate)"} style={{ ...chipBtn, color: "#F87171" }}>✕</button>}
           </span>
         </div>
         <div style={{ fontSize: 13, color: B.white, lineHeight: 1.6, marginTop: 3, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{p.body}</div>
@@ -7325,7 +7334,22 @@ function MessengerDock({ viewer }) {
       await supaFetch(`/rest/v1/messages?to_id=eq.${me}&from_id=eq.${p}&read_at=is.null`, { method: "PATCH", token: viewer.token, headers: { Prefer: "return=minimal" }, body: { read_at: new Date().toISOString() } });
     } catch { }
   }
-  useEffect(() => { loadConvos(); const id = setInterval(() => { loadConvos(); if (actRef.current) loadThread(actRef.current.userId); }, open ? 4000 : 30000); return () => clearInterval(id); }, [open]); // eslint-disable-line
+  // Polling is only a safety net now — realtime below delivers messages instantly.
+  useEffect(() => { loadConvos(); const id = setInterval(() => { loadConvos(); if (actRef.current) loadThread(actRef.current.userId); }, open ? 20000 : 60000); return () => clearInterval(id); }, [open]); // eslint-disable-line
+  useEffect(() => {
+    let ch = null;
+    try {
+      const sb = sbRealtime(viewer.token);
+      ch = sb.channel(`dm-${me}`)
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter: `to_id=eq.${me}` }, (payload) => {
+          loadConvos();
+          const m = payload?.new;
+          if (m && actRef.current && m.from_id === actRef.current.userId) loadThread(actRef.current.userId);
+        })
+        .subscribe();
+    } catch { /* websocket unavailable → polling still covers us */ }
+    return () => { try { ch?.unsubscribe(); } catch { } };
+  }, [me]); // eslint-disable-line
   useEffect(() => {
     const h = (e) => { setOpen(true); const d = e.detail || {}; setAct({ userId: d.userId, name: d.name || "Member" }); loadThread(d.userId); };
     window.addEventListener("sx-dm", h); return () => window.removeEventListener("sx-dm", h);
@@ -7429,6 +7453,57 @@ function FriendsCard({ session }) {
             <button onClick={() => act(f)} style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 12 }}>✕</button>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+// STUDENT PROFILE — one account across every school: avatar, display name,
+// this school's progress, and cross-school friends. Opened from the public header.
+function StudentProfileModal({ viewer, T, xp, passed, total, schoolName, onClose }) {
+  const [prof, setProf] = useState(null);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const avatarRef = useRef(null);
+  useEffect(() => { loadProfile(viewer.token, viewer.user.id).then(p => { setProf(p); setName(p?.display_name || viewerName(viewer)); }); }, []); // eslint-disable-line
+  async function saveName() {
+    const n = name.trim(); if (!n) return;
+    try { await saveProfile(viewer.token, viewer.user.id, { display_name: n }); setProf(p => ({ ...(p || {}), display_name: n })); } catch { }
+  }
+  async function onAvatar(e) {
+    const f = e.target.files?.[0]; if (!f) return;
+    setBusy(true);
+    try { const m = await uploadMedia(f, viewer.token, viewer.user.id); await saveProfile(viewer.token, viewer.user.id, { avatar_url: m.url }); setProf(p => ({ ...(p || {}), avatar_url: m.url })); } catch { }
+    setBusy(false); e.target.value = "";
+  }
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 330, background: "rgba(2,2,8,0.72)", backdropFilter: "blur(7px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "max(24px,6vh) 16px 40px", overflowY: "auto", fontFamily: "'Inter',sans-serif" }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 460, background: "var(--surface)", border: `1px solid ${T.ba}`, borderRadius: 20, padding: 22 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
+          <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 17, fontWeight: 800, color: B.white }}>Your profile</div>
+          <button onClick={onClose} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "5px 10px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>✕</button>
+        </div>
+        <div style={{ display: "flex", gap: 14, alignItems: "center", marginBottom: 16 }}>
+          <div onClick={() => avatarRef.current?.click()} title="Change photo" style={{ position: "relative", cursor: "pointer" }}>
+            <Avatar name={name} url={prof?.avatar_url} size={62} T={T} />
+            <div style={{ position: "absolute", bottom: -3, right: -3, width: 22, height: 22, borderRadius: "50%", background: T.grad || "linear-gradient(135deg,#7C3AED,#06B6D4)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "#fff" }}>{busy ? "…" : "📷"}</div>
+          </div>
+          <input ref={avatarRef} type="file" accept="image/*" onChange={onAvatar} style={{ display: "none" }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <input value={name} onChange={e => setName(e.target.value)} onBlur={saveName} onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); saveName(); e.currentTarget.blur(); } }} placeholder="Your name" style={{ width: "100%", background: "var(--surface3)", border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, fontFamily: "inherit", fontSize: 15, fontWeight: 700, padding: "8px 11px", boxSizing: "border-box" }} />
+            <div style={{ fontSize: 11.5, color: B.muted, marginTop: 5 }}>{viewer.user.email} · shown in communities & chats across all schools</div>
+          </div>
+        </div>
+        {total > 0 && (
+          <div style={{ background: "var(--surface2)", border: `1px solid ${B.border}`, borderRadius: 13, padding: "12px 15px", marginBottom: 16 }}>
+            <div style={{ fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.2, color: T.hi, marginBottom: 7 }}>{schoolName}</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ flex: 1, height: 6, background: "var(--surface3)", borderRadius: 3, overflow: "hidden" }}><div style={{ width: `${Math.round((passed / total) * 100)}%`, height: "100%", background: T.grad, borderRadius: 3 }} /></div>
+              <span style={{ fontSize: 12, color: B.mutedMid, fontWeight: 700, whiteSpace: "nowrap" }}>{passed}/{total} lessons · {xp} XP</span>
+            </div>
+          </div>
+        )}
+        <FriendsCard session={viewer} />
       </div>
     </div>
   );
@@ -7632,6 +7707,7 @@ function PublicSchool({ slug }) {
   const [rec, setRec] = useState(null);
   const [status, setStatus] = useState("loading");
   const [stud, setStud] = useState(null); // signed-in student { token, user }
+  const [profOpen, setProfOpen] = useState(false); // student profile modal
   const [mode, setMode] = useThemeMode();
   const lsKey = `senseito_progress_${slug}`;
   const saveT = useRef(null);
@@ -7715,7 +7791,7 @@ function PublicSchool({ slug }) {
         <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 16, fontWeight: 700, color: B.white }}>Sensei<span style={{ background: "linear-gradient(135deg,#7C3AED,#06B6D4)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>to</span></div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <ThemeToggle mode={mode} setMode={setMode} />
-          {stud ? <span style={{ fontSize: 12, color: "#6EE7B7" }}>☁️ {stud.user.email}</span>
+          {stud ? <button onClick={() => setProfOpen(true)} title="Your profile — name, photo, friends" style={{ fontSize: 12, color: "#6EE7B7", background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.3)", borderRadius: 100, padding: "5px 13px", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>👤 {viewerName(stud)}</button>
             : <button onClick={signIn} style={{ fontSize: 12.5, color: "#67E8F9", background: "rgba(6,182,212,0.09)", border: "1px solid rgba(6,182,212,0.3)", borderRadius: 8, padding: "6px 12px", fontWeight: 600, cursor: "pointer", fontFamily: "inherit" }}>Enroll — sign in</button>}
           <a href="/" style={{ fontSize: 12.5, color: "#A78BFA", textDecoration: "none", border: "1px solid rgba(124,58,237,0.35)", borderRadius: 8, padding: "6px 13px", fontWeight: 600 }}>Build your own →</a>
         </div>
@@ -7747,6 +7823,9 @@ function PublicSchool({ slug }) {
         : <div id="sx-enroll"><EnrollCard schoolId={rec.id} mentorName={rec.data?.mentor?.name} T={T} onSignIn={signIn} /></div>}
       {stud && <Boundary><SchoolPage rec={merged} readOnly onUpdate={(patch) => setLocalState(s => ({ ...s, ...patch }))} viewer={stud} onSignIn={signIn} /></Boundary>}
       {stud && <MessengerDock viewer={stud} />}
+      {stud && profOpen && (() => { const total = (rec.data.semesters || []).reduce((a, x) => a + (x.lessons?.length || 0), 0); const passed = Object.values(localState.progress || {}).filter(v => v === "passed").length; return (
+        <StudentProfileModal viewer={stud} T={T} xp={localState.xp || 0} passed={passed} total={total} schoolName={rec.data.name} onClose={() => setProfOpen(false)} />
+      ); })()}
     </div>
   );
 }
