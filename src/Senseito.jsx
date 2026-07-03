@@ -405,6 +405,17 @@ const GAMI = {
 
 function shortName(t = "") { return t.split(" ").slice(0, 2).join(" "); }
 
+// Badges normalize to { icon, title, rule:{type:"lessons"|"xp", n} } — legacy string badges
+// become a lessons-ladder (badge i unlocks at i+1 passes), so old schools keep working.
+function normBadges(school) {
+  const g = school?.gamification; if (!g) return [];
+  return (g.badges || []).map((b, i) => typeof b === "string"
+    ? { icon: "🏅", title: b, rule: { type: "lessons", n: i + 1 } }
+    : { icon: b.icon || "🏅", title: b.title || "Badge", rule: (b.rule && b.rule.n > 0) ? { type: b.rule.type === "xp" ? "xp" : "lessons", n: b.rule.n } : { type: "lessons", n: i + 1 } });
+}
+const badgeEarned = (b, passed, xp) => b.rule.type === "xp" ? xp >= b.rule.n : passed >= b.rule.n;
+const badgeRuleLabel = (b, school) => b.rule.type === "xp" ? `${b.rule.n} ${curLabel(school)}` : `${b.rule.n} lesson${b.rule.n > 1 ? "s" : ""}`;
+
 const CHIPS = [
   { label: "🧠 Life Coaching", key: "life" },
   { label: "💪 Fitness", key: "fitness" },
@@ -879,6 +890,7 @@ DECIDE which of three modes this message is:
 - "navStyle": "pills" | "topbar" | "chunky" | "minimal" | "soft" | "sidebar" — override the section navigation style independently of the theme. "sidebar" = a left vertical nav with content beside it (two-column).
 - "navGrad": a CSS gradient string for the navigation/sidebar background, e.g. "linear-gradient(180deg,#ef4444,#3b82f6)". Use for "make the sidebar a red→blue gradient". "" to clear.
 - "currency": { "word":"<what the points/XP are called, e.g. Energy, Coins, Sparks, Insight>", "icon":"<single emoji>" }. Use for "rename XP to …", "call points coins", "make XP energy". Set "currency": null to reset to "XP".
+- "gamification": patch object — include ONLY the keys being changed: { "xpPerLesson": <number>, "streakEvery": <number>, "streakXp": <number> (every streakEvery passed lessons grants +streakXp bonus — THIS IS WIRED, use for "add a streak bonus"), "completionReward": "<text>", "badges": [{ "icon":"<emoji>", "title":"...", "rule": {"type":"lessons"|"xp","n":<threshold>} }] (FULL replacement list — badges unlock automatically when the rule is met; use for "add/change badges", "make badges harder") }. Use for anything about XP amounts, streaks, badges or rewards.
 - "progressSkin": "<a short description of a bespoke PROGRESS-bar metaphor that fits the subject, e.g. 'a shoelace that tightens', 'a rocket climbing toward a planet', 'a plant that grows', 'a jar filling up'>", OR "default" to restore the plain bar. Use whenever they ask to change the progress bar / completion meter / loading bar / how progress looks.
 - "soul": "<a short description of a bespoke animated 'signature' centerpiece for the hero — e.g. 'a glowing constellation of the key ideas', 'an animated crest', 'drifting particles that form the topic'>", OR "remove" to take it away. A hidden delight — use ONLY when they explicitly ask for a hero/signature visual, a 'soul', or something special/animated at the top.
 IMPORTANT: "brand" is ONLY a company logo + nav links bar. A picture/illustration the user wants INSIDE the page body is NOT brand and NOT a cover — it's a content image: handle that as an "action" ("add an image brick of … to the dashboard/lesson"), not a design field.
@@ -6183,8 +6195,16 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
 
   function handlePass(lessonNumber) {
     if (progress[lessonNumber] === "passed") return; // already passed — don't re-award XP on revisit
-    const nextXp = xp + (school.gamification?.xpPerLesson || 100);
+    const g = school.gamification || {};
     const next = { ...progress, [lessonNumber]: "passed" };
+    const passedBefore = Object.values(progress).filter(v => v === "passed").length;
+    const passedNow = passedBefore + 1;
+    // Streak bonus — WIRED: every g.streakEvery passes grants +g.streakXp on top of the lesson XP.
+    let bonus = 0;
+    if (g.streakEvery > 0 && g.streakXp > 0 && passedNow % g.streakEvery === 0) { bonus = g.streakXp; showToast(`🔥 Streak! +${bonus} bonus ${curLabel(school)}`); }
+    const nextXp = xp + (g.xpPerLesson || 100) + bonus;
+    // Badge unlocks — celebrate the moment a rule is met (lessons-passed or XP thresholds).
+    normBadges(school).forEach(b => { if (!badgeEarned(b, passedBefore, xp) && badgeEarned(b, passedNow, nextXp)) setTimeout(() => showToast(`${b.icon} Badge unlocked: ${b.title}`), 600); });
     // Branching lesson: the student's chosen fork unlocks the path — skip the linear auto-advance.
     const forked = (school.semesters || []).flatMap(s => s.lessons || []).find(l => l.number === lessonNumber)?.forks?.length;
     if (forked) { onUpdate({ progress: next, xp: nextXp }); return; }
@@ -6806,27 +6826,47 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
               </div>
             ); })}
             {!readOnly && <AddLessonBar T={T} disabled={iterating} onAdd={(topic) => onIterate(`Add ONE new lesson about "${topic}" to the end of the lessons. Give it a fitting title, concept, mission, passCriteria and 1-3 activities allowed for the ${school.learningPath || "mixed"} learning path. Keep the school name and ALL existing lessons exactly as they are.`)} />}
-            {school.gamification && (
+            {school.gamification && (() => {
+              const g = school.gamification;
+              const setG = (patch) => onUpdate({ data: { ...school, gamification: { ...g, ...patch } } });
+              const badges = normBadges(school);
+              const setBadge = (i, patch) => setG({ badges: badges.map((b, k) => k === i ? { ...b, ...patch } : b) });
+              return (
               <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 18, padding: 26 }}>
-                <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 15, fontWeight: 700, color: B.white, marginBottom: 18 }}>🎮 {GAMI[school.gamification.preset]?.name || "Gamification"}</div>
+                <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 15, fontWeight: 700, color: B.white, marginBottom: 18 }}>🎮 {GAMI[g.preset]?.name || "Gamification"}{!readOnly && <span style={{ fontSize: 11, fontWeight: 400, color: B.muted, marginLeft: 10 }}>editable — or just tell the chat ("make badges harder", "+50 XP every 3 lessons")</span>}</div>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 10 }}>
-                  {[["XP Per Lesson", `${school.gamification.xpPerLesson} XP`], ["Streak Bonus", school.gamification.streakBonus], ["Completion Reward", school.gamification.completionReward]].map(([l, v]) => (
-                    <div key={l} style={{ background: B.surface2, borderRadius: 10, padding: "13px 15px", gridColumn: l === "Completion Reward" ? "1 / -1" : undefined }}>
-                      <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, color: B.muted, marginBottom: 4 }}>{l}</div>
-                      <div style={{ fontSize: 13, color: B.white }}>{v}</div>
-                    </div>
-                  ))}
+                  <div style={{ background: B.surface2, borderRadius: 10, padding: "13px 15px" }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, color: B.muted, marginBottom: 4 }}>Per lesson</div>
+                    {readOnly ? <div style={{ fontSize: 13, color: B.white }}>{g.xpPerLesson} {curLabel(school)}</div>
+                      : <div style={{ display: "flex", alignItems: "center", gap: 6 }}><input type="number" min="0" value={g.xpPerLesson ?? 100} onChange={e => setG({ xpPerLesson: Math.max(0, +e.target.value || 0) })} style={{ width: 74, background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.white, fontFamily: "inherit", fontSize: 13, padding: "5px 8px" }} /><span style={{ fontSize: 12.5, color: B.mutedMid }}>{curLabel(school)}</span></div>}
+                  </div>
+                  <div style={{ background: B.surface2, borderRadius: 10, padding: "13px 15px" }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, color: B.muted, marginBottom: 4 }}>Streak bonus</div>
+                    {readOnly ? <div style={{ fontSize: 13, color: B.white }}>{g.streakEvery > 0 && g.streakXp > 0 ? `Every ${g.streakEvery} lessons → +${g.streakXp} ${curLabel(school)}` : (g.streakBonus || "—")}</div>
+                      : <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", fontSize: 12.5, color: B.mutedMid }}>every <input type="number" min="0" value={g.streakEvery ?? 3} onChange={e => setG({ streakEvery: Math.max(0, +e.target.value || 0) })} style={{ width: 48, background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.white, fontFamily: "inherit", fontSize: 13, padding: "5px 8px" }} /> lessons → +<input type="number" min="0" value={g.streakXp ?? 50} onChange={e => setG({ streakXp: Math.max(0, +e.target.value || 0) })} style={{ width: 58, background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.white, fontFamily: "inherit", fontSize: 13, padding: "5px 8px" }} /> {curLabel(school)}</div>}
+                  </div>
                   <div style={{ background: B.surface2, borderRadius: 10, padding: "13px 15px", gridColumn: "1 / -1" }}>
-                    <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, color: B.muted, marginBottom: 8 }}>Badges</div>
+                    <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, color: B.muted, marginBottom: 4 }}>Completion reward</div>
+                    <div style={{ fontSize: 13, color: B.white }}><EditableText value={g.completionReward} readOnly={readOnly} placeholder="What finishing everything earns…" onSave={v => setG({ completionReward: v })} /></div>
+                  </div>
+                  <div style={{ background: B.surface2, borderRadius: 10, padding: "13px 15px", gridColumn: "1 / -1" }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, color: B.muted, marginBottom: 8 }}>Badges {!readOnly && <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: 400 }}>— click a rule to change when it unlocks</span>}</div>
                     <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
-                      {school.gamification.badges?.map((badge, i) => (
-                        <span key={i} style={{ background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 100, padding: "3px 11px", fontSize: 12, color: T.hi }}>{passedCount > i ? "🏅" : "🔒"} {badge}</span>
-                      ))}
+                      {badges.map((b, i) => { const earned = badgeEarned(b, passedCount, xp); return (
+                        <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: earned ? "rgba(74,222,128,0.1)" : T.ps, border: `1px solid ${earned ? "rgba(74,222,128,0.4)" : T.ba}`, borderRadius: 100, padding: "4px 12px", fontSize: 12, color: earned ? "#4ADE80" : T.hi }}>
+                          <span>{earned ? b.icon : "🔒"}</span>
+                          <EditableText value={b.title} readOnly={readOnly} onSave={v => setBadge(i, { title: v })} />
+                          <span onClick={() => { if (readOnly) return; const n = window.prompt(`Unlock "${b.title}" after how many ${b.rule.type === "xp" ? curLabel(school) : "passed lessons"}? (number — prefix with "xp:" to switch to an XP rule, e.g. xp:500)`, b.rule.type === "xp" ? `xp:${b.rule.n}` : String(b.rule.n)); if (n == null) return; const m = n.trim().match(/^(xp:)?\s*(\d+)$/i); if (m) setBadge(i, { rule: { type: m[1] ? "xp" : "lessons", n: +m[2] } }); }} title={`Unlocks at ${badgeRuleLabel(b, school)}`} style={{ fontSize: 10, color: B.muted, cursor: readOnly ? "default" : "pointer" }}>· {badgeRuleLabel(b, school)}</span>
+                          {!readOnly && <span onClick={() => setG({ badges: badges.filter((_, k) => k !== i) })} style={{ color: B.muted, cursor: "pointer", fontSize: 11 }}>✕</span>}
+                        </span>
+                      ); })}
+                      {!readOnly && <button onClick={() => { const t = window.prompt("Badge name:"); if (!t || !t.trim()) return; const n = parseInt(window.prompt("Unlocks after how many passed lessons?", String(badges.length + 1)) || "0", 10); setG({ badges: [...badges, { icon: "🏅", title: t.trim(), rule: { type: "lessons", n: n > 0 ? n : badges.length + 1 } }] }); }} style={{ background: "none", border: `1px dashed ${T.ba}`, borderRadius: 100, color: T.hi, padding: "4px 12px", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>＋ Badge</button>}
                     </div>
                   </div>
                 </div>
               </div>
-            )}
+              );
+            })()}
           </>))}
           {activeTab === "mentor" && <MentorOffice school={school} T={T} chat={rec.mentorChat || []} onChat={(msgs) => onUpdate({ mentorChat: msgs })} bus={bus} onIngest={ingestOutput} progress={progress} onUpdate={onUpdate} readOnly={readOnly} />}
           {activeTab === "tools" && <ToolsSection rec={rec} T={T} onUpdate={onUpdate} buildTool={buildTool} buildingTool={buildingTool} readOnly={readOnly} onReloadIdeas={reloadIdeas} onEditTool={editTool} />}
@@ -8196,6 +8236,7 @@ export default function Senseito() {
     if ("overlay" in d) patch.overlay = d.overlay;
     if ("currency" in d) patch.currency = (d.currency && d.currency.word) ? { word: String(d.currency.word).slice(0, 16), icon: String(d.currency.icon || "").slice(0, 4) } : undefined;
     if ("coverHeight" in d) patch.coverHeight = d.coverHeight === null ? undefined : Math.max(120, Math.min(560, Math.round(Number(d.coverHeight)) || 240));
+    if ("gamification" in d && d.gamification && typeof d.gamification === "object") patch.gamification = { ...(cur.gamification || { preset: "xp", xpPerLesson: 100 }), ...d.gamification };
     if (!Object.keys(patch).length) return false;
     pushVersion(rec.id, cur); // snapshot for Undo
     updateSchool(rec.id, { data: { ...cur, ...patch } });
