@@ -884,7 +884,9 @@ const CHAT_SYS = (school) => `You are the Senseito build assistant for the proje
 ${schoolSummary(school)}
 Available block types: ${ALL_BLOCKS.join(", ")}.
 The creator chats with you to shape this project. Reply in JSON ONLY:
-{ "reply": "<conversational reply, under 90 words>", "action": <null OR one precise one-line CONTENT/STRUCTURE edit instruction>, "design": <null OR an object that patches VISUAL/LAYOUT fields directly> }
+{ "reply": "<conversational reply, under 90 words>", "action": <null OR one precise one-line CONTENT/STRUCTURE edit instruction>, "design": <null OR an object that patches VISUAL/LAYOUT fields directly>, "options": <null OR 2-3 idea cards — see IDEAS mode> }
+
+IDEAS MODE (takes priority): when they ask for IDEAS, OPTIONS, SUGGESTIONS or DIRECTIONS ("give me 3 ideas to make it more beautiful", "how could the lesson cards look better", "options for a nicer tab design") — do NOT change anything. Return "options": [2-3 of { "title": "<catchy name, max 5 words>", "summary": "<2-3 sentences vividly describing exactly how it would look/feel — specific to THIS school, not generic>", "instruction": "<the precise one-line edit instruction to execute if they pick this — phrased for the design/content engine>" }] with a one-line "reply" and action/design null. Make the 2-3 options genuinely DIFFERENT directions, not variations.
 
 DECIDE which of three modes this message is:
 1) JUST TALKING — a question, brainstorming, asking your opinion/advice, or thinking out loud ("what do you think of…", "should I…", "how would you design…", "explain…"). Then reply helpfully and set BOTH action and design to null. DO NOT edit the school. If their wish is ambiguous, ASK ONE clarifying question in the reply and keep action/design null — wait for their answer before changing anything.
@@ -8160,7 +8162,27 @@ function ProjectChat({ rec, iterating, thinking, history, onSend, onIterate, onB
       </div>
       <div style={{ flex: 1, overflowY: "auto", padding: "10px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
         <div style={{ fontSize: 12, color: B.mutedMid, lineHeight: 1.6, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 10, padding: "10px 12px" }}>👋 Tell me what to change — e.g. “add a quiz to lesson 2”.</div>
-        {history.map((m, i) => (
+        {history.map((m, i) => m.role === "options" ? (
+          /* IDEAS — pickable design-direction cards: hover to feel them, use or refine one. */
+          <div key={i} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {(m.options || []).map((o, k) => (
+              <div key={k} style={{ position: "relative", background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: "13px 14px", transition: "transform 0.16s, border-color 0.2s, box-shadow 0.2s", overflow: "hidden" }}
+                onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.borderColor = T.ba; e.currentTarget.style.boxShadow = `0 10px 30px ${T.pg}`; }}
+                onMouseLeave={e => { e.currentTarget.style.transform = "none"; e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.boxShadow = "none"; }}>
+                <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: T.grad, opacity: 0.8 }} />
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                  <span style={{ width: 22, height: 22, borderRadius: 7, background: T.ps, border: `1px solid ${T.ba}`, color: T.hi, fontSize: 11, fontWeight: 800, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{k + 1}</span>
+                  <span style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 13.5, fontWeight: 800, color: B.white }}>{o.title}</span>
+                </div>
+                <div style={{ fontSize: 12, color: B.mutedMid, lineHeight: 1.6, marginBottom: 10 }}>{o.summary}</div>
+                <div style={{ display: "flex", gap: 7 }}>
+                  <button onClick={() => onIterate(o.instruction)} disabled={busy} style={{ background: T.grad, border: "none", borderRadius: 8, color: "#fff", padding: "6px 14px", cursor: "pointer", fontSize: 11.5, fontWeight: 800, fontFamily: "inherit", opacity: busy ? 0.5 : 1 }}>✓ Use this</button>
+                  <button onClick={() => { setInput(`${o.instruction} — with these tweaks: `); }} disabled={busy} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "6px 12px", cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit" }}>✎ Refine it</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
           <div key={i} style={{ display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start", gap: 7, alignItems: "flex-start" }}>
             {m.role !== "user" && <div style={{ flex: "0 0 22px", marginTop: 2 }}><SenseitoMark size={22} /></div>}
             <div style={{ maxWidth: "88%", background: m.role === "user" ? T.ps : B.surface, border: `1px solid ${m.role === "user" ? T.ba : B.border}`, borderRadius: m.role === "user" ? "12px 4px 12px 12px" : "4px 12px 12px 12px", padding: "8px 11px", fontSize: 12.5, lineHeight: 1.5, color: B.white }}>{m.role === "user" ? m.content : <Markdown text={m.content} />}</div>
@@ -8502,7 +8524,14 @@ export default function Senseito() {
     pushMsg({ role: "user", content: text }); setChatThinking(true);
     try {
       const thread = iterHistory.filter(m => m.role === "user" || m.role === "assistant").slice(-8).map(m => ({ role: m.role, content: m.content }));
-      const out = await apiJSON(CHAT_SYS(rec.data), [...thread, { role: "user", content: text }], 800, "sonnet");
+      const out = await apiJSON(CHAT_SYS(rec.data), [...thread, { role: "user", content: text }], 1400, "sonnet");
+      // IDEAS mode → render pickable option cards in the chat; nothing is applied yet.
+      if (Array.isArray(out.options) && out.options.length) {
+        if (out.reply) pushMsg({ role: "assistant", content: out.reply });
+        pushMsg({ role: "options", content: "", options: out.options.slice(0, 3).filter(o => o && o.title && o.instruction) });
+        setChatThinking(false);
+        return;
+      }
       if (out.reply) pushMsg({ role: "assistant", content: out.reply });
       const d = out.design && typeof out.design === "object" ? out.design : null;
       // Only NOW — if there's a real change to apply — show the school-update bar. Pure chat shows nothing.
