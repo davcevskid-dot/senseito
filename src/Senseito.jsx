@@ -80,17 +80,34 @@ async function deleteMedia(path, token) {
 }
 // ── AI image generation → straight into the creator's media library. ──
 // The OpenAI key lives ONLY in the "image-gen" edge function (server-side).
-async function genImageToMedia(prompt, token, userId, size) {
+// The API only outputs 1:1 / 3:2 / 2:3 — we generate at the closest size and
+// centre-crop client-side to the EXACT ratio requested.
+const IMG_RATIOS = { "1:1": [1, 1], "16:9": [16, 9], "9:16": [9, 16], "4:5": [4, 5], "5:4": [5, 4] };
+const ratioApiSize = (ratio) => { const [w, h] = IMG_RATIOS[ratio] || [1, 1]; return w > h ? "1536x1024" : w < h ? "1024x1536" : "1024x1024"; };
+function b64ToImage(b64) {
+  return new Promise((res, rej) => { const img = new Image(); img.onload = () => res(img); img.onerror = rej; img.src = `data:image/png;base64,${b64}`; });
+}
+async function cropImageToRatio(img, ratio) {
+  const [rw, rh] = IMG_RATIOS[ratio] || [1, 1];
+  const target = rw / rh;
+  let sw = img.naturalWidth, sh = img.naturalHeight;
+  if (sw / sh > target) sw = Math.round(sh * target); else sh = Math.round(sw / target);
+  const sx = Math.round((img.naturalWidth - sw) / 2), sy = Math.round((img.naturalHeight - sh) / 2);
+  const c = document.createElement("canvas"); c.width = sw; c.height = sh;
+  c.getContext("2d").drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+  const blob = await new Promise(r => c.toBlob(r, "image/jpeg", 0.92));
+  return new File([blob], `ai-${ratio.replace(":", "x")}-${Date.now()}.jpg`, { type: "image/jpeg" });
+}
+async function genImageToMedia(prompt, token, userId, ratio = "1:1") {
   const res = await fetch(`${SUPA_URL}/functions/v1/image-gen`, {
     method: "POST",
     headers: { "Content-Type": "application/json", apikey: SUPA_KEY, Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ prompt, size }),
+    body: JSON.stringify({ prompt, size: ratioApiSize(ratio) }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data.error || !data.b64) throw new Error(data.error || "Image generation failed");
-  const bin = atob(data.b64); const arr = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
-  const file = new File([arr], `ai-${Date.now()}.png`, { type: "image/png" });
+  const img = await b64ToImage(data.b64);
+  const file = await cropImageToRatio(img, ratio);
   return uploadMedia(file, token, userId);
 }
 
@@ -5973,9 +5990,10 @@ function SchoolWizard({ school, T, media, published, onUpdate, saveLesson, autho
   }
 
   const atStart = picker;
+  // Only the FINAL card approves; the rest just move on (skipping an empty card shouldn't feel like "approving" it).
   const primaryLabel = picker
     ? (allApproved ? "Continue to Phase 2 →" : "Skip lessons — go to Phase 2 →")
-    : phase === "lessons" ? (ci === WIZ_CARDS.length - 1 ? "✓ Approve lesson" : "Approve →")
+    : phase === "lessons" ? (ci === WIZ_CARDS.length - 1 ? "✓ Approve lesson" : "Next →")
     : "Next →";
   const stepKey = `${phase}-${li}-${ci}`;
   return (
@@ -7044,6 +7062,17 @@ function Home({ onCreated, autofocus, onAutofocusDone, session, onRequireAuth })
         genProgressSkin(content).then(code => { if (code) content.progressSkin = { code }; }).catch(() => { }),
         genCurrency(content).then(c => { if (c) content.currency = c; }).catch(() => { }),
       ] : [];
+      // Bespoke AI imagery, sized for its slot: a 16:9 school cover for every build (Normal+Super),
+      // and per-lesson 16:9 covers in SUPER — each themed to ITS topic, so no two schools look alike.
+      // All land in the creator's media library too. Failures are silent (the build never blocks on art).
+      if (session && mode !== "fast") {
+        const noText = "Cinematic, atmospheric, premium editorial photography style. Absolutely NO text, letters, logos or watermarks.";
+        extraP.push(genImageToMedia(`Cover image for an online school called "${content.name}" — ${flattenText(content.description) || content.tagline || ""}. Capture the FEELING of the subject. ${noText}`, session.token, session.user.id, "16:9").then(m => { content.cover = m.url; }).catch(() => { }));
+        if (mode === "super") {
+          const ls = (content.semesters || []).flatMap(s => s.lessons || []).slice(0, 6);
+          ls.forEach(l => extraP.push(genImageToMedia(`Cover image for a lesson titled "${l.title}" (${l.concept || ""}) in a school about ${content.name}. Evoke this exact lesson's idea visually. ${noText}`, session.token, session.user.id, "16:9").then(m => { l.cover = m.url; }).catch(() => { })));
+        }
+      }
       await fillSchoolBlocks(content, { dna, onProgress: (d, t) => setProg(p => ({ ...p, pct: 30 + Math.round((d / t) * 64), label: `Authoring activities… (${d}/${t} done)` })) });
       if (extraP.length) { setProg(p => ({ ...p, label: "Crafting bespoke touches…" })); await Promise.all(extraP); }
       autoFixSchool(content); // deterministic self-review so the one-shot feels finished
@@ -7261,6 +7290,7 @@ function MediaPicker({ token, userId, imagesOnly = false, onPick, onClose }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [genPrompt, setGenPrompt] = useState("");
+  const [genRatio, setGenRatio] = useState("1:1");
   const [genBusy, setGenBusy] = useState(false);
   const fileRef = useRef(null);
   const refresh = () => listMedia(token, userId).then(setItems).catch(e => { setErr(e.message); setItems([]); });
@@ -7268,7 +7298,7 @@ function MediaPicker({ token, userId, imagesOnly = false, onPick, onClose }) {
   async function generate() {
     const p = genPrompt.trim(); if (!p || genBusy) return;
     setGenBusy(true); setErr("");
-    try { const m = await genImageToMedia(p, token, userId); setGenPrompt(""); await refresh(); onPick(m); onClose(); }
+    try { const m = await genImageToMedia(p, token, userId, genRatio); setGenPrompt(""); await refresh(); onPick(m); onClose(); }
     catch (e) { setErr(e.message); }
     setGenBusy(false);
   }
@@ -7294,6 +7324,7 @@ function MediaPicker({ token, userId, imagesOnly = false, onPick, onClose }) {
         {err && <div style={{ padding: "8px 18px", fontSize: 12, color: "#F87171" }}>{err}</div>}
         <div style={{ display: "flex", gap: 7, padding: "10px 18px", borderBottom: `1px solid ${B.border}`, background: T.ps }}>
           <input value={genPrompt} onChange={e => setGenPrompt(e.target.value)} onKeyDown={e => { if (e.key === "Enter") generate(); }} placeholder='✨ Or generate one… e.g. "warm watercolor of a sunrise over mountains"' disabled={genBusy} style={{ flex: 1, background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, fontFamily: "inherit", fontSize: 12.5, padding: "8px 11px" }} />
+          <select value={genRatio} onChange={e => setGenRatio(e.target.value)} title="Aspect ratio" disabled={genBusy} style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, fontFamily: "inherit", fontSize: 12, padding: "8px 7px", cursor: "pointer" }}>{Object.keys(IMG_RATIOS).map(r => <option key={r} value={r}>{r}</option>)}</select>
           <button onClick={generate} disabled={genBusy || !genPrompt.trim()} style={{ background: T.grad, border: "none", borderRadius: 9, color: "#fff", padding: "8px 14px", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", opacity: genBusy || !genPrompt.trim() ? 0.6 : 1 }}>{genBusy ? <><Spinner color="#fff" />Painting…</> : "✨ Generate"}</button>
         </div>
         <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
@@ -7640,6 +7671,83 @@ function StudentProfileModal({ viewer, T, xp, passed, total, schoolName, onClose
   );
 }
 
+// CROP TOOL — pan + zoom an image inside a fixed-ratio window, save as a NEW
+// media file (original untouched). Used from the media library on any image.
+function CropModal({ item, token, userId, onSaved, onClose }) {
+  const T = { grad: "linear-gradient(135deg,#7C3AED,#06B6D4)", ba: "rgba(124,58,237,0.4)", ps: "rgba(124,58,237,0.12)", hi: "#C4B5FD" };
+  const [ratio, setRatio] = useState("16:9");
+  const [zoom, setZoom] = useState(1);
+  const [off, setOff] = useState({ x: 0, y: 0 });
+  const [img, setImg] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  useEffect(() => {
+    const i = new Image(); i.crossOrigin = "anonymous";
+    i.onload = () => setImg(i); i.onerror = () => setErr("Couldn't load this image for cropping.");
+    i.src = item.url;
+  }, [item.url]);
+  const [rw, rh] = IMG_RATIOS[ratio];
+  const VW = 380, VH = Math.round(VW * rh / rw);
+  const base = img ? Math.max(VW / img.naturalWidth, VH / img.naturalHeight) : 1; // cover-fit at zoom 1
+  const scale = base * zoom;
+  const clampOff = (o, s = scale) => {
+    if (!img) return o;
+    const maxX = Math.max(0, (img.naturalWidth * s - VW) / 2), maxY = Math.max(0, (img.naturalHeight * s - VH) / 2);
+    return { x: Math.min(maxX, Math.max(-maxX, o.x)), y: Math.min(maxY, Math.max(-maxY, o.y)) };
+  };
+  useEffect(() => { setOff(o => clampOff(o)); }, [ratio, zoom, img]); // eslint-disable-line
+  const onDrag = (ev) => {
+    ev.preventDefault(); const node = ev.currentTarget; try { node.setPointerCapture(ev.pointerId); } catch { }
+    const sx = ev.clientX, sy = ev.clientY, o0 = off;
+    const move = (m) => setOff(clampOff({ x: o0.x + (m.clientX - sx), y: o0.y + (m.clientY - sy) }));
+    const up = () => { node.removeEventListener("pointermove", move); node.removeEventListener("pointerup", up); node.removeEventListener("pointercancel", up); };
+    node.addEventListener("pointermove", move); node.addEventListener("pointerup", up); node.addEventListener("pointercancel", up);
+  };
+  async function save() {
+    if (!img || busy) return; setBusy(true); setErr("");
+    try {
+      const w = img.naturalWidth * scale, h = img.naturalHeight * scale;
+      const left = (VW - w) / 2 + off.x, top = (VH - h) / 2 + off.y;
+      const sx = -left / scale, sy = -top / scale, sw = VW / scale, sh = VH / scale;
+      const c = document.createElement("canvas"); c.width = Math.max(1, Math.round(sw)); c.height = Math.max(1, Math.round(sh));
+      c.getContext("2d").drawImage(img, sx, sy, sw, sh, 0, 0, c.width, c.height);
+      const blob = await new Promise(r => c.toBlob(r, "image/jpeg", 0.92));
+      if (!blob) throw new Error("Couldn't export the crop (the image may block cross-origin use).");
+      const f = new File([blob], `${(item.name || "image").replace(/\.[a-z0-9]+$/i, "")}-${ratio.replace(":", "x")}.jpg`, { type: "image/jpeg" });
+      await uploadMedia(f, token, userId);
+      onSaved?.(); onClose();
+    } catch (e) { setErr(e.message || "Crop failed"); }
+    setBusy(false);
+  }
+  const imgW = img ? img.naturalWidth * scale : 0, imgH = img ? img.naturalHeight * scale : 0;
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 340, background: "rgba(2,2,8,0.78)", backdropFilter: "blur(7px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, fontFamily: "'Inter',sans-serif" }}>
+      <div onClick={e => e.stopPropagation()} style={{ background: "var(--surface)", border: `1px solid ${T.ba}`, borderRadius: 18, padding: 18, width: "auto", maxWidth: "94vw" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 12 }}>
+          <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 15, fontWeight: 800, color: B.white }}>✂ Crop image</div>
+          <button onClick={onClose} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "5px 10px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>✕</button>
+        </div>
+        <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
+          {Object.keys(IMG_RATIOS).map(r => <button key={r} onClick={() => { setRatio(r); setZoom(1); }} style={{ background: ratio === r ? T.ps : "var(--surface2)", border: `1px solid ${ratio === r ? T.ba : B.borderMid}`, borderRadius: 8, color: ratio === r ? T.hi : B.mutedMid, padding: "5px 12px", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>{r}</button>)}
+        </div>
+        <div onPointerDown={img ? onDrag : undefined} style={{ position: "relative", width: VW, height: VH, maxWidth: "88vw", overflow: "hidden", borderRadius: 12, border: `1px solid ${B.borderMid}`, background: "#000", cursor: img ? "grab" : "default", touchAction: "none" }}>
+          {img
+            ? <img src={item.url} alt="" draggable={false} style={{ position: "absolute", width: imgW, height: imgH, left: (VW - imgW) / 2 + off.x, top: (VH - imgH) / 2 + off.y, maxWidth: "none", userSelect: "none", pointerEvents: "none" }} />
+            : <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: B.muted, fontSize: 13 }}>{err || "Loading…"}</div>}
+          <div style={{ position: "absolute", inset: 0, border: "1px dashed rgba(255,255,255,0.35)", borderRadius: 12, pointerEvents: "none" }} />
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 12 }}>
+          <span style={{ fontSize: 11.5, color: B.muted }}>Zoom</span>
+          <input type="range" min="1" max="3" step="0.01" value={zoom} onChange={e => setZoom(+e.target.value)} style={{ flex: 1 }} />
+        </div>
+        <div style={{ fontSize: 11, color: B.muted, margin: "8px 0 12px" }}>Drag the photo to position it · saved as a NEW file, the original stays.</div>
+        {err && img && <div style={{ fontSize: 12, color: "#F87171", marginBottom: 8 }}>{err}</div>}
+        <button onClick={save} disabled={!img || busy} style={{ width: "100%", background: T.grad, border: "none", borderRadius: 10, color: "#fff", padding: "11px", cursor: "pointer", fontSize: 13.5, fontWeight: 800, fontFamily: "inherit", opacity: !img || busy ? 0.6 : 1 }}>{busy ? <><Spinner color="#fff" />Saving…</> : `💾 Save ${ratio} copy`}</button>
+      </div>
+    </div>
+  );
+}
+
 // The creator's Profile — avatar, media library ("Filebase"), achievements.
 function ProfileView({ session, profile, onProfile, achStats, schoolCount, syncState, onBack, onSignOut }) {
   const T = { ...THEMES.violet, grad: "linear-gradient(135deg,#7C3AED,#06B6D4)" };
@@ -7649,13 +7757,15 @@ function ProfileView({ session, profile, onProfile, achStats, schoolCount, syncS
   const [avatarBusy, setAvatarBusy] = useState(false);
   const [err, setErr] = useState("");
   const [genPrompt, setGenPrompt] = useState("");
+  const [genRatio, setGenRatio] = useState("1:1");
   const [genBusy, setGenBusy] = useState(false);
+  const [cropItem, setCropItem] = useState(null); // image being cropped
   const fileRef = useRef(null);
   const avatarRef = useRef(null);
   async function generate() {
     const p = genPrompt.trim(); if (!p || genBusy) return;
     setGenBusy(true); setErr("");
-    try { await genImageToMedia(p, session.token, userId); setGenPrompt(""); await refresh(); }
+    try { await genImageToMedia(p, session.token, userId, genRatio); setGenPrompt(""); await refresh(); }
     catch (e) { setErr(e.message); }
     setGenBusy(false);
   }
@@ -7726,6 +7836,7 @@ function ProfileView({ session, profile, onProfile, achStats, schoolCount, syncS
         </div>
         <div style={{ display: "flex", gap: 7, marginBottom: 14 }}>
           <input value={genPrompt} onChange={e => setGenPrompt(e.target.value)} onKeyDown={e => { if (e.key === "Enter") generate(); }} placeholder='✨ Generate an image with AI… e.g. "minimal line-art logo of a mountain sunrise"' disabled={genBusy} style={{ flex: 1, background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, fontFamily: "inherit", fontSize: 12.5, padding: "9px 12px" }} />
+          <select value={genRatio} onChange={e => setGenRatio(e.target.value)} title="Aspect ratio" disabled={genBusy} style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, fontFamily: "inherit", fontSize: 12, padding: "9px 8px", cursor: "pointer" }}>{Object.keys(IMG_RATIOS).map(r => <option key={r} value={r}>{r}</option>)}</select>
           <button onClick={generate} disabled={genBusy || !genPrompt.trim()} style={{ background: T.grad, border: "none", borderRadius: 9, color: "#fff", padding: "9px 15px", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", opacity: genBusy || !genPrompt.trim() ? 0.6 : 1, whiteSpace: "nowrap" }}>{genBusy ? <><Spinner color="#fff" />Painting…</> : "✨ Generate"}</button>
         </div>
         {err && <div style={{ fontSize: 12, color: "#F87171", marginBottom: 10 }}>{err}</div>}
@@ -7735,6 +7846,7 @@ function ProfileView({ session, profile, onProfile, achStats, schoolCount, syncS
             {items.map(m => (
               <div key={m.path} style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 12, overflow: "hidden", position: "relative" }}>
                 <button onClick={() => remove(m)} title="Delete" style={{ position: "absolute", top: 6, right: 6, zIndex: 2, background: "rgba(0,0,0,0.5)", border: "none", borderRadius: 7, color: "#F87171", width: 24, height: 22, cursor: "pointer", fontSize: 12 }}>🗑</button>
+                {isImageFile(m) && <button onClick={() => setCropItem(m)} title="Crop — save a copy in another ratio" style={{ position: "absolute", top: 6, right: 34, zIndex: 2, background: "rgba(0,0,0,0.5)", border: "none", borderRadius: 7, color: "#fff", width: 24, height: 22, cursor: "pointer", fontSize: 11 }}>✂</button>}
                 <a href={m.url} target="_blank" rel="noreferrer" style={{ display: "block", textDecoration: "none" }}>
                   <div style={{ height: 100, background: B.surface3, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
                     {isImageFile(m) ? <img src={m.url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontSize: 34 }}>{FILE_ICON(m.name, m.url)}</span>}
@@ -7749,6 +7861,7 @@ function ProfileView({ session, profile, onProfile, achStats, schoolCount, syncS
             ))}
           </div>}
       </div>
+      {cropItem && <CropModal item={cropItem} token={session.token} userId={userId} onSaved={refresh} onClose={() => setCropItem(null)} />}
     </div>
   );
 }
@@ -8379,7 +8492,7 @@ export default function Senseito() {
         if (d.genImage?.prompt && session) {
           setIterProg({ pct: 40, label: "Painting your image…" });
           try {
-            const m = await genImageToMedia(String(d.genImage.prompt), session.token, session.user.id, d.genImage.target === "cover" ? "1536x1024" : "1024x1024");
+            const m = await genImageToMedia(String(d.genImage.prompt), session.token, session.user.id, d.genImage.target === "cover" || d.genImage.target === "hero" ? "16:9" : "1:1");
             const t = d.genImage.target === "background" ? { bgImage: m.url, bgTint: rec.data.bgTint !== false } : d.genImage.target === "hero" ? { heroImage: m.url, heroTint: rec.data.heroTint !== false } : { cover: m.url };
             mergeData(t); showAToast("✓ Image generated & placed (also saved to your media)", "ok");
           } catch (e) { pushMsg({ role: "assistant", content: `✕ Image generation failed: ${e.message}` }); }
