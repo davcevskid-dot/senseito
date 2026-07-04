@@ -2994,18 +2994,42 @@ function normalizeSlideEl(e) {
     url: e.url || "", fit: e.fit, frame: !!e.frame, rot: Number(e.rot) || 0,
   };
 }
+// The AI can SEE the creator's photos: attach up to 4 image elements as real vision
+// blocks (the proxy forwards content arrays straight to Anthropic).
+function elsVisionContent(els, text) {
+  const imgs = (els || []).filter(e => e.type === "image" && /^https:\/\//i.test(e.url || "")).slice(0, 4);
+  const note = imgs.length ? `\n\nATTACHED PHOTOS (you can SEE them; in order they are element ids: ${imgs.map(e => e.id).join(", ")}) — use what's actually IN each photo to inform titles, captions, grouping and placement.` : "";
+  return [{ type: "text", text: text + note }, ...imgs.map(e => ({ type: "image", source: { type: "url", url: e.url } }))];
+}
+
 // Polish the user's overlay elements (positions, sizing, colour, typography) to look more beautiful
 // and aligned — keeping each element's type and text. Returns improved els (or the originals).
 async function genPolishEls(school, els) {
   if (!Array.isArray(els) || !els.length) return els;
   const T = themeFor(school);
-  const sys = `You are a presentation designer refining overlay elements on a slide for "${school.name}". Improve their beauty: better positions/sizes (x,y,w,h as PERCENT 0-100, keep inside the frame), tasteful colour using accents ${T.p}/${T.a}, readable typography, clean alignment. KEEP each element's "id", "type" and its text/"html"/"url" exactly. Return JSON {"els": Element[]} with the SAME elements, only restyled/repositioned.`;
+  const sys = `You are a presentation designer refining overlay elements on a slide for "${school.name}". Improve their beauty: better positions/sizes (x,y,w,h as PERCENT 0-100, keep inside the frame), tasteful colour using accents ${T.p}/${T.a}, readable typography, clean alignment. If photos are attached you can SEE them — align and balance around their actual content. KEEP each element's "id", "type" and its text/"html"/"url" exactly. Return JSON {"els": Element[]} with the SAME elements, only restyled/repositioned.`;
   try {
-    const j = await apiJSON(sys, [{ role: "user", content: `Elements:\n${JSON.stringify(els)}` }], 1600, "sonnet");
+    const j = await apiJSON(sys, [{ role: "user", content: elsVisionContent(els, `Elements:\n${JSON.stringify(els)}`) }], 1600, "sonnet");
     const out = Array.isArray(j?.els) ? j.els : null;
     if (out && out.length) return out.map(normalizeSlideEl);
   } catch { /* keep originals */ }
   return els;
+}
+
+// ARRANGE — full creative authority over the creator's own elements: it SEES their photos,
+// can reposition/restyle everything, and ADD text (titles, captions) / boxes / lines to fulfil
+// the instruction ("make these 3 photos work together, give each a title"). Never loses a photo.
+async function genArrangeEls(school, els, instruction) {
+  const T = themeFor(school);
+  const sys = `You are a world-class slide designer working on the creator's OWN overlay elements for "${school.name}". Fulfil their instruction on the CURRENT elements: reposition/resize/restyle anything, and ADD new elements where the instruction needs them — text titles/captions (type "text": {x,y,w,h,html,size,color,align,weight}), boxes, ellipses, lines. You can SEE the attached photos — write titles/captions about what is ACTUALLY in each photo and group/align them meaningfully.
+RULES: coordinates are PERCENT 0-100 inside the slide (keep everything inside). NEVER remove an existing image element or change its "url". Keep existing element "id"s. Accents ${T.p}/${T.a}; light readable text. Return JSON {"els": Element[]} — the COMPLETE new element list.`;
+  const j = await apiJSON(sys, [{ role: "user", content: elsVisionContent(els, `INSTRUCTION: ${instruction}\n\nCURRENT ELEMENTS:\n${JSON.stringify(els)}`) }], 2400, "sonnet");
+  let out = Array.isArray(j?.els) ? j.els.map(normalizeSlideEl) : null;
+  if (!out || !out.length) throw new Error("Couldn't rework the elements — try rephrasing.");
+  // Safety net: any photo the model dropped gets re-attached unchanged.
+  const kept = new Set(out.filter(e => e.type === "image").map(e => e.url));
+  (els || []).filter(e => e.type === "image" && e.url && !kept.has(e.url)).forEach(e => out.push(e));
+  return out;
 }
 
 // The school's "soul": a bespoke signature centerpiece, generated as a self-contained themed
@@ -3511,9 +3535,18 @@ function ShowroomBlock({ data = {}, T, school, canEdit, onEditData, disabled }) 
     const p = draft.trim(); if ((!p && kind !== "regen") || busy) return;
     setBusy(kind);
     try {
-      const scene = await genShowroomScene(school, p || cur?.prompt || "a beautiful, alive title slide for this school", kind === "iter" ? (cur?.scene || "") : null);
-      const next = { ...(cur || {}), prompt: p || cur?.prompt || "", scene, h: cur?.h || 360, els: cur?.els || [], bg: cur?.bg || "" };
-      save(slides.map((s, k) => k === idx ? next : s)); setSel(null);
+      // Instructions about the creator's OWN content (their photos/text els) go to the
+      // element engine — which SEES the photos — instead of regenerating the backdrop scene.
+      const els = cur?.els || [];
+      const elsIntent = /\b(photo|image|picture|title|caption|label|arrange|align|group|grid|order|them|these|together|my |resize|bigger|smaller)\b/i.test(p);
+      if (kind === "iter" && els.length && (elsIntent || !cur?.scene)) {
+        const newEls = await genArrangeEls(school, els, p);
+        save(slides.map((s, k) => k === idx ? { ...cur, els: newEls } : s)); setSel(null);
+      } else {
+        const scene = await genShowroomScene(school, p || cur?.prompt || "a beautiful, alive title slide for this school", kind === "iter" ? (cur?.scene || "") : null);
+        const next = { ...(cur || {}), prompt: p || cur?.prompt || "", scene, h: cur?.h || 360, els: cur?.els || [], bg: cur?.bg || "" };
+        save(slides.map((s, k) => k === idx ? next : s)); setSel(null);
+      }
     } catch { } setBusy(false);
   }
   // One-click "make this beautiful" — enhances the slide's generated visual while keeping the message.
