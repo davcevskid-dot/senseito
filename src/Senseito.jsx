@@ -111,6 +111,46 @@ async function genImageToMedia(prompt, token, userId, ratio = "1:1") {
   return uploadMedia(file, token, userId);
 }
 
+// ── Persistent auth session — survives refresh, auto-renews via the refresh token,
+//    and is SHARED between the creator app and public school pages (one key). ──
+const SESS_KEY = "senseito_sess";
+const readSessLS = () => { try { return JSON.parse(localStorage.getItem(SESS_KEY) || "null"); } catch { return null; } };
+const writeSessLS = (s) => { try { s ? localStorage.setItem(SESS_KEY, JSON.stringify(s)) : localStorage.removeItem(SESS_KEY); } catch { } };
+// If the URL carries a fresh OAuth hash (#access_token=…), persist it (incl. the refresh token) and clean the URL.
+function captureHashSession() {
+  try {
+    const h = new URLSearchParams((window.location.hash || "").replace(/^#/, ""));
+    const at = h.get("access_token");
+    if (!at) return null;
+    const s = { access_token: at, refresh_token: h.get("refresh_token") || "", expires_at: Date.now() + (parseInt(h.get("expires_in") || "3600", 10) * 1000) };
+    writeSessLS(s);
+    try { window.history.replaceState(null, "", window.location.pathname + window.location.search); } catch { }
+    return s;
+  } catch { return null; }
+}
+async function refreshSessLS(s) {
+  if (!s?.refresh_token) { writeSessLS(null); return null; }
+  try {
+    const r = await fetch(`${SUPA_URL}/auth/v1/token?grant_type=refresh_token`, { method: "POST", headers: { "Content-Type": "application/json", apikey: SUPA_KEY }, body: JSON.stringify({ refresh_token: s.refresh_token }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.access_token) { writeSessLS(null); return null; }
+    const ns = { access_token: j.access_token, refresh_token: j.refresh_token || s.refresh_token, expires_at: Date.now() + (j.expires_in || 3600) * 1000 };
+    writeSessLS(ns); return ns;
+  } catch { return null; } // network blip — keep the stored session, retry later
+}
+// → { token, user } | null. Fresh OAuth hash wins; else the stored session, refreshed when stale.
+async function restoreSession() {
+  let s = captureHashSession() || readSessLS();
+  if (!s) return null;
+  if (Date.now() > (s.expires_at || 0) - 120000) s = await refreshSessLS(s);
+  if (!s) return null;
+  try { const user = await supaFetch("/auth/v1/user", { token: s.access_token }); return { token: s.access_token, user }; }
+  catch {
+    const ns = await refreshSessLS(s); if (!ns) return null;
+    try { const user = await supaFetch("/auth/v1/user", { token: ns.access_token }); return { token: ns.access_token, user }; } catch { return null; }
+  }
+}
+
 async function loadProfile(token, userId) {
   try { const rows = await supaFetch(`/rest/v1/profiles?id=eq.${userId}&select=*`, { token }); return (rows && rows[0]) || null; } catch { return null; }
 }
@@ -7997,16 +8037,19 @@ function PublicSchool({ slug }) {
   });
   useEffect(() => { if (!stud) { try { localStorage.setItem(lsKey, JSON.stringify(localState)); } catch { } } }, [localState, lsKey, stud]);
 
-  // Capture the OAuth token from the hash (sign-in returns to this page).
+  // Fresh OAuth hash OR the persisted shared session (same account as the creator app).
   useEffect(() => {
     (async () => {
-      try {
-        const h = new URLSearchParams((window.location.hash || "").replace(/^#/, ""));
-        const at = h.get("access_token");
-        if (at) { const user = await supaFetch("/auth/v1/user", { token: at }); setStud({ token: at, user }); try { window.history.replaceState(null, "", window.location.pathname); } catch { } }
-      } catch { }
+      const sess = await restoreSession();
+      if (sess) { setStud(sess); try { localStorage.removeItem("senseito_return_to"); } catch { } }
     })();
   }, []);
+  // Keep the student's session alive across long study sessions too.
+  useEffect(() => {
+    if (!stud) return;
+    const id = setInterval(async () => { const s = readSessLS(); if (!s) return; const ns = await refreshSessLS(s); if (ns) setStud(prev => prev ? { ...prev, token: ns.access_token } : prev); }, 40 * 60 * 1000);
+    return () => clearInterval(id);
+  }, [stud?.user?.id]); // eslint-disable-line
 
   useEffect(() => {
     (async () => {
@@ -8056,7 +8099,13 @@ function PublicSchool({ slug }) {
     </div>
   );
 
-  const signIn = () => { const redirect = encodeURIComponent(window.location.href.split("#")[0]); window.location.href = `${SUPA_URL}/auth/v1/authorize?provider=google&redirect_to=${redirect}`; };
+  const signIn = () => {
+    // Remember where enrollment started — if Supabase bounces the OAuth return to the
+    // root page (redirect not allow-listed), the root app forwards them right back here.
+    try { localStorage.setItem("senseito_return_to", window.location.pathname); } catch { }
+    const redirect = encodeURIComponent(window.location.href.split("#")[0]);
+    window.location.href = `${SUPA_URL}/auth/v1/authorize?provider=google&redirect_to=${redirect}`;
+  };
   const T = themeFor(rec.data);
   const merged = { ...rec, ...localState };
   // Landing page first for visitors who aren't signed in; the school itself sits behind a peek.
@@ -8250,20 +8299,26 @@ export default function Senseito() {
   useEffect(() => { setIterHistory([]); setGuideOpen(false); }, [view]); // fresh chat per project; close the guide on switch
   useEffect(() => { if (session?.user?.id) loadProfile(session.token, session.user.id).then(p => p && setProfile(p)); else setProfile(null); }, [session]);
 
-  // auth bootstrap (OAuth hash → session)
+  // auth bootstrap — fresh OAuth hash OR the persisted session (survives refresh, auto-renews).
   useEffect(() => {
     (async () => {
+      const sess = await restoreSession();
+      if (!sess) return;
+      setSession(sess);
+      // If sign-in started on a public school page but OAuth bounced to the root
+      // (redirect not on Supabase's allow-list), send them straight back to the school.
       try {
-        const h = new URLSearchParams((window.location.hash || "").replace(/^#/, ""));
-        const at = h.get("access_token");
-        if (at) {
-          const user = await supaFetch("/auth/v1/user", { token: at });
-          setSession({ token: at, user });
-          try { window.history.replaceState(null, "", window.location.pathname); } catch { }
-        }
-      } catch { /* not signed in */ }
+        const ret = localStorage.getItem("senseito_return_to");
+        if (ret && /^\/s\//.test(ret)) { localStorage.removeItem("senseito_return_to"); window.location.assign(ret); }
+      } catch { }
     })();
   }, []);
+  // Keep long sessions alive: quietly renew the token well before its ~1h expiry.
+  useEffect(() => {
+    if (!session) return;
+    const id = setInterval(async () => { const s = readSessLS(); if (!s) return; const ns = await refreshSessLS(s); if (ns) setSession(prev => prev ? { ...prev, token: ns.access_token } : prev); }, 40 * 60 * 1000);
+    return () => clearInterval(id);
+  }, [session?.user?.id]); // eslint-disable-line
 
   // load cloud schools on sign-in.
   // IMPORTANT: filter by user_id. The "select published" RLS policy would
@@ -8607,7 +8662,7 @@ export default function Senseito() {
         [contenteditable][data-ph]:empty:before{content:attr(data-ph);color:#55556E}
       `}</style>
 
-      {accountOpen && <AccountModal session={session} syncState={syncState} schoolCount={schools.length} achStats={achStats} onSignOut={() => { setSession(null); setSchools([]); setSyncState("idle"); setAccountOpen(false); }} onClose={() => setAccountOpen(false)} />}
+      {accountOpen && <AccountModal session={session} syncState={syncState} schoolCount={schools.length} achStats={achStats} onSignOut={() => { writeSessLS(null); setSession(null); setSchools([]); setSyncState("idle"); setAccountOpen(false); }} onClose={() => setAccountOpen(false)} />}
       {/* Achievement celebration — waits politely until any fresh-build reveal is done. */}
       {achQueue.length > 0 && justBuiltId === null && <AchievementOverlay ach={achQueue[0]} onClose={() => setAchQueue(q => q.slice(1))} />}
       {session && <MessengerDock viewer={{ token: session.token, user: session.user }} />}
@@ -8693,7 +8748,7 @@ export default function Senseito() {
         <div style={{ position: "relative", zIndex: 1 }}>
           <Boundary resetKey={view}>
             {view === "profile"
-              ? (session ? <ProfileView session={session} profile={profile} onProfile={setProfile} achStats={achStats} schoolCount={schools.length} syncState={syncState} onBack={() => setView("home")} onSignOut={() => { setSession(null); setSchools([]); setSyncState("idle"); setView("home"); }} />
+              ? (session ? <ProfileView session={session} profile={profile} onProfile={setProfile} achStats={achStats} schoolCount={schools.length} syncState={syncState} onBack={() => setView("home")} onSignOut={() => { writeSessLS(null); setSession(null); setSchools([]); setSyncState("idle"); setView("home"); }} />
                 : <Home onCreated={createSchool} session={session} onRequireAuth={() => setAccountOpen(true)} />)
               : view === "home" || !active
               ? <Home onCreated={createSchool} autofocus={scrollHome} onAutofocusDone={() => setScrollHome(false)} session={session} onRequireAuth={() => setAccountOpen(true)} />
