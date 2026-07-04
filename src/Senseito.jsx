@@ -3002,13 +3002,18 @@ function EmbedBlock({ data = {}, onOutput, T, disabled }) {
 }
 
 // ── DESIGN / UI BRICKS (display-only, no completion gate) ──
-function DividerBlock({ data = {} }) {
-  if (data.label) return (<div style={{ display: "flex", alignItems: "center", gap: 12, margin: "2px 0" }}>
-    <div style={{ flex: 1, height: 1, background: B.borderMid }} />
-    <span style={{ fontSize: 11.5, fontWeight: 700, color: B.mutedMid, letterSpacing: 0.5, textTransform: "uppercase" }}>{data.label}</span>
-    <div style={{ flex: 1, height: 1, background: B.borderMid }} />
-  </div>);
-  return <div style={{ height: 1, background: B.borderMid, margin: "4px 0" }} />;
+function DividerBlock({ data = {}, T }) {
+  const st = data.style || "line"; // line | dots | ornament | gradient
+  const line = st === "gradient"
+    ? <div style={{ flex: 1, height: 2, borderRadius: 2, background: `linear-gradient(90deg, transparent, ${T?.p || "#7C3AED"}, transparent)` }} />
+    : st === "dots"
+      ? <div style={{ flex: 1, display: "flex", gap: 7, alignItems: "center", justifyContent: "center" }}>{Array.from({ length: 24 }).map((_, i) => <span key={i} style={{ width: 3, height: 3, borderRadius: "50%", background: B.borderMid }} />)}</div>
+      : <div style={{ flex: 1, height: 1, background: B.borderMid }} />;
+  const center = data.label
+    ? <span style={{ fontSize: 11.5, fontWeight: 700, color: B.mutedMid, letterSpacing: 0.5, textTransform: "uppercase" }}>{data.label}</span>
+    : st === "ornament" ? <span style={{ fontSize: 13, color: T?.hi || B.mutedMid }}>✦ ✦ ✦</span> : null;
+  if (center) return <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "2px 0" }}>{line}{center}{line}</div>;
+  return <div style={{ display: "flex", margin: "4px 0" }}>{line}</div>;
 }
 function CalloutBlock({ data = {}, T }) {
   const tones = { info: { bg: "rgba(56,189,248,0.08)", bd: "rgba(56,189,248,0.3)", ic: "💡" }, success: { bg: "rgba(74,222,128,0.08)", bd: "rgba(74,222,128,0.3)", ic: "✅" }, warn: { bg: "rgba(251,191,36,0.08)", bd: "rgba(251,191,36,0.3)", ic: "⚠️" }, accent: { bg: T.ps, bd: T.ba, ic: "⭐" } };
@@ -3044,8 +3049,28 @@ function ImageBlock({ data = {}, canEdit, onEditData }) {
 }
 function CtaButtonBlock({ data = {}, T }) {
   const url = (data.url || "").trim(); const label = data.label || "Learn more";
-  const inner = <span style={{ display: "inline-block", background: T.grad, color: "white", fontWeight: 700, fontSize: 14, padding: "12px 26px", borderRadius: 10, fontFamily: "inherit", boxShadow: `0 6px 20px ${T.pg}` }}>{label}</span>;
+  const inner = <span style={{ display: "inline-block", background: T.grad, color: "white", fontWeight: 700, fontSize: 14, padding: "12px 26px", borderRadius: 10, fontFamily: "inherit", boxShadow: `0 6px 20px ${T.pg}`, cursor: "pointer" }}>{label}</span>;
+  // Internal targets: "#tab:<sectionId>" jumps to a section, "#lesson:<number>" opens a lesson.
+  if (/^#(tab|lesson):/i.test(url)) return <div style={{ textAlign: data.align || "center", padding: "4px 0" }} onClick={() => { try { window.dispatchEvent(new CustomEvent("sx-goto", { detail: url.slice(1) })); } catch { } }}>{inner}</div>;
   return (<div style={{ textAlign: data.align || "center", padding: "4px 0" }}>{/^https?:\/\//i.test(url) ? <a href={url} target="_blank" rel="noopener noreferrer" style={{ textDecoration: "none" }}>{inner}</a> : inner}</div>);
+}
+// Animated count-up for stat numbers (parses "82%", "3/7", "1,200 kcal" → animates the first number).
+function CountUp({ value }) {
+  const [v, setV] = useState(null);
+  useEffect(() => {
+    const m = String(value).match(/^([^0-9]*)([\d,]+(?:\.\d+)?)([\s\S]*)$/);
+    if (!m) { setV(null); return; }
+    const target = parseFloat(m[2].replace(/,/g, "")); if (!isFinite(target)) { setV(null); return; }
+    const dec = m[2].includes(".") ? 1 : 0; const t0 = performance.now(); let raf;
+    const step = (t) => {
+      const p = Math.min(1, (t - t0) / 850), eased = 1 - Math.pow(1 - p, 3);
+      setV(`${m[1]}${(target * eased).toFixed(dec)}${m[3]}`);
+      if (p < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [value]);
+  return <>{v == null ? value : v}</>;
 }
 // "Performance" brick — reflects the learner's live progress from the Context Bus.
 function StatGridBlock({ data = {}, T, school, bus }) {
@@ -3064,7 +3089,7 @@ function StatGridBlock({ data = {}, T, school, bus }) {
     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(110px,1fr))", gap: 10 }}>
       {tiles.map(([k, v], i) => (
         <div key={i} style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 12, padding: "14px 12px", textAlign: "center" }}>
-          <div style={{ fontSize: 24, fontWeight: 800, color: T.hi, fontFamily: "'Space Grotesk',sans-serif" }}>{v}</div>
+          <div style={{ fontSize: 24, fontWeight: 800, color: T.hi, fontFamily: "'Space Grotesk',sans-serif" }}><CountUp value={v} /></div>
           <div style={{ fontSize: 11.5, color: B.mutedMid, marginTop: 4 }}>{k}</div>
         </div>
       ))}
@@ -3686,12 +3711,26 @@ function ShowroomBlock({ data = {}, T, school, canEdit, onEditData, disabled }) 
     node.addEventListener("pointermove", move); node.addEventListener("pointerup", up); node.addEventListener("pointercancel", up);
   };
   const isLegacy = cur && cur.code && !cur.els;
+  // ▶ PRESENT MODE — fullscreen deck: ←/→ (or click edges) to navigate, Esc to leave.
+  const [present, setPresent] = useState(false);
+  useEffect(() => {
+    if (!present) return;
+    const onKey = (e) => {
+      if (e.key === "Escape") setPresent(false);
+      else if (e.key === "ArrowRight" || e.key === " ") setI(v => Math.min(slides.length - 1, v + 1));
+      else if (e.key === "ArrowLeft") setI(v => Math.max(0, v - 1));
+    };
+    window.addEventListener("keydown", onKey);
+    const prevOverflow = document.body.style.overflow; document.body.style.overflow = "hidden";
+    return () => { window.removeEventListener("keydown", onKey); document.body.style.overflow = prevOverflow; };
+  }, [present, slides.length]);
   const pill = (active) => ({ background: active ? T.ps : B.surface3, border: `1px solid ${active ? T.ba : B.borderMid}`, borderRadius: 8, color: active ? T.hi : B.mutedMid, padding: "6px 11px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 700 });
   return (
     <div style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 14, padding: 14 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
         <div style={{ fontSize: 13, fontWeight: 700, color: B.white }}>🎬 {data.title || "Showroom"}</div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {cur && !isLegacy && slides.length > 0 && <button onClick={() => { setPresent(true); setEdit(false); setSel(null); }} title="Fullscreen — ←/→ to move, Esc to leave" style={pill(false)}>▶ Present</button>}
           {canEdit && !isLegacy && (cur?.scene || cur?.els?.length > 0) && <button onClick={beautify} disabled={!!busy} title="One tap — let the AI make this slide more beautiful (keeps your content)" style={{ background: T.grad, border: "none", borderRadius: 8, color: "#fff", padding: "6px 12px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 700, boxShadow: `0 3px 12px ${T.pg}`, opacity: busy ? 0.6 : 1 }}>{busy === "beautify" ? <><Spinner color="#fff" />Beautifying…</> : "✨ Make beautiful"}</button>}
           {canEdit && edit && !isLegacy && <button onClick={() => setSnap(s => !s)} title={snap ? "Magnetic aligner ON — snaps to guides; click for free-form" : "Free-form — click to turn the magnetic aligner on"} style={pill(snap)}>{snap ? "🧲 Aligner on" : "🧲 Aligner off"}</button>}
           {canEdit && cur && !isLegacy && <button onClick={() => { setEdit(!edit); setEditingText(false); setSel(null); }} style={pill(edit)}>{edit ? "✓ Done editing" : "✎ Edit slide"}</button>}
@@ -3706,8 +3745,10 @@ function ShowroomBlock({ data = {}, T, school, canEdit, onEditData, disabled }) 
           {canEdit && <button onClick={() => ai("regen")} disabled={!!busy} style={{ ...pBtn(T), marginTop: 8, opacity: busy ? 0.6 : 1 }}>{busy ? <><Spinner color="#fff" />Rebuilding…</> : "↻ Rebuild as an editable slide"}</button>}
         </>
       ) : cur && (
-        <div style={{ position: "relative" }}>
-          <div onPointerDown={() => { setSel(null); setEditingText(false); }} style={{ position: "relative", width: "100%", height: cur.h || 360, background: cur.bg || defaultSlideBg(T), borderRadius: 12, overflow: "hidden", border: `1px solid ${B.border}` }}>
+        <div style={present ? { position: "fixed", inset: 0, zIndex: 420, background: "#000", display: "flex", alignItems: "center", justifyContent: "center" } : { position: "relative" }}>
+          <div onPointerDown={() => { setSel(null); setEditingText(false); }} style={present
+            ? { position: "relative", width: "100vw", height: "100vh", background: cur.bg || defaultSlideBg(T), overflow: "hidden" }
+            : { position: "relative", width: "100%", height: cur.h || 360, background: cur.bg || defaultSlideBg(T), borderRadius: 12, overflow: "hidden", border: `1px solid ${B.border}` }}>
             {/* The AI-designed scene fills the frame; non-interactive while editing so overlays stay draggable */}
             {cur.scene && <MentorWidget code={cur.scene} T={T} fill interactive={!edit} />}
             {/* Alignment guides (centre + thirds) shown while the magnetic aligner is on */}
@@ -3721,7 +3762,13 @@ function ShowroomBlock({ data = {}, T, school, canEdit, onEditData, disabled }) 
             ))}
             {!cur.scene && (cur.els || []).length === 0 && <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: hexA("#ffffff", 0.5), fontSize: 13 }}>{canEdit ? "Write a prompt below and Generate a beautiful slide — then add text & shapes on top." : ""}</div>}
           </div>
-          {edit && <div data-handle="1" onPointerDown={resizeCanvas} title="Drag to resize the slide" style={{ height: 16, marginTop: 2, display: "flex", alignItems: "center", justifyContent: "center", cursor: "ns-resize", color: B.muted, fontSize: 11, touchAction: "none" }}>⇕ drag to resize</div>}
+          {present && (<>
+            <button onClick={() => setPresent(false)} title="Exit (Esc)" style={{ position: "absolute", top: 16, right: 18, zIndex: 10, background: "rgba(0,0,0,0.55)", border: "1px solid rgba(255,255,255,0.25)", borderRadius: 10, color: "#fff", padding: "8px 14px", cursor: "pointer", fontSize: 13, fontFamily: "inherit", fontWeight: 700 }}>✕ Exit</button>
+            {idx > 0 && <button onClick={() => setI(idx - 1)} style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", zIndex: 10, background: "rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.2)", borderRadius: "50%", width: 46, height: 46, color: "#fff", fontSize: 19, cursor: "pointer" }}>‹</button>}
+            {idx < slides.length - 1 && <button onClick={() => setI(idx + 1)} style={{ position: "absolute", right: 14, top: "50%", transform: "translateY(-50%)", zIndex: 10, background: "rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.2)", borderRadius: "50%", width: 46, height: 46, color: "#fff", fontSize: 19, cursor: "pointer" }}>›</button>}
+            <div style={{ position: "absolute", bottom: 16, left: "50%", transform: "translateX(-50%)", zIndex: 10, background: "rgba(0,0,0,0.55)", borderRadius: 100, padding: "6px 16px", color: "rgba(255,255,255,0.85)", fontSize: 12.5, fontWeight: 700, fontFamily: "'Inter',sans-serif" }}>{idx + 1} / {slides.length}</div>
+          </>)}
+          {edit && !present && <div data-handle="1" onPointerDown={resizeCanvas} title="Drag to resize the slide" style={{ height: 16, marginTop: 2, display: "flex", alignItems: "center", justifyContent: "center", cursor: "ns-resize", color: B.muted, fontSize: 11, touchAction: "none" }}>⇕ drag to resize</div>}
         </div>
       )}
 
@@ -4020,6 +4067,24 @@ function LibraryBlock({ data = {}, T, canEdit, onEditData }) {
   );
 }
 // ── EVENTS — upcoming lives / webinars / calls, with per-student RSVP ──
+// Live countdown chip — shows when e.when parses to a real future datetime.
+function EventCountdown({ when }) {
+  const [, tick] = useState(0);
+  useEffect(() => { const id = setInterval(() => tick(t => t + 1), 60000); return () => clearInterval(id); }, []);
+  const d = new Date(when); if (isNaN(d.getTime())) return null;
+  const ms = d.getTime() - Date.now();
+  if (ms < -90 * 60000) return null; // long past
+  if (ms <= 0) return <span style={{ fontSize: 11, fontWeight: 800, color: "#F87171", background: "rgba(248,113,113,0.1)", border: "1px solid rgba(248,113,113,0.35)", borderRadius: 100, padding: "3px 10px", animation: "blink 1.4s infinite" }}>🔴 LIVE NOW</span>;
+  const mins = Math.round(ms / 60000);
+  const label = mins < 60 ? `${mins} min` : mins < 2880 ? `${Math.round(mins / 60)}h` : `${Math.round(mins / 1440)} days`;
+  return <span style={{ fontSize: 11, fontWeight: 700, color: "#FBBF24", background: "rgba(251,191,36,0.09)", border: "1px solid rgba(251,191,36,0.3)", borderRadius: 100, padding: "3px 10px" }}>⏳ starts in {label}</span>;
+}
+function icsHref(e) {
+  const d = new Date(e.when); if (isNaN(d.getTime())) return null;
+  const fmt = (x) => x.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+  const body = `BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Senseito//EN\nBEGIN:VEVENT\nDTSTART:${fmt(d)}\nDTEND:${fmt(new Date(d.getTime() + 3600000))}\nSUMMARY:${(e.title || "Session").replace(/\n/g, " ")}\n${/^https?:\/\//i.test(e.url || "") ? `LOCATION:${e.url}\n` : ""}END:VEVENT\nEND:VCALENDAR`;
+  return `data:text/calendar;charset=utf8,${encodeURIComponent(body)}`;
+}
 function EventsBlock({ data = {}, T, canEdit, onEditData, state, onState }) {
   const events = data.events || [];
   const rsvp = state?.rsvp || {};
@@ -4034,7 +4099,7 @@ function EventsBlock({ data = {}, T, canEdit, onEditData, state, onState }) {
           <div key={i} style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 11, padding: "11px 13px" }}>
             <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
               <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 13.5, fontWeight: 700, color: B.white }}>{e.title}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}><span style={{ fontSize: 13.5, fontWeight: 700, color: B.white }}>{e.title}</span>{e.when && <EventCountdown when={e.when} />}</div>
                 {e.when && <div style={{ fontSize: 12, color: T.a, marginTop: 2 }}>🕒 {e.when}</div>}
                 {e.desc && <div style={{ fontSize: 12, color: B.mutedMid, marginTop: 4, lineHeight: 1.5 }}>{e.desc}</div>}
               </div>
@@ -4043,6 +4108,7 @@ function EventsBlock({ data = {}, T, canEdit, onEditData, state, onState }) {
             <div style={{ display: "flex", gap: 8, marginTop: 9, flexWrap: "wrap" }}>
               <button onClick={() => toggleRsvp(i)} style={{ background: rsvp[i] ? "rgba(74,222,128,0.12)" : T.ps, border: `1px solid ${rsvp[i] ? "rgba(74,222,128,0.4)" : T.ba}`, borderRadius: 8, color: rsvp[i] ? "#4ADE80" : T.hi, padding: "6px 13px", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>{rsvp[i] ? "✓ You're going" : "RSVP"}</button>
               {/^https?:\/\//i.test(e.url || "") && <a href={e.url} target="_blank" rel="noopener noreferrer" style={{ background: T.grad, color: "white", borderRadius: 8, padding: "6px 14px", fontSize: 12.5, fontWeight: 700, textDecoration: "none" }}>Join ↗</a>}
+              {icsHref(e) && <a href={icsHref(e)} download={`${(e.title || "event").replace(/[^a-z0-9]+/gi, "-")}.ics`} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "6px 12px", fontSize: 12, fontWeight: 700, textDecoration: "none" }}>📆 Add to calendar</a>}
             </div>
           </div>
         ))}
@@ -6364,6 +6430,15 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const [ckCollapsed, setCkCollapsed] = useState(false);
   const dismissCk = () => { setCkDismissed(true); try { localStorage.setItem("sx_ck_" + rec.id, "1"); } catch { } };
   const enterLesson = (l) => { if (!previewed) { setPreviewed(true); try { localStorage.setItem("sx_prev_" + rec.id, "1"); } catch { } } setActiveLesson(l); };
+  // CTA bricks can jump inside the school: "#tab:<sectionId>" or "#lesson:<number>".
+  useEffect(() => {
+    const h = (e) => {
+      const d = String(e.detail || "");
+      if (d.startsWith("tab:")) { const id = d.slice(4); if (SECTIONS.some(s => s.id === id)) setTab(id); }
+      else if (d.startsWith("lesson:")) { const n = +d.slice(7); const l = (school.semesters || []).flatMap(s => s.lessons || []).find(x => x.number === n); if (l) enterLesson(l); }
+    };
+    window.addEventListener("sx-goto", h); return () => window.removeEventListener("sx-goto", h);
+  }); // deliberately unmemoized — always sees fresh sections/lessons
 
   const progress = rec.progress || {};
   const xp = rec.xp || 0;
