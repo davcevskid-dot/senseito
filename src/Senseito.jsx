@@ -2394,6 +2394,7 @@ function EvalChat({ system, opener, criteria, minUser, T, disabled, placeholder,
     </div>
     {!done && <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
       <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} placeholder={placeholder || "Type your reply…"} disabled={disabled} rows={2} style={{ ...bx.input, fontSize: 13 }} />
+      <MicButton icon onText={t => setInput(v => (v ? v.trim() + " " : "") + t)} T={T} />
       <button onClick={send} disabled={loading || !input.trim() || disabled} style={{ ...pBtn(T), padding: "10px 14px", opacity: (loading || !input.trim()) ? 0.5 : 1 }}>↑</button>
     </div>}
   </div>);
@@ -2781,10 +2782,26 @@ function MetricTrackerBlock({ data = {}, onOutput, T, disabled, state, onState }
   function add() { if (v === "") return; const e = [...entries, { t: Date.now(), value: +v }]; set({ entries: e }); setV(""); const hit = target != null && +v >= target; if (hit || e.length >= 5) onOutput?.({ type: "metric_tracker", entries: e, trend, passed: true }); }
   const max = Math.max(...vals, target || 0, 1), min = Math.min(...vals, 0);
   return (<BlockShell type="metric_tracker" passed={(target != null && vals.some(x => x >= target)) || entries.length >= 5} sub={`${data.label || "Metric"}${data.unit ? ` (${data.unit})` : ""}${target != null ? ` · target ${target}` : ""}`}>
-    <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 70, marginBottom: 10 }}>
-      {entries.map((e, i) => <div key={i} title={`${e.value}`} style={{ flex: 1, minWidth: 6, background: T.p, borderRadius: "3px 3px 0 0", height: `${((e.value - min) / (max - min || 1)) * 100}%` }} />)}
-      {!entries.length && <div style={{ fontSize: 12, color: B.muted }}>No entries yet.</div>}
-    </div>
+    {entries.length >= 2 ? (() => {
+      // Smooth sparkline + goal line + latest-value dot.
+      const W = 100, H = 64, pad = 4;
+      const yOf = (val) => H - pad - ((val - min) / (max - min || 1)) * (H - pad * 2);
+      const xOf = (i) => pad + (i / (vals.length - 1)) * (W - pad * 2);
+      const pts = vals.map((val, i) => `${xOf(i)},${yOf(val)}`).join(" ");
+      return (
+        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ width: "100%", height: 80, marginBottom: 10, display: "block" }}>
+          <polygon points={`${pad},${H - pad} ${pts} ${W - pad},${H - pad}`} fill={hexA(HEX_RE.test(T.p) ? T.p : "#7C3AED", 0.14)} />
+          {target != null && <line x1={pad} x2={W - pad} y1={yOf(target)} y2={yOf(target)} stroke="#4ADE80" strokeWidth="0.7" strokeDasharray="2.5 2" />}
+          <polyline points={pts} fill="none" stroke={T.p} strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" />
+          <circle cx={xOf(vals.length - 1)} cy={yOf(vals[vals.length - 1])} r="2.6" fill={T.p} stroke="#fff" strokeWidth="0.8" />
+        </svg>
+      );
+    })() : (
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 70, marginBottom: 10 }}>
+        {entries.map((e, i) => <div key={i} title={`${e.value}`} style={{ flex: 1, minWidth: 6, background: T.p, borderRadius: "3px 3px 0 0", height: `${((e.value - min) / (max - min || 1)) * 100}%` }} />)}
+        {!entries.length && <div style={{ fontSize: 12, color: B.muted }}>No entries yet — log your first value below.</div>}
+      </div>
+    )}
     {!disabled && <div style={{ display: "flex", gap: 8 }}>
       <input value={v} onChange={e => setV(e.target.value)} onKeyDown={e => { if (e.key === "Enter") add(); }} type="number" placeholder={`Log ${data.label || "value"}…`} style={{ ...bx.input, fontSize: 13 }} />
       <button onClick={add} style={pBtn(T)}>+ Log</button>
@@ -2902,16 +2919,43 @@ function AudioPitcherBlock({ data = {}, onOutput, T, disabled, school }) {
 // ── 23. Image Gate ──
 function ImageGateBlock({ data = {}, onOutput, T, disabled, school }) {
   const [img, setImg] = useState(null); const [desc, setDesc] = useState(""); const [fb, setFb] = useState(""); const [loading, setLoading] = useState(false); const [passed, setPassed] = useState(false);
-  function pick(e) { const file = e.target.files?.[0]; if (!file) return; const r = new FileReader(); r.onload = () => setImg(r.result); r.readAsDataURL(file); }
+  // Downscale to ≤1200px JPEG so phone photos don't bloat the vision request.
+  function pick(e) {
+    const file = e.target.files?.[0]; if (!file) return;
+    const r = new FileReader();
+    r.onload = () => {
+      const im = new Image();
+      im.onload = () => {
+        const k = Math.min(1, 1200 / Math.max(im.width, im.height));
+        const c = document.createElement("canvas"); c.width = Math.round(im.width * k); c.height = Math.round(im.height * k);
+        c.getContext("2d").drawImage(im, 0, 0, c.width, c.height);
+        setImg(c.toDataURL("image/jpeg", 0.85));
+      };
+      im.src = r.result;
+    };
+    r.readAsDataURL(file);
+  }
   async function verify() {
     setLoading(true);
-    try { const r = await api(`${blockMentor(school)} The student uploaded a photo as proof and described it. Judge against criteria: "${data.criteria}". Reply EXACTLY:\nVERDICT: PASS or NOTYET\nFEEDBACK: one sentence.`, [{ role: "user", content: `TASK: ${data.instruction}\n\nSTUDENT'S DESCRIPTION OF THEIR PHOTO:\n${desc}` }], 500); const ok = /VERDICT:\s*PASS/i.test(r); const f = (r.match(/FEEDBACK:\s*([\s\S]*)/i)?.[1] || r).trim(); setFb(f); setPassed(ok); onOutput?.({ type: "image_gate", imageUrl: img, analysis: f, passed: ok }); }
+    try {
+      // REAL vision: the mentor SEES the photo (base64 block through the proxy) — no more trusting the description.
+      const m = String(img).match(/^data:(image\/\w+);base64,(.+)$/);
+      const content = m
+        ? [{ type: "text", text: `TASK: ${data.instruction}\nSTUDENT'S DESCRIPTION: ${desc}\n\nJudge the ATTACHED PHOTO itself against the criteria — does it genuinely show the task done?` }, { type: "image", source: { type: "base64", media_type: m[1], data: m[2] } }]
+        : `TASK: ${data.instruction}\n\nSTUDENT'S DESCRIPTION OF THEIR PHOTO:\n${desc}`;
+      const r = await api(`${blockMentor(school)} The student submitted PHOTO PROOF. Look at the photo and judge it against the criteria: "${data.criteria}". Be fair but don't accept unrelated or fake-looking proof. Reply EXACTLY:\nVERDICT: PASS or NOTYET\nFEEDBACK: one specific sentence about what you SEE.`, [{ role: "user", content }], 500);
+      const ok = /VERDICT:\s*PASS/i.test(r); const f = (r.match(/FEEDBACK:\s*([\s\S]*)/i)?.[1] || r).trim();
+      setFb(f); setPassed(ok); onOutput?.({ type: "image_gate", imageUrl: img, analysis: f, passed: ok });
+    }
     catch (e) { setFb("Error: " + e.message); }
     setLoading(false);
   }
   return (<BlockShell type="image_gate" passed={passed} sub={data.instruction}>
     {img && <img src={img} alt="proof" style={{ width: "100%", maxHeight: 220, objectFit: "contain", borderRadius: 10, border: `1px solid ${B.border}`, marginBottom: 10 }} />}
-    {!disabled && <label style={{ display: "inline-block", ...pBtn(T, false), marginBottom: 10 }}>📷 {img ? "Change photo" : "Upload photo"}<input type="file" accept="image/*" onChange={pick} style={{ display: "none" }} /></label>}
+    {!disabled && <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+      <label style={{ display: "inline-block", ...pBtn(T, false) }}>📷 {img ? "Change photo" : "Upload photo"}<input type="file" accept="image/*" onChange={pick} style={{ display: "none" }} /></label>
+      <label style={{ display: "inline-block", background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 10, color: T.hi, padding: "10px 16px", cursor: "pointer", fontSize: 13.5, fontWeight: 700, fontFamily: "inherit" }}>🤳 Take photo now<input type="file" accept="image/*" capture="environment" onChange={pick} style={{ display: "none" }} /></label>
+    </div>}
     <textarea value={desc} onChange={e => setDesc(e.target.value)} disabled={disabled} rows={2} placeholder="Describe what your photo shows…" style={{ ...bx.input, fontSize: 13 }} />
     <button onClick={verify} disabled={!img || !desc.trim() || loading || disabled} style={{ ...pBtn(T), marginTop: 8, opacity: (!img || !desc.trim() || loading) ? 0.5 : 1 }}>{loading ? "Verifying…" : "Submit proof"}</button>
     {fb && <div style={{ marginTop: 10, fontSize: 13, color: passed ? "#4ADE80" : "#F87171", lineHeight: 1.6 }}><Markdown text={fb} /></div>}
