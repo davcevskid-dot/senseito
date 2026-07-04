@@ -311,6 +311,7 @@ const GLOBAL_CSS = `
   @keyframes shimmer{to{background-position:-200% 0}}
   @keyframes blink{0%,100%{opacity:1}50%{opacity:0.3}}
   @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+  @keyframes sxBurst{0%{opacity:0;transform:translateY(0) scale(0.4)}25%{opacity:1}100%{opacity:0;transform:translateY(-46px) scale(1.15) rotate(14deg)}}
   @keyframes aurora{0%,100%{opacity:0.6;transform:translateY(0) scale(1)}50%{opacity:1;transform:translateY(-12px) scale(1.05)}}
   @keyframes drift{0%{transform:translate(0,0) scale(1)}33%{transform:translate(34px,-26px) scale(1.12)}66%{transform:translate(-22px,22px) scale(0.94)}100%{transform:translate(0,0) scale(1)}}
   @keyframes sgBreathe{0%,100%{transform:scale(1)}50%{transform:scale(1.02)}}
@@ -1976,6 +1977,7 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, onChooseFork, c
 
         {activeTab === "theory" && (
           <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
+            <div style={{ display: "flex", justifyContent: "flex-end" }}><SpeakButton text={lesson.theory} /></div>
             <Markdown text={String(lesson.theory || "")} />
             {!canEdit && <button onClick={markTheoryRead} style={{ ...pBtn(T), alignSelf: "center", marginTop: 4 }}>{stages[stages.indexOf("theory") + 1] === "mentor" ? "I've read this — talk to my mentor →" : stages.length > 1 ? "I've read this — continue →" : "✓ Done"}</button>}
             {canEdit && <div style={{ fontSize: 11.5, color: B.muted, textAlign: "center" }}>Students read this first; it unlocks the next stage. Edit it from the lesson editor.</div>}
@@ -2210,10 +2212,26 @@ async function scoreTranscript(transcript, criteria, minUser = 2) {
   return { score: parseFloat(out.match(/SCORE:\s*([\d.]+)/i)?.[1] || "0"), passed: /VERDICT:\s*PASS/i.test(out), reason: (out.match(/REASON:\s*([\s\S]*)/i)?.[1] || "").trim() };
 }
 
+// Shared chrome for every activity block — consistent header, status, and a small
+// celebration burst the moment a block is completed (fires once, on the pass edge).
 function BlockShell({ type, sub, passed, children, foot }) {
   const m = BLOCK_META[type] || { icon: "🧩", label: "Activity" };
+  const prev = useRef(passed);
+  const [burst, setBurst] = useState(false);
+  useEffect(() => {
+    if (passed && !prev.current) { setBurst(true); const t = setTimeout(() => setBurst(false), 1500); prev.current = passed; return () => clearTimeout(t); }
+    prev.current = passed;
+  }, [passed]);
   return (
-    <div style={{ background: B.surface2, border: `1px solid ${passed ? "rgba(74,222,128,0.3)" : B.border}`, borderRadius: 14, padding: 16 }}>
+    <div style={{ position: "relative", background: B.surface2, border: `1px solid ${passed ? "rgba(74,222,128,0.35)" : B.border}`, borderRadius: 14, padding: 16, boxShadow: burst ? "0 0 30px rgba(74,222,128,0.25)" : "none", transition: "box-shadow 0.5s, border-color 0.4s" }}>
+      {burst && (
+        <div style={{ position: "absolute", inset: 0, pointerEvents: "none", overflow: "hidden", borderRadius: 14, zIndex: 5 }}>
+          {["✦", "✳", "✦", "＋", "✦", "✳"].map((s, i) => (
+            <span key={i} style={{ position: "absolute", left: `${12 + i * 15}%`, top: "42%", fontSize: 15 + (i % 3) * 5, color: i % 2 ? "#4ADE80" : "#FBBF24", animation: `sxBurst 1.1s ${i * 0.07}s ease-out both` }}>{s}</span>
+          ))}
+          <div style={{ position: "absolute", left: "50%", top: "50%", transform: "translate(-50%,-50%)", background: "rgba(74,222,128,0.95)", color: "#06230f", fontSize: 13, fontWeight: 800, borderRadius: 100, padding: "6px 16px", animation: "popIn 0.4s cubic-bezier(.2,1.4,.4,1) both", fontFamily: "'Space Grotesk',sans-serif" }}>✓ Nailed it</div>
+        </div>
+      )}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, marginBottom: 12 }}>
         <div><div style={{ fontSize: 13, fontWeight: 700, color: B.white }}>{m.icon} {m.label}</div>{sub && <div style={{ fontSize: 12, color: B.muted, marginTop: 3, lineHeight: 1.5 }}>{sub}</div>}</div>
         <PassPill passed={passed} />
@@ -2222,6 +2240,35 @@ function BlockShell({ type, sub, passed, children, foot }) {
       {foot}
     </div>
   );
+}
+
+// 🔊 Listen — browser TTS narration for reading-style content (free, offline-safe).
+function SpeakButton({ text, small }) {
+  const [on, setOn] = useState(false);
+  useEffect(() => () => { try { window.speechSynthesis.cancel(); } catch { } }, []);
+  if (typeof window === "undefined" || !window.speechSynthesis) return null;
+  const toggle = () => {
+    try {
+      if (on) { window.speechSynthesis.cancel(); setOn(false); return; }
+      window.speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(String(text || "").replace(/[#*_`>]/g, "").slice(0, 4500));
+      u.rate = 1.02; u.onend = () => setOn(false); u.onerror = () => setOn(false);
+      window.speechSynthesis.speak(u); setOn(true);
+    } catch { }
+  };
+  return <button onClick={toggle} title={on ? "Stop" : "Listen to this"} style={{ background: on ? "rgba(248,113,113,0.12)" : B.surface3, border: `1px solid ${on ? "rgba(248,113,113,0.4)" : B.borderMid}`, borderRadius: 8, color: on ? "#F87171" : B.mutedMid, padding: small ? "3px 9px" : "5px 11px", cursor: "pointer", fontSize: small ? 11 : 12, fontFamily: "inherit", flexShrink: 0 }}>{on ? "■ Stop" : "🔊 Listen"}</button>;
+}
+
+// One warm, specific sentence of mentor feedback on a student's work (used by input blocks).
+async function aiCoach(school, taskDesc, studentWork) {
+  try {
+    return await api(`You are ${school?.mentor?.name || "a mentor"} reacting to a student's just-submitted work with ONE warm, SPECIFIC sentence (max 30 words): name something they actually did well, plus one gentle nudge if useful. No preamble, no quotes.`,
+      [{ role: "user", content: `TASK: ${taskDesc}\nSTUDENT'S WORK:\n${String(studentWork || "").slice(0, 1600)}` }], 90);
+  } catch { return ""; }
+}
+function CoachNote({ note, T }) {
+  if (!note) return null;
+  return <div style={{ display: "flex", gap: 9, alignItems: "flex-start", background: T?.ps || "rgba(124,58,237,0.09)", border: `1px solid ${T?.ba || "rgba(124,58,237,0.35)"}`, borderRadius: 10, padding: "9px 12px", marginTop: 10, animation: "fadeUp 0.35s ease" }}><span style={{ fontSize: 14 }}>🎓</span><span style={{ fontSize: 12.5, color: B.white, lineHeight: 1.55, fontStyle: "italic" }}>{note}</span></div>;
 }
 
 // Mentor "generative widget": renders AI-authored SVG/HTML in a locked-down
@@ -2401,25 +2448,42 @@ function FlashcardBlock({ data = {}, onOutput, T, disabled, school, bus }) {
     setDrilling(false);
   }
   if (!cards.length) return <BlockShell type="flashcard" sub="No cards." />;
+  // True spaced behaviour: "Again" sends the card to the BACK of the queue — you finish
+  // only when every card has been rated Good/Easy. Shuffle reorders what's left.
+  const [queue, setQueue] = useState(() => cards.map((_, k) => k));
+  useEffect(() => { setQueue(cards.map((_, k) => k)); setRev([]); setPassed(false); setFlip(false); }, [cards.length]); // eslint-disable-line
   function rate(d) {
-    const next = [...rev, d]; setRev(next); setFlip(false);
-    if (next.length >= cards.length) { const ok = next.filter(x => x !== "again").length >= cards.length * 0.8; setPassed(true); setWeakResult(!ok); onOutput?.({ type: "flashcard", cardsReviewed: next.length, passed: ok, concept: data.concepts?.[0] }); }
-    else setI(i + 1);
+    setFlip(false);
+    const cur = queue[0], rest = queue.slice(1);
+    const next = [...rev, d]; setRev(next);
+    if (d === "again") { setQueue([...rest, cur]); return; }
+    if (rest.length === 0) {
+      const agains = next.filter(x => x === "again").length;
+      const ok = agains <= cards.length * 0.4;
+      setPassed(true); setWeakResult(!ok);
+      onOutput?.({ type: "flashcard", cardsReviewed: next.length, passed: true, concept: data.concepts?.[0] });
+      if (!ok) setWeakResult(true);
+    } else setQueue(rest);
   }
-  const c = cards[Math.min(i, cards.length - 1)];
-  return (<BlockShell type="flashcard" passed={passed} sub={`Card ${Math.min(i + 1, cards.length)} of ${cards.length}${extra.length ? " · focused round" : ""}`}>
+  const shuffle = () => setQueue(q => { const a = [...q]; for (let k = a.length - 1; k > 0; k--) { const j = Math.floor(Math.random() * (k + 1)); [a[k], a[j]] = [a[j], a[k]]; } return a; });
+  const c = cards[queue[0]] || cards[0];
+  return (<BlockShell type="flashcard" passed={passed} sub={`${queue.length} card${queue.length !== 1 ? "s" : ""} left of ${cards.length}${extra.length ? " · focused round" : ""}`}>
     {!passed ? (<>
-      <div onClick={() => setFlip(f => !f)} style={{ minHeight: 120, display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 12, padding: 20, cursor: "pointer", fontSize: 15, color: B.white, lineHeight: 1.6 }}>
-        {flip ? c.back : c.front}
+      <div key={`${queue[0]}-${flip}`} onClick={() => setFlip(f => !f)} style={{ minHeight: 120, display: "flex", flexDirection: "column", gap: 10, alignItems: "center", justifyContent: "center", textAlign: "center", background: flip ? T.ps : B.surface, border: `1px solid ${T.ba}`, borderRadius: 14, padding: 20, cursor: "pointer", fontSize: 15, color: B.white, lineHeight: 1.6, animation: "popIn 0.28s cubic-bezier(.2,1.2,.4,1) both", boxShadow: flip ? `0 8px 26px ${T.pg}` : "none" }}>
+        {(flip ? c.backImage : c.image) && <img src={flip ? c.backImage : c.image} alt="" style={{ maxHeight: 110, maxWidth: "100%", borderRadius: 10 }} />}
+        <span>{flip ? c.back : c.front}</span>
       </div>
-      <div style={{ fontSize: 11, color: B.muted, textAlign: "center", margin: "8px 0" }}>{flip ? "Answer — rate yourself" : "Tap card to reveal"}</div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, margin: "8px 0" }}>
+        <span style={{ fontSize: 11, color: B.muted }}>{flip ? "Answer — rate yourself" : "Tap card to reveal"}</span>
+        {!flip && queue.length > 2 && <button onClick={shuffle} title="Shuffle the remaining cards" style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 100, color: B.muted, padding: "2px 10px", cursor: "pointer", fontSize: 10.5, fontFamily: "inherit" }}>🔀 Shuffle</button>}
+      </div>
       {flip && <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
-        {[["again", "Again", "#F87171"], ["good", "Good", T.p], ["easy", "Easy", "#4ADE80"]].map(([k, l, col]) => (
+        {[["again", "↩ Again", "#F87171"], ["good", "Good", T.p], ["easy", "Easy ✓", "#4ADE80"]].map(([k, l, col]) => (
           <button key={k} disabled={disabled} onClick={() => rate(k)} style={{ background: B.surface, border: `1px solid ${col}`, borderRadius: 9, color: col, padding: "8px 16px", cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit" }}>{l}</button>
         ))}
       </div>}
     </>) : <>
-      <div style={{ textAlign: "center", color: B.mutedMid, fontSize: 13 }}>Deck complete — {rev.filter(x => x !== "again").length}/{cards.length} known.</div>
+      <div style={{ textAlign: "center", color: B.mutedMid, fontSize: 13 }}>Deck complete — every card rated · {rev.filter(x => x === "again").length} needed a second look.</div>
       {weakResult && <HandoffHint labels={weak.length ? weak : null} T={T} />}
     </>}
     {weak.length > 0 && !disabled && <div style={{ textAlign: "center", marginTop: 10 }}>
@@ -2441,6 +2505,7 @@ function ReadingBlock({ data = {}, onOutput, T, disabled, school }) {
   }
   return (<BlockShell type="reading" passed={passed} sub="Read, then tap each key phrase you'd highlight.">
     {/^https:\/\//i.test(data.image || "") && <img src={data.image} alt="" style={{ width: "100%", borderRadius: 10, marginBottom: 12, display: "block", border: `1px solid ${B.border}` }} />}
+    <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}><SpeakButton text={data.passage} small /></div>
     <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 12, padding: "16px 18px", fontSize: 14.5, lineHeight: 1.85, color: B.white, marginBottom: 12, whiteSpace: "pre-wrap", letterSpacing: "0.005em" }}>{data.passage}</div>
     <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginBottom: 12 }}>
       {phrases.map((p, i) => (
@@ -2875,6 +2940,7 @@ function ReadingPlainBlock({ data = {}, onOutput, T, disabled }) {
   const [passed, setPassed] = useState(false);
   return (<BlockShell type="reading_plain" passed={passed}>
     {/^https:\/\//i.test(data.image || "") && <img src={data.image} alt="" style={{ width: "100%", borderRadius: 10, marginBottom: 12, display: "block", border: `1px solid ${B.border}` }} />}
+    <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}><SpeakButton text={data.content} small /></div>
     <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 10, padding: "14px 16px", marginBottom: 12 }}><Markdown text={data.content || ""} /></div>
     {!passed && <button onClick={() => { setPassed(true); onOutput?.({ type: "reading_plain", read: true, passed: true }); }} disabled={disabled} style={pBtn(T)}>Mark as read ✓</button>}
   </BlockShell>);
@@ -2953,6 +3019,7 @@ function CalloutBlock({ data = {}, T }) {
       {data.title && <div style={{ fontSize: 14, fontWeight: 700, color: B.white, marginBottom: 4 }}>{data.title}</div>}
       <div style={{ fontSize: 13, color: B.white, lineHeight: 1.6 }}><Markdown text={data.body || data.content || ""} /></div>
     </div>
+    <SpeakButton text={`${data.title || ""}. ${data.body || data.content || ""}`} small />
   </div>);
 }
 function ImageBlock({ data = {}, canEdit, onEditData }) {
@@ -4053,10 +4120,35 @@ function NotebookBlock({ data = {}, state, onState, T, disabled }) {
 }
 
 // ── 27. Quiz ──
+// Tiny WebAudio blip — rising pitch as a correct-streak grows; soft low tone on a miss.
+function quizTone(streak, ok) {
+  try {
+    const ctx = quizTone._ctx || (quizTone._ctx = new (window.AudioContext || window.webkitAudioContext)());
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = "sine"; o.frequency.value = ok ? 440 + Math.min(streak, 6) * 90 : 180;
+    g.gain.setValueAtTime(0.12, ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + (ok ? 0.18 : 0.3));
+    o.connect(g); g.connect(ctx.destination); o.start(); o.stop(ctx.currentTime + (ok ? 0.2 : 0.32));
+  } catch { }
+}
 function QuizBlock({ data = {}, onOutput, T, disabled, school, bus }) {
   const weak = weakLabelsFor(bus, school, data.concepts);
   const [extra, setExtra] = useState([]); const [drilling, setDrilling] = useState(false);
   const questions = [...(data.questions || []), ...extra]; const [ans, setAns] = useState({});
+  const streak = useRef(0);
+  const [why, setWhy] = useState({}); const [whyBusy, setWhyBusy] = useState(null);
+  const pick = (qi, oi) => {
+    setAns(a => { if (a[qi] !== undefined) return a; const ok = oi === questions[qi].answer; streak.current = ok ? streak.current + 1 : 0; quizTone(streak.current, ok); return { ...a, [qi]: oi }; });
+  };
+  async function explainWhy(qi) {
+    if (why[qi] || whyBusy !== null) return; setWhyBusy(qi);
+    try {
+      const q = questions[qi];
+      const e = await api(`${blockMentor(school)} In 2 short sentences, explain WHY the correct answer is right (and why the student's pick misses), in plain warm language.`, [{ role: "user", content: `QUESTION: ${q.q}\nOPTIONS: ${q.options.join(" | ")}\nCORRECT: ${q.options[q.answer]}\nSTUDENT PICKED: ${q.options[ans[qi]] ?? "?"}` }], 200);
+      setWhy(w => ({ ...w, [qi]: e }));
+    } catch { }
+    setWhyBusy(null);
+  }
   const answered = questions.length > 0 && questions.every((_, i) => ans[i] !== undefined); const score = questions.filter((q, i) => ans[i] === q.answer).length;
   const lowScore = answered && score < questions.length * 0.7;
   useEffect(() => { if (answered && questions.length) { const passed = score >= questions.length * 0.7; onOutput?.({ type: "quiz", score, passed, concept: data.concepts?.[0] }); } }, [answered]); // eslint-disable-line
@@ -4071,10 +4163,12 @@ function QuizBlock({ data = {}, onOutput, T, disabled, school, bus }) {
         <div style={{ fontSize: 14.5, fontWeight: 600, color: B.white, marginBottom: 10, lineHeight: 1.55 }}>{qi + 1}. {q.q}</div>
         <div style={{ display: "grid", gap: 7 }}>
           {q.options.map((opt, oi) => { const show = picked !== undefined, isC = oi === q.answer, isP = picked === oi; return (
-            <button key={oi} disabled={disabled} onClick={() => picked === undefined && setAns(a => ({ ...a, [qi]: oi }))} style={{ textAlign: "left", padding: "11px 14px", borderRadius: 10, fontSize: 13.5, fontFamily: "inherit", lineHeight: 1.5, cursor: picked === undefined ? "pointer" : "default", color: B.white, background: show && isC ? "rgba(74,222,128,0.12)" : show && isP ? "rgba(248,113,113,0.1)" : B.surface, border: `1px solid ${show && isC ? "rgba(74,222,128,0.4)" : show && isP ? "rgba(248,113,113,0.35)" : B.border}`, transition: "background 0.15s, border-color 0.15s" }}>{show && isC ? "✓ " : show && isP ? "✕ " : ""}{opt}</button>
+            <button key={oi} disabled={disabled} onClick={() => picked === undefined && pick(qi, oi)} style={{ textAlign: "left", padding: "11px 14px", borderRadius: 10, fontSize: 13.5, fontFamily: "inherit", lineHeight: 1.5, cursor: picked === undefined ? "pointer" : "default", color: B.white, background: show && isC ? "rgba(74,222,128,0.12)" : show && isP ? "rgba(248,113,113,0.1)" : B.surface, border: `1px solid ${show && isC ? "rgba(74,222,128,0.4)" : show && isP ? "rgba(248,113,113,0.35)" : B.border}`, transition: "background 0.15s, border-color 0.15s" }}>{show && isC ? "✓ " : show && isP ? "✕ " : ""}{opt}</button>
           ); })}
         </div>
         {picked !== undefined && q.explain && <div style={{ fontSize: 12.5, color: picked === q.answer ? "#4ADE80" : "#F87171", marginTop: 9, lineHeight: 1.55, padding: "8px 11px", background: picked === q.answer ? "rgba(74,222,128,0.07)" : "rgba(248,113,113,0.06)", borderRadius: 8 }}>{q.explain}</div>}
+        {picked !== undefined && picked !== q.answer && !why[qi] && <button onClick={() => explainWhy(qi)} disabled={whyBusy !== null} style={{ marginTop: 7, background: "none", border: `1px solid ${T.ba}`, borderRadius: 8, color: T.hi, padding: "5px 12px", cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit" }}>{whyBusy === qi ? "Thinking…" : "🎓 Why is that the answer?"}</button>}
+        {why[qi] && <CoachNote note={why[qi]} T={T} />}
       </div>
     ); })}
     {answered && <div style={{ textAlign: "center", padding: 12, background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 10, fontSize: 14, fontWeight: 700, color: T.hi }}>Score: {score}/{questions.length} <button onClick={() => setAns({})} style={{ marginLeft: 10, background: "none", border: `1px solid ${T.ba}`, borderRadius: 8, color: T.hi, padding: "4px 12px", cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>Retake</button></div>}
