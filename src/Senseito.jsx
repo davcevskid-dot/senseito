@@ -927,6 +927,22 @@ CUSTOM: if NOTHING above fits the request, return type "custom" with:
 { type:"custom", title, description, data: { intro (markdown), sections:[{label, key}] (1-6 input fields the student fills), rubric (how the AI should evaluate / give feedback), aiFeedback: true } }
 Make every item/prompt/field SPECIFIC to the school's content and mentor's voice — never generic. Output ONLY the JSON object.`;
 
+// Give the build assistant REAL EYES: when the creator asks about the look/cover/hero/
+// background image, attach those images as vision blocks (the proxy forwards content arrays
+// straight to Anthropic) so it can genuinely SEE and describe/critique them.
+function schoolVisionUserContent(school, text) {
+  if (!/\b(image|images|cover|hero|banner|photo|picture|visual|visuals|look|looks|logo|icon|design|colou?r|colours|colors|background|see|show|describe|description|aesthetic|thumbnail|vibe|style)\b/i.test(text)) return text;
+  const imgs = [];
+  const add = (u, label) => { if (/^https:\/\//i.test(u || "")) imgs.push({ url: u, label }); };
+  add(school.cover, "the hero COVER banner");
+  add(school.heroImage, "the photo behind the hero title");
+  add(school.bgImage, "the page BACKGROUND photo");
+  add(school.iconImage, "the school icon/logo");
+  if (!imgs.length) return text;
+  const list = imgs.map((x, i) => `#${i + 1} = ${x.label}`).join("; ");
+  return [{ type: "text", text: `${text}\n\n[ATTACHED IMAGES — you can SEE them: ${list}. Describe/critique what is ACTUALLY visible in each and give concrete, specific visual advice. Do NOT say you can't see images.]` }, ...imgs.map(x => ({ type: "image", source: { type: "url", url: x.url } }))];
+}
+
 const ADVISOR_SYS = (school) => `You are the Senseito Learning Experience Advisor for "${school.name}" — ${school.description}
 Lessons: ${school.semesters?.flatMap(s => s.lessons?.map(l => l.title)).join("; ")}
 The creator is chatting with you about improving their school. Be a sharp, honest product brain: discuss tradeoffs, propose concrete ideas, ask one good question when needed. Keep replies under 110 words, conversational, no bullet lists.
@@ -9046,7 +9062,7 @@ export default function Senseito() {
     pushMsg({ role: "user", content: text }); setChatThinking(true);
     try {
       const thread = iterHistory.filter(m => m.role === "user" || m.role === "assistant").slice(-8).map(m => ({ role: m.role, content: m.content }));
-      const out = await apiJSON(CHAT_SYS(rec.data), [...thread, { role: "user", content: text }], 1400, "sonnet");
+      const out = await apiJSON(CHAT_SYS(rec.data), [...thread, { role: "user", content: schoolVisionUserContent(rec.data, text) }], 1400, "sonnet");
       // IDEAS mode → render pickable option cards in the chat; nothing is applied yet.
       if (Array.isArray(out.options) && out.options.length) {
         if (out.reply) pushMsg({ role: "assistant", content: out.reply });
