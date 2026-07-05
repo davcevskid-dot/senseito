@@ -918,7 +918,14 @@ function schoolSummary(school) {
   const secs = getSections(school).map(s => `${s.kind}:"${s.title}"`).join(", ");
   const sems = (school.semesters || []).map((s, i) => `Semester/Part ${s.number || i + 1}: "${s.title}" → ${(s.lessons || []).map(l => `#${l.number} ${l.title} [${(l.blocks || []).map(b => b.type).join("/") || "—"}]`).join("; ") || "no lessons"}`).join("\n  ");
   const dash = (school.sections || []).filter(s => s.kind === "dashboard").map(s => `"${s.title}" [${(s.blocks || []).map(b => b.type).join("/")}]`).join("; ");
-  return `Name: ${school.name}. Subject/path: ${school.learningPath || "mixed"}. Layout sections: ${secs}.\nSemesters/Parts (${(school.semesters || []).length}):\n  ${sems || "none"}\nDashboards: ${dash || "none"}. Mentor: ${school.mentor?.name || "—"} (${school.voicePreset || "sage"} voice). Theme: ${school.theme}, skin: ${school.skin || "aurora"}.`;
+  const imgs = [];
+  if (school.cover) imgs.push(`a hero COVER banner image (${school.cover})`);
+  if (school.heroImage) imgs.push(`a photo behind the hero title (${school.heroImage})`);
+  if (school.bgImage) imgs.push(`a page BACKGROUND photo (${school.bgImage})`);
+  if (school.iconImage) imgs.push(`a custom icon/logo image`);
+  const lessonCovers = (school.semesters || []).flatMap(s => (s.lessons || []).filter(l => /^https:\/\//i.test(l.cover || "")).map(l => `"${l.title}"`)).slice(0, 8);
+  const imgLine = imgs.length ? `\nImages currently on the school: ${imgs.join("; ")}.${lessonCovers.length ? ` Lessons with their own cover image: ${lessonCovers.join(", ")}.` : ""}` : `\nImages: this school currently has NO cover, background or hero image.`;
+  return `Name: ${school.name}. Subject/path: ${school.learningPath || "mixed"}. Layout sections: ${secs}.\nSemesters/Parts (${(school.semesters || []).length}):\n  ${sems || "none"}\nDashboards: ${dash || "none"}. Mentor: ${school.mentor?.name || "—"} (${school.voicePreset || "sage"} voice). Theme: ${school.theme}, skin: ${school.skin || "aurora"}.${imgLine}`;
 }
 // The build assistant: knows the full project; converses OR emits a precise edit directive.
 const CHAT_SYS = (school) => `You are the Senseito build assistant for the project "${school.name}". You know it fully:
@@ -8376,84 +8383,80 @@ function PublicSchool({ slug }) {
 // PROJECT CHAT — the left bar inside a project (Lovable-style). Every
 // message iterates the school; quick "levers" are zero-token tweaks.
 // ─────────────────────────────────────────────────────────────
+function IdeasModal({ ideas, T, busy, onPick, onRefine, onClose }) {
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 350, background: "rgba(2,2,8,0.75)", backdropFilter: "blur(8px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "max(28px,6vh) 16px 40px", overflowY: "auto", fontFamily: "'Inter',sans-serif" }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 620, background: "var(--surface)", border: `1px solid ${T.ba}`, borderRadius: 20, padding: 22, boxShadow: "0 30px 90px rgba(0,0,0,0.6)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+          <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 17, fontWeight: 800, color: B.white }}>💡 {ideas.title}</div>
+          <button onClick={onClose} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "5px 10px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>✕</button>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: ideas.items.length > 1 ? "repeat(auto-fit,minmax(230px,1fr))" : "1fr", gap: 12 }}>
+          {ideas.items.map((o, k) => (
+            <div key={k} style={{ position: "relative", background: "var(--surface2)", border: `1px solid ${B.border}`, borderRadius: 16, padding: "16px 16px 14px", overflow: "hidden", transition: "transform 0.16s, border-color 0.2s, box-shadow 0.2s", display: "flex", flexDirection: "column" }}
+              onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-3px)"; e.currentTarget.style.borderColor = T.ba; e.currentTarget.style.boxShadow = `0 14px 40px ${T.pg}`; }}
+              onMouseLeave={e => { e.currentTarget.style.transform = "none"; e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.boxShadow = "none"; }}>
+              <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: T.grad }} />
+              <div style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 9 }}>
+                <span style={{ width: 24, height: 24, borderRadius: 8, background: T.ps, border: `1px solid ${T.ba}`, color: T.hi, fontSize: 12, fontWeight: 800, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{k + 1}</span>
+                <span style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 14.5, fontWeight: 800, color: B.white, lineHeight: 1.25 }}>{o.title}</span>
+              </div>
+              {o.summary && <div style={{ fontSize: 12.5, color: B.mutedMid, lineHeight: 1.65, marginBottom: 14, flex: 1 }}>{o.summary}</div>}
+              <div style={{ display: "flex", gap: 8, marginTop: "auto" }}>
+                <button onClick={() => onPick(o.instruction)} disabled={busy} style={{ background: T.grad, border: "none", borderRadius: 9, color: "#fff", padding: "8px 16px", cursor: "pointer", fontSize: 12.5, fontWeight: 800, fontFamily: "inherit", opacity: busy ? 0.5 : 1 }}>✓ Use this</button>
+                <button onClick={() => onRefine(o.instruction)} disabled={busy} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.mutedMid, padding: "8px 13px", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>✎ Refine</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ProjectChat({ rec, iterating, thinking, history, onSend, onIterate, onBack, onTheme, onVoice, onFont, onFontScale, onGami, onTemplate, onUndo, canUndo }) {
   const busy = iterating || thinking;
   const school = rec.data; const T = themeFor(school);
   const [input, setInput] = useState("");
-  const [showLevers, setShowLevers] = useState(false);
-  const [showSugg, setShowSugg] = useState(false);
-  const bottom = useRef(null);
-  useEffect(() => { bottom.current?.scrollIntoView({ behavior: "smooth" }); }, [history, iterating]);
+  const [ideas, setIdeas] = useState(null); // { title, items } → shown in the popup
+  const msgScroll = useRef(null);
+  // Scroll ONLY the messages container — never the page (that was the "whole school jumps" bug).
+  useEffect(() => { const el = msgScroll.current; if (el) el.scrollTop = el.scrollHeight; }, [history, iterating]);
+  // When the AI returns idea cards, open them in the popup (not squished in the narrow chat).
+  const lastOpts = history[history.length - 1]?.role === "options" ? history[history.length - 1] : null;
+  useEffect(() => { if (lastOpts?.options?.length) setIdeas({ title: "Pick a direction", items: lastOpts.options }); }, [history.length]); // eslint-disable-line
   function send() { const t = input.trim(); if (!t || busy) return; setInput(""); onSend(t); }
-  const sel = { background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.white, fontFamily: "inherit", fontSize: 12, padding: "6px 8px", cursor: "pointer", width: "100%" };
-  const collBtn = { width: "100%", textAlign: "left", background: "none", border: `1px solid ${B.border}`, borderRadius: 8, color: B.mutedMid, fontSize: 11.5, padding: "7px 10px", cursor: "pointer", fontFamily: "inherit" };
   const suggestions = (school.suggestions || []);
   return (
     <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
       <div style={{ padding: "10px 14px 10px", borderBottom: `1px solid ${B.border}` }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
           <button onClick={onBack} style={{ background: "none", border: "none", color: B.muted, fontSize: 11.5, cursor: "pointer", fontFamily: "inherit", padding: 0 }}>← All schools</button>
-          {canUndo && <button onClick={onUndo} disabled={iterating} title="Undo the last AI change" style={{ background: "rgba(124,58,237,0.1)", border: `1px solid ${T.ba}`, borderRadius: 7, color: T.hi, fontSize: 11, padding: "3px 9px", cursor: "pointer", fontFamily: "inherit", opacity: iterating ? 0.5 : 1 }}>↩ Undo</button>}
+          <div style={{ display: "flex", gap: 6 }}>
+            {suggestions.length > 0 && <button onClick={() => setIdeas({ title: "Ideas to improve your school", items: suggestions.map(s => ({ title: s, instruction: s })) })} title="Suggested improvements" style={{ background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 7, color: T.hi, fontSize: 11, padding: "3px 9px", cursor: "pointer", fontFamily: "inherit", fontWeight: 700 }}>💡 {suggestions.length}</button>}
+            {canUndo && <button onClick={onUndo} disabled={iterating} title="Undo the last AI change" style={{ background: "rgba(124,58,237,0.1)", border: `1px solid ${T.ba}`, borderRadius: 7, color: T.hi, fontSize: 11, padding: "3px 9px", cursor: "pointer", fontFamily: "inherit", opacity: iterating ? 0.5 : 1 }}>↩ Undo</button>}
+          </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ fontSize: 20 }}>{school.emoji || "🏫"}</span>
           <div style={{ fontSize: 14, fontWeight: 700, color: B.white, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{school.name}</div>
         </div>
       </div>
-      <div style={{ padding: "10px 14px 0", display: "flex", flexDirection: "column", gap: 8, maxHeight: "42vh", overflowY: "auto", flexShrink: 0 }}>
-        <button onClick={() => setShowLevers(s => !s)} style={collBtn}>{showLevers ? "▾" : "▸"} Quick styles · 0 tokens</button>
-        {showLevers && (
-          <div style={{ display: "grid", gap: 8, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 10, padding: 10 }}>
-            {onTemplate && <div style={{ display: "flex", gap: 6, alignItems: "center" }}><span style={{ fontSize: 10, color: B.muted, width: 46 }}>Vibe</span><select value={school.template || ""} onChange={e => onTemplate(e.target.value)} style={sel}><option value="" disabled>Choose an experience…</option>{Object.entries(TEMPLATES).map(([k, t]) => <option key={k} value={k}>{t.emoji} {t.label}</option>)}</select></div>}
-            <div style={{ display: "flex", gap: 6, alignItems: "center" }}><span style={{ fontSize: 10, color: B.muted, width: 46 }}>Theme</span>{Object.keys(THEMES).map(k => <button key={k} onClick={() => onTheme(k)} title={THEMES[k].label} style={{ width: 22, height: 22, borderRadius: "50%", border: school.theme === k ? `2px solid ${B.white}` : `1px solid ${B.borderMid}`, background: THEMES[k].p, cursor: "pointer" }} />)}</div>
-            <div style={{ display: "flex", gap: 6, alignItems: "center" }}><span style={{ fontSize: 10, color: B.muted, width: 46 }}>Voice</span><select value={school.voicePreset || "sage"} onChange={e => onVoice(e.target.value)} style={sel}>{["sage", "drill", "socratic", "scientist", "storyteller", "trickster"].map(v => <option key={v} value={v}>{v[0].toUpperCase() + v.slice(1)}</option>)}{school.voicePreset === "custom" && <option value="custom">Custom</option>}</select></div>
-            <div style={{ display: "flex", gap: 6, alignItems: "center" }}><span style={{ fontSize: 10, color: B.muted, width: 46 }}>Font</span><select value={school.font || "inter"} onChange={e => onFont(e.target.value)} style={sel}>{Object.entries(FONTS).map(([k, f]) => <option key={k} value={k}>{f.label}</option>)}</select></div>
-            {onFontScale && <div style={{ display: "flex", gap: 6, alignItems: "center" }}><span style={{ fontSize: 10, color: B.muted, width: 46 }}>Size</span>
-              <button onClick={() => onFontScale((school.fontScale || 1) - 0.1)} title="Smaller" style={{ width: 26, height: 24, borderRadius: 7, border: `1px solid ${B.borderMid}`, background: "none", color: B.mutedMid, cursor: "pointer", fontFamily: "inherit", fontSize: 12, fontWeight: 700 }}>A−</button>
-              <span style={{ fontSize: 11, color: B.mutedMid, minWidth: 36, textAlign: "center" }}>{Math.round((school.fontScale || 1) * 100)}%</span>
-              <button onClick={() => onFontScale((school.fontScale || 1) + 0.1)} title="Bigger" style={{ width: 26, height: 24, borderRadius: 7, border: `1px solid ${B.borderMid}`, background: "none", color: B.white, cursor: "pointer", fontFamily: "inherit", fontSize: 14, fontWeight: 700 }}>A+</button>
-              {(school.fontScale && school.fontScale !== 1) ? <button onClick={() => onFontScale(1)} style={{ fontSize: 10, background: "none", border: "none", color: B.muted, cursor: "pointer", fontFamily: "inherit" }}>reset</button> : null}
-            </div>}
-            <div style={{ display: "flex", gap: 6, alignItems: "center" }}><span style={{ fontSize: 10, color: B.muted, width: 46 }}>Game</span><select value={school.gamification?.preset || "none"} onChange={e => onGami(e.target.value)} style={sel}>{Object.values(GAMI).map(g => <option key={g.id} value={g.id}>{g.name}</option>)}</select></div>
-            <button onClick={() => onIterate("Unlock all lessons")} style={{ ...sel, cursor: "pointer", textAlign: "center", color: "#A78BFA" }}>🔓 Unlock all lessons</button>
-          </div>
-        )}
-        {suggestions.length > 0 && <>
-          <button onClick={() => setShowSugg(s => !s)} style={collBtn}>{showSugg ? "▾" : "▸"} Suggestions ({suggestions.length})</button>
-          {showSugg && <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>{suggestions.map((s, i) => <button key={i} onClick={() => onIterate(s)} disabled={iterating} style={{ textAlign: "left", background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 10, padding: "8px 11px", fontSize: 12, color: T.hi, cursor: "pointer", fontFamily: "inherit", lineHeight: 1.4, opacity: iterating ? 0.5 : 1 }}>✨ {s}</button>)}</div>}
-        </>}
-      </div>
-      <div style={{ flex: 1, overflowY: "auto", padding: "10px 14px", display: "flex", flexDirection: "column", gap: 8 }}>
-        <div style={{ fontSize: 12, color: B.mutedMid, lineHeight: 1.6, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 10, padding: "10px 12px" }}>👋 Tell me what to change — e.g. “add a quiz to lesson 2”.</div>
+      <div ref={msgScroll} style={{ flex: 1, overflowY: "auto", padding: "12px 14px", display: "flex", flexDirection: "column", gap: 9 }}>
+        <div style={{ fontSize: 12.5, color: B.mutedMid, lineHeight: 1.6, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 10, padding: "11px 13px" }}>👋 Tell me what to change — “add a quiz to lesson 2” — or ask for ideas, and I'll show options to pick from. Styles, layout & more live in the top bar.</div>
         {history.map((m, i) => m.role === "options" ? (
-          /* IDEAS — pickable design-direction cards: hover to feel them, use or refine one. */
-          <div key={i} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {(m.options || []).map((o, k) => (
-              <div key={k} style={{ position: "relative", background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: "13px 14px", transition: "transform 0.16s, border-color 0.2s, box-shadow 0.2s", overflow: "hidden" }}
-                onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.borderColor = T.ba; e.currentTarget.style.boxShadow = `0 10px 30px ${T.pg}`; }}
-                onMouseLeave={e => { e.currentTarget.style.transform = "none"; e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.boxShadow = "none"; }}>
-                <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: T.grad, opacity: 0.8 }} />
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                  <span style={{ width: 22, height: 22, borderRadius: 7, background: T.ps, border: `1px solid ${T.ba}`, color: T.hi, fontSize: 11, fontWeight: 800, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{k + 1}</span>
-                  <span style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 13.5, fontWeight: 800, color: B.white }}>{o.title}</span>
-                </div>
-                <div style={{ fontSize: 12, color: B.mutedMid, lineHeight: 1.6, marginBottom: 10 }}>{o.summary}</div>
-                <div style={{ display: "flex", gap: 7 }}>
-                  <button onClick={() => onIterate(o.instruction)} disabled={busy} style={{ background: T.grad, border: "none", borderRadius: 8, color: "#fff", padding: "6px 14px", cursor: "pointer", fontSize: 11.5, fontWeight: 800, fontFamily: "inherit", opacity: busy ? 0.5 : 1 }}>✓ Use this</button>
-                  <button onClick={() => { setInput(`${o.instruction} — with these tweaks: `); }} disabled={busy} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "6px 12px", cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit" }}>✎ Refine it</button>
-                </div>
-              </div>
-            ))}
-          </div>
+          <button key={i} onClick={() => setIdeas({ title: "Pick a direction", items: m.options || [] })} style={{ textAlign: "left", background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 12, padding: "11px 13px", cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: 9 }}>
+            <span style={{ fontSize: 17 }}>💡</span><span style={{ fontSize: 12.5, color: T.hi, fontWeight: 700 }}>{(m.options || []).length} ideas ready — tap to view & choose →</span>
+          </button>
         ) : (
           <div key={i} style={{ display: "flex", justifyContent: m.role === "user" ? "flex-end" : "flex-start", gap: 7, alignItems: "flex-start" }}>
             {m.role !== "user" && <div style={{ flex: "0 0 22px", marginTop: 2 }}><SenseitoMark size={22} /></div>}
-            <div style={{ maxWidth: "88%", background: m.role === "user" ? T.ps : B.surface, border: `1px solid ${m.role === "user" ? T.ba : B.border}`, borderRadius: m.role === "user" ? "12px 4px 12px 12px" : "4px 12px 12px 12px", padding: "8px 11px", fontSize: 12.5, lineHeight: 1.5, color: B.white }}>{m.role === "user" ? m.content : <Markdown text={m.content} />}</div>
+            <div style={{ maxWidth: "88%", background: m.role === "user" ? T.ps : B.surface, border: `1px solid ${m.role === "user" ? T.ba : B.border}`, borderRadius: m.role === "user" ? "12px 4px 12px 12px" : "4px 12px 12px 12px", padding: "9px 12px", fontSize: 13, lineHeight: 1.55, color: B.white }}>{m.role === "user" ? m.content : <Markdown text={m.content} />}</div>
           </div>
         ))}
         {busy && <div style={{ display: "flex", gap: 4, paddingLeft: 4 }}>{[0, 1, 2].map(i => <div key={i} style={{ width: 6, height: 6, borderRadius: "50%", background: T.p, animation: `pulse 1s ${i * 0.2}s infinite` }} />)}</div>}
-        <div ref={bottom} />
       </div>
+      {ideas && <IdeasModal ideas={ideas} T={T} busy={busy} onPick={inst => { onIterate(inst); setIdeas(null); }} onRefine={inst => { setInput(`${inst} — with these tweaks: `); setIdeas(null); }} onClose={() => setIdeas(null)} />}
       <div data-guide="chat" style={{ padding: "10px 12px", borderTop: `1px solid ${B.border}`, display: "flex", gap: 8, alignItems: "flex-end" }}>
         <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} placeholder={iterating ? "Working…" : thinking ? "Thinking…" : "Ask or describe a change…"} disabled={busy} rows={2} style={{ flex: 1, background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 10, color: B.white, fontFamily: "inherit", fontSize: 13, lineHeight: 1.5, padding: "8px 11px", resize: "none" }} />
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
