@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useLayoutEffect, useMemo, useContext, createContext, Component } from "react";
+import { createPortal } from "react-dom";
 import { createClient } from "@supabase/supabase-js";
 
 // Signed-in creator's auth ({ token, userId }) — lets deep blocks open the media library.
@@ -447,6 +448,10 @@ const ICO_PATHS = {
   publish: "M12 3v12M12 3l-4 4M12 3l4 4M4 15v4a2 2 0 002 2h12a2 2 0 002-2v-4",
   check: "M20 6L9 17l-5-5",
   undo: "M9 14l-4-4 4-4M5 10h9a5 5 0 010 10h-3",
+  lms: "M4 5h16v14H4zM9 5v14M12 9.5h5M12 13.5h5",
+  cards: "M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z",
+  steps: "M4 19h4v-5h4v-5h4v-5h4",
+  arcade: "M7 11h4M9 9v4M15 10h.01M18 12h.01M7 7h10a4 4 0 014 4v2a4 4 0 01-7 3l-1-1h-2l-1 1a4 4 0 01-7-3v-2a4 4 0 014-4z",
 };
 function Ico({ name, size = 15, fill = false, style }) {
   const d = ICO_PATHS[name]; if (!d) return null;
@@ -3688,7 +3693,8 @@ function ShowroomEl({ e, T, selected, editMode, snap, onSelect, onChange, onEdit
 }
 
 function ShowroomBlock({ data = {}, T, school, canEdit, onEditData, disabled }) {
-  const slides = data.slides || [];
+  // A Showroom brick with no slides of its own displays the school-level deck built in the top-bar Showroom studio.
+  const slides = (data.slides && data.slides.length) ? data.slides : (school?.showroom?.slides || []);
   const [i, setI] = useState(0);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);       // "regen" | "iter" | false
@@ -6316,7 +6322,7 @@ function SchoolWizard({ school, T, media, published, rec, onUpdate, saveLesson, 
     heading = "🎨 Design"; sup = "Pick a layout & polish";
     body = (<>
       <div style={sub}>Layout</div>
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{[["lms", "🗂️ LMS"], ["cards", "🗃️ Cards"], ["steps", "🪜 Steps"], ["arcade", "🎮 Arcade"]].map(([k, l]) => <button key={k} onClick={() => onUpdate({ data: { ...school, shell: k, ...(k === "arcade" ? { progression: "arcade" } : k === "cards" ? { progression: "list" } : {}) } })} style={{ background: shellOf(school) === k ? T.ps : B.surface2, border: `1px solid ${shellOf(school) === k ? T.ba : B.borderMid}`, borderRadius: 8, color: shellOf(school) === k ? T.hi : B.mutedMid, padding: "6px 12px", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>{l}</button>)}</div>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{[["lms", "LMS", "lms"], ["cards", "Cards", "cards"], ["steps", "Steps", "steps"], ["arcade", "Arcade", "arcade"]].map(([k, l, ic]) => <button key={k} onClick={() => onUpdate({ data: { ...school, shell: k, ...(k === "arcade" ? { progression: "arcade" } : k === "cards" ? { progression: "list" } : {}) } })} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: shellOf(school) === k ? T.ps : B.surface2, border: `1px solid ${shellOf(school) === k ? T.ba : B.borderMid}`, borderRadius: 8, color: shellOf(school) === k ? T.hi : B.mutedMid, padding: "6px 12px", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}><Ico name={ic} size={14} /> {l}</button>)}</div>
       {(school.suggestions || []).length > 0 && <>
         <div style={{ ...sub, marginTop: 6 }}>✨ Improvement ideas (tap to apply)</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>{school.suggestions.slice(0, 4).map((s, i) => <button key={i} onClick={() => { onIterate(s); }} style={{ textAlign: "left", background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 9, color: T.hi, padding: "8px 11px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", lineHeight: 1.4 }}>✨ {s}</button>)}</div>
@@ -6430,7 +6436,8 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const [bgPick, setBgPick] = useState(false); // background-photo picker open
   const [stylesOpen, setStylesOpen] = useState(false); // quick-styles popover (theme/font/density)
   const [bgOpen, setBgOpen] = useState(false); // background popover (color / photo / tint)
-  const [vibeOpen, setVibeOpen] = useState(false); // vibe/experience popover (styled, no native select)
+  const [vibeOpen, setVibeOpen] = useState(false); // (legacy) vibe popover — vibe now lives inside Styles
+  const [showroomOpen, setShowroomOpen] = useState(false); // school-level Showroom studio (like Game Lab)
   const [iconEdit, setIconEdit] = useState(false); // school-icon edit popover
   const [iconPick, setIconPick] = useState(false); // school-icon image picker open
   const schoolIcon = (size) => school.iconImage
@@ -6894,39 +6901,39 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
             <div style={{ display: "flex", alignItems: "center", gap: 2, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: 6, flexWrap: "wrap", boxShadow: "0 6px 24px rgba(0,0,0,0.28)", backdropFilter: "blur(6px)" }}>
               <button onClick={() => setWizardOpen(true)} title="Guided setup — review every lesson, your mentor, tools, design & publish" style={{ display: "inline-flex", alignItems: "center", gap: 6, height: 30, background: T.grad, border: "none", borderRadius: 9, color: "#fff", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, padding: "0 14px", cursor: "pointer", boxShadow: `0 4px 14px ${T.pg}`, whiteSpace: "nowrap" }}><Ico name="wand" /> Set up</button>
               {sep}
-              <button onClick={() => { setStylesOpen(o => !o); setBgOpen(false); setVibeOpen(false); }} title="Theme, font & spacing" style={ghost(stylesOpen)} {...(stylesOpen ? {} : hover)}><Ico name="palette" /> Styles</button>
-              <button onClick={() => { setVibeOpen(o => !o); setStylesOpen(false); setBgOpen(false); }} title="Experience vibe" style={ghost(vibeOpen)} {...(vibeOpen ? {} : hover)}><Ico name="sparkle" fill /> {activeVibe ? activeVibe.label : "Vibe"}</button>
-              <button onClick={() => { setBgOpen(o => !o); setStylesOpen(false); setVibeOpen(false); }} title="Background — colour, photo, tint" style={ghost(bgOpen)} {...(bgOpen ? {} : hover)}><Ico name="image" /> Background</button>
+              <button onClick={() => { setStylesOpen(o => !o); setBgOpen(false); }} title="Theme, vibe, font & spacing" style={ghost(stylesOpen)} {...(stylesOpen ? {} : hover)}><Ico name="palette" /> Styles</button>
+              <button onClick={() => { setBgOpen(o => !o); setStylesOpen(false); }} title="Background — colour, photo, tint" style={ghost(bgOpen)} {...(bgOpen ? {} : hover)}><Ico name="image" /> Background</button>
               {sep}
               <button onClick={() => setLandingOpen(true)} title="Design a high-converting landing page" style={ghost(false)} {...hover}><Ico name="rocket" /> Landing{school.landing?.sections?.length && school.landing?.on !== false ? <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#4ADE80", display: "inline-block" }} /> : null}</button>
               <button onClick={() => onOpenMedia?.()} title="Your media library" style={ghost(false)} {...hover}><Ico name="folder" /> Media</button>
               <button onClick={() => setGamelabOpen(true)} title="Build games, then drop them in with a Game brick" style={ghost(false)} {...hover}><Ico name="game" /> Game Lab{(school.games || []).length ? ` · ${school.games.length}` : ""}</button>
+              <button onClick={() => setShowroomOpen(true)} title="Build a Showroom slider, then drop it in with a Showroom brick" style={ghost(false)} {...hover}><Ico name="cards" /> Showroom{(school.showroom?.slides?.length) ? ` · ${school.showroom.slides.length}` : ""}</button>
               <div style={{ flex: 1, minWidth: 6 }} />
               <button data-guide="publish" onClick={() => onPublish(rec)} disabled={publishing} style={{ display: "inline-flex", alignItems: "center", gap: 6, height: 30, background: rec.published ? "rgba(74,222,128,0.12)" : "linear-gradient(135deg,#059669,#047857)", border: rec.published ? "1px solid rgba(74,222,128,0.35)" : "none", borderRadius: 9, color: rec.published ? "#4ADE80" : "#fff", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, padding: "0 14px", cursor: "pointer", whiteSpace: "nowrap" }}>
                 {publishing ? <><Ico name="check" /> Published</> : rec.published ? <><Ico name="check" /> Published</> : <><Ico name="publish" /> Publish</>}
               </button>
             </div>
-            {vibeOpen && (
-              <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 12, padding: "12px 14px", marginTop: 8, animation: "fadeUp 0.2s ease" }}>
-                <div style={{ fontSize: 11, color: B.muted, fontWeight: 700, marginBottom: 9 }}>EXPERIENCE VIBE — sets a matching theme, font & feel in one tap</div>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(150px,1fr))", gap: 8 }}>
-                  <button onClick={() => { onUpdate({ data: { ...school, template: undefined } }); }} style={{ textAlign: "left", background: !school.template ? T.ps : B.surface3, border: `1px solid ${!school.template ? T.ba : B.borderMid}`, borderRadius: 10, padding: "9px 11px", cursor: "pointer", fontFamily: "inherit", color: !school.template ? T.hi : B.mutedMid }}>
-                    <div style={{ fontSize: 12.5, fontWeight: 700 }}>◐ Auto</div><div style={{ fontSize: 10.5, color: B.muted, marginTop: 2 }}>Keep current look</div>
-                  </button>
-                  {Object.entries(TEMPLATES).map(([k, t]) => { const on = school.template === k; return (
-                    <button key={k} onClick={() => { applyVibe(k); }} style={{ textAlign: "left", background: on ? T.ps : B.surface3, border: `1px solid ${on ? T.ba : B.borderMid}`, borderRadius: 10, padding: "9px 11px", cursor: "pointer", fontFamily: "inherit", color: on ? T.hi : B.white, transition: "border-color 0.15s" }}
-                      onMouseEnter={e => { if (!on) e.currentTarget.style.borderColor = T.ba; }} onMouseLeave={e => { if (!on) e.currentTarget.style.borderColor = B.borderMid; }}>
-                      <div style={{ fontSize: 12.5, fontWeight: 700 }}>{t.emoji} {t.label}</div>{t.desc && <div style={{ fontSize: 10.5, color: B.muted, marginTop: 2, lineHeight: 1.4 }}>{t.desc}</div>}
-                    </button>
-                  ); })}
-                </div>
-              </div>
-            )}
             {stylesOpen && (
-              <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center", background: B.surface, border: `1px solid ${B.border}`, borderRadius: 12, padding: "12px 15px", marginTop: 8, animation: "fadeUp 0.2s ease" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 7 }}><span style={{ fontSize: 11, color: B.muted, fontWeight: 700 }}>Theme</span>{Object.keys(THEMES).map(k => <button key={k} onClick={() => onUpdate({ data: { ...school, theme: k, palette: undefined } })} title={THEMES[k].label} style={{ width: 22, height: 22, borderRadius: "50%", border: school.theme === k ? `2px solid ${B.white}` : `1px solid ${B.borderMid}`, background: THEMES[k].p, cursor: "pointer" }} />)}</div>
-                <div style={{ display: "flex", alignItems: "center", gap: 7 }}><span style={{ fontSize: 11, color: B.muted, fontWeight: 700 }}>Font</span><select value={school.font || "inter"} onChange={e => onUpdate({ data: { ...school, font: e.target.value } })} style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.white, fontFamily: "inherit", fontSize: 12, padding: "5px 8px", cursor: "pointer" }}>{Object.entries(FONTS).map(([k, f]) => <option key={k} value={k}>{f.label}</option>)}</select></div>
-                <div style={{ display: "flex", alignItems: "center", gap: 7 }}><span style={{ fontSize: 11, color: B.muted, fontWeight: 700 }}>Spacing</span>{[["compact", "Compact"], ["cozy", "Cozy"], ["spacious", "Spacious"]].map(([k, l]) => <button key={k} onClick={() => onUpdate({ data: { ...school, density: k } })} style={{ background: (school.density || "cozy") === k ? T.ps : "none", border: `1px solid ${(school.density || "cozy") === k ? T.ba : B.borderMid}`, borderRadius: 7, color: (school.density || "cozy") === k ? T.hi : B.mutedMid, padding: "4px 10px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit", fontWeight: 700 }}>{l}</button>)}</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 12, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 12, padding: "12px 15px", marginTop: 8, animation: "fadeUp 0.2s ease" }}>
+                <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 7 }}><span style={{ fontSize: 11, color: B.muted, fontWeight: 700 }}>Theme</span>{Object.keys(THEMES).map(k => <button key={k} onClick={() => onUpdate({ data: { ...school, theme: k, palette: undefined } })} title={THEMES[k].label} style={{ width: 22, height: 22, borderRadius: "50%", border: school.theme === k ? `2px solid ${B.white}` : `1px solid ${B.borderMid}`, background: THEMES[k].p, cursor: "pointer" }} />)}</div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 7 }}><span style={{ fontSize: 11, color: B.muted, fontWeight: 700 }}>Font</span><select value={school.font || "inter"} onChange={e => onUpdate({ data: { ...school, font: e.target.value } })} style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.white, fontFamily: "inherit", fontSize: 12, padding: "5px 8px", cursor: "pointer" }}>{Object.entries(FONTS).map(([k, f]) => <option key={k} value={k}>{f.label}</option>)}</select></div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 7 }}><span style={{ fontSize: 11, color: B.muted, fontWeight: 700 }}>Spacing</span>{[["compact", "Compact"], ["cozy", "Cozy"], ["spacious", "Spacious"]].map(([k, l]) => <button key={k} onClick={() => onUpdate({ data: { ...school, density: k } })} style={{ background: (school.density || "cozy") === k ? T.ps : "none", border: `1px solid ${(school.density || "cozy") === k ? T.ba : B.borderMid}`, borderRadius: 7, color: (school.density || "cozy") === k ? T.hi : B.mutedMid, padding: "4px 10px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit", fontWeight: 700 }}>{l}</button>)}</div>
+                </div>
+                <div style={{ borderTop: `1px solid ${B.border}`, paddingTop: 11 }}>
+                  <div style={{ fontSize: 11, color: B.muted, fontWeight: 700, marginBottom: 9 }}>VIBE — a style preset: sets theme, font & feel in one tap</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(150px,1fr))", gap: 8 }}>
+                    <button onClick={() => { onUpdate({ data: { ...school, template: undefined } }); }} style={{ textAlign: "left", background: !school.template ? T.ps : B.surface3, border: `1px solid ${!school.template ? T.ba : B.borderMid}`, borderRadius: 10, padding: "9px 11px", cursor: "pointer", fontFamily: "inherit", color: !school.template ? T.hi : B.mutedMid }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 700 }}>◐ Auto</div><div style={{ fontSize: 10.5, color: B.muted, marginTop: 2 }}>Keep current look</div>
+                    </button>
+                    {Object.entries(TEMPLATES).map(([k, t]) => { const on = school.template === k; return (
+                      <button key={k} onClick={() => { applyVibe(k); }} style={{ textAlign: "left", background: on ? T.ps : B.surface3, border: `1px solid ${on ? T.ba : B.borderMid}`, borderRadius: 10, padding: "9px 11px", cursor: "pointer", fontFamily: "inherit", color: on ? T.hi : B.white, transition: "border-color 0.15s" }}
+                        onMouseEnter={e => { if (!on) e.currentTarget.style.borderColor = T.ba; }} onMouseLeave={e => { if (!on) e.currentTarget.style.borderColor = B.borderMid; }}>
+                        <div style={{ fontSize: 12.5, fontWeight: 700 }}>{t.emoji} {t.label}</div>{t.desc && <div style={{ fontSize: 10.5, color: B.muted, marginTop: 2, lineHeight: 1.4 }}>{t.desc}</div>}
+                      </button>
+                    ); })}
+                  </div>
+                </div>
               </div>
             )}
             {bgOpen && (
@@ -6956,6 +6963,19 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
               </div>
               <div style={{ fontSize: 12.5, color: B.mutedMid, lineHeight: 1.6, marginBottom: 14 }}>Build games here. To show one to students, add a section (e.g. a “Game Room” dashboard) and drop in a Game brick that points to it — or set a game as a lesson reward.</div>
               <GameLabSection school={school} T={T} onUpdate={onUpdate} readOnly={false} />
+            </div>
+          </div>
+        )}
+
+        {!readOnly && showroomOpen && (
+          <div onClick={() => setShowroomOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 230, background: "rgba(0,0,0,0.82)", backdropFilter: "blur(10px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "max(24px,4vh) 16px 40px", overflowY: "auto" }}>
+            <div onClick={e => e.stopPropagation()} style={{ background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 20, width: "100%", maxWidth: 760, padding: 20, boxShadow: `0 0 80px ${T.pg}` }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+                <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 17, fontWeight: 700, color: B.white }}>🎬 Showroom <span style={{ fontSize: 12, fontWeight: 400, color: B.muted }}>· creator-only slider</span></div>
+                <button onClick={() => setShowroomOpen(false)} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "6px 11px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>✕ Close</button>
+              </div>
+              <div style={{ fontSize: 12.5, color: B.mutedMid, lineHeight: 1.6, marginBottom: 14 }}>Build a beautiful slide deck here — students swipe it as a slider. To show it, add a section and drop in a <b>Showroom</b> brick (a brick with no slides of its own displays this deck).</div>
+              <ShowroomBlock data={{ title: "Showroom", ...(school.showroom || {}) }} T={T} school={school} canEdit onEditData={(d) => onUpdate({ data: { ...school, showroom: d } })} />
             </div>
           </div>
         )}
@@ -7217,7 +7237,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
           {activeTab === "lessons" && !readOnly && (
             <div style={{ display: "flex", gap: 6, alignItems: "center", justifyContent: "flex-end", flexWrap: "wrap" }}>
               <span style={{ fontSize: 11, color: B.muted }}>Layout</span>
-              {[["lms", "🗂️ LMS"], ["cards", "🗃️ Cards"], ["steps", "🪜 Steps"], ["arcade", "🎮 Arcade"]].map(([k, l]) => <button key={k} onClick={() => onUpdate({ data: { ...school, shell: k, ...(k === "arcade" ? { progression: "arcade" } : k === "cards" ? { progression: "list" } : {}) } })} style={{ background: shell === k ? T.ps : "none", border: `1px solid ${shell === k ? T.ba : B.borderMid}`, borderRadius: 8, color: shell === k ? T.hi : B.mutedMid, padding: "5px 11px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 700 }}>{l}</button>)}
+              {[["lms", "LMS", "lms"], ["cards", "Cards", "cards"], ["steps", "Steps", "steps"], ["arcade", "Arcade", "arcade"]].map(([k, l, ic]) => <button key={k} onClick={() => onUpdate({ data: { ...school, shell: k, ...(k === "arcade" ? { progression: "arcade" } : k === "cards" ? { progression: "list" } : {}) } })} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: shell === k ? T.ps : "none", border: `1px solid ${shell === k ? T.ba : B.borderMid}`, borderRadius: 8, color: shell === k ? T.hi : B.mutedMid, padding: "5px 11px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 700 }}><Ico name={ic} size={14} /> {l}</button>)}
             </div>
           )}
           {activeTab === "lessons" && (stepsShell ? (activeLesson ? (
@@ -8603,8 +8623,9 @@ function PublicSchool({ slug }) {
 // message iterates the school; quick "levers" are zero-token tweaks.
 // ─────────────────────────────────────────────────────────────
 function IdeasModal({ ideas, T, busy, onPick, onRefine, onClose }) {
-  return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 350, background: "rgba(2,2,8,0.75)", backdropFilter: "blur(8px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "max(28px,6vh) 16px 40px", overflowY: "auto", fontFamily: "'Inter',sans-serif" }}>
+  // Portal to <body> so it escapes the sidebar's stacking context (was rendering behind the school preview).
+  return createPortal(
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 3000, background: "rgba(2,2,8,0.75)", backdropFilter: "blur(8px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "max(28px,6vh) 16px 40px", overflowY: "auto", fontFamily: "'Inter',sans-serif" }}>
       <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 620, background: "var(--surface)", border: `1px solid ${T.ba}`, borderRadius: 20, padding: 22, boxShadow: "0 30px 90px rgba(0,0,0,0.6)" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
           <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 17, fontWeight: 800, color: B.white }}>💡 {ideas.title}</div>
@@ -8629,7 +8650,8 @@ function IdeasModal({ ideas, T, busy, onPick, onRefine, onClose }) {
           ))}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
