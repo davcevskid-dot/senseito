@@ -491,16 +491,57 @@ const GAMI = {
 
 function shortName(t = "") { return t.split(" ").slice(0, 2).join(" "); }
 
-// Badges normalize to { icon, title, rule:{type:"lessons"|"xp", n} } — legacy string badges
-// become a lessons-ladder (badge i unlocks at i+1 passes), so old schools keep working.
+// Badges normalize to { icon, title, rule } where rule.type is one of:
+//   lessons  — n lessons passed        (n)
+//   xp       — n XP earned             (n)
+//   lesson   — a SPECIFIC lesson done  (lessonNumber)
+//   game     — a SPECIFIC game won     (gameId)
+//   download — n downloads made        (n, default 1 = first download)
+// Legacy string badges become a lessons-ladder (badge i unlocks at i+1 passes).
+const BADGE_RULE_TYPES = ["lessons", "xp", "lesson", "game", "download"];
 function normBadges(school) {
   const g = school?.gamification; if (!g) return [];
-  return (g.badges || []).map((b, i) => typeof b === "string"
-    ? { icon: "🏅", title: b, rule: { type: "lessons", n: i + 1 } }
-    : { icon: b.icon || "🏅", title: b.title || "Badge", rule: (b.rule && b.rule.n > 0) ? { type: b.rule.type === "xp" ? "xp" : "lessons", n: b.rule.n } : { type: "lessons", n: i + 1 } });
+  return (g.badges || []).map((b, i) => {
+    if (typeof b === "string") return { icon: "🏅", title: b, rule: { type: "lessons", n: i + 1 } };
+    const r = b.rule || {};
+    const type = BADGE_RULE_TYPES.includes(r.type) ? r.type : "lessons";
+    const rule = { type, n: r.n > 0 ? r.n : (type === "lessons" ? i + 1 : 1), lessonNumber: r.lessonNumber, gameId: r.gameId };
+    return { icon: b.icon || "🏅", title: b.title || "Badge", rule };
+  });
 }
-const badgeEarned = (b, passed, xp) => b.rule.type === "xp" ? xp >= b.rule.n : passed >= b.rule.n;
-const badgeRuleLabel = (b, school) => b.rule.type === "xp" ? `${b.rule.n} ${curLabel(school)}` : `${b.rule.n} lesson${b.rule.n > 1 ? "s" : ""}`;
+// ctx: { passed, xp, passedLessons:Set<number>, gamesWon:Set<string>, downloads:number }
+const badgeEarned = (b, ctx) => {
+  const r = b.rule || {}; const c = ctx || {};
+  switch (r.type) {
+    case "xp": return (c.xp || 0) >= (r.n || 0);
+    case "lesson": return !!(c.passedLessons && r.lessonNumber != null && c.passedLessons.has(Number(r.lessonNumber)));
+    case "game": return !!(c.gamesWon && r.gameId && c.gamesWon.has(r.gameId));
+    case "download": return (c.downloads || 0) >= (r.n || 1);
+    default: return (c.passed || 0) >= (r.n || 0);
+  }
+};
+const badgeRuleLabel = (b, school) => {
+  const r = b.rule || {};
+  if (r.type === "xp") return `${r.n} ${curLabel(school)}`;
+  if (r.type === "download") return (r.n || 1) > 1 ? `${r.n} downloads` : "first download";
+  if (r.type === "lesson") { const l = (school?.semesters || []).flatMap(s => s.lessons || []).find(x => x.number === Number(r.lessonNumber)); return `finish “${l?.title || `lesson ${r.lessonNumber}`}”`; }
+  if (r.type === "game") { const gm = (school?.games || []).find(x => x.id === r.gameId); return `win “${gm?.title || "a game"}”`; }
+  return `${r.n} lesson${r.n > 1 ? "s" : ""}`;
+};
+// Student-side achievement triggers — fired from anywhere, caught by SchoolPage, which
+// updates the enrollment's tallies and celebrates any newly-unlocked badge.
+const sxGameWon = (gameId) => { try { window.dispatchEvent(new CustomEvent("sx-game-won", { detail: { gameId } })); } catch { } };
+const sxDownloaded = () => { try { window.dispatchEvent(new CustomEvent("sx-download")); } catch { } };
+function badgeCtx(toolStates, progressObj, xpVal) {
+  const ts = toolStates || {}, p = progressObj || {};
+  return {
+    passed: Object.values(p).filter(v => v === "passed").length,
+    xp: xpVal || 0,
+    passedLessons: new Set(Object.keys(p).filter(k => p[k] === "passed").map(Number)),
+    gamesWon: new Set(ts.__gamesWon || []),
+    downloads: ts.__downloads || 0,
+  };
+}
 
 const CHIPS = [
   { label: "🧠 Life Coaching", key: "life" },
@@ -1003,7 +1044,7 @@ DECIDE which of three modes this message is:
 - "tabScale": number 0.8–1.4 — size of the section tabs/nav. Use for "make the tabs bigger/smaller" (1 = default).
 - "navGrad": a CSS gradient string for the navigation/sidebar background, e.g. "linear-gradient(180deg,#ef4444,#3b82f6)". Use for "make the sidebar a red→blue gradient". "" to clear.
 - "currency": { "word":"<what the points/XP are called, e.g. Energy, Coins, Sparks, Insight>", "icon":"<single emoji>" }. Use for "rename XP to …", "call points coins", "make XP energy". Set "currency": null to reset to "XP".
-- "gamification": patch object — include ONLY the keys being changed: { "xpPerLesson": <number>, "streakEvery": <number>, "streakXp": <number> (every streakEvery passed lessons grants +streakXp bonus — THIS IS WIRED, use for "add a streak bonus"), "completionReward": "<text>", "badges": [{ "icon":"<emoji>", "title":"...", "rule": {"type":"lessons"|"xp","n":<threshold>} }] (FULL replacement list — badges unlock automatically when the rule is met; use for "add/change badges", "make badges harder") }. Use for anything about XP amounts, streaks, badges or rewards.
+- "gamification": patch object — include ONLY the keys being changed: { "xpPerLesson": <number>, "streakEvery": <number>, "streakXp": <number> (every streakEvery passed lessons grants +streakXp bonus — THIS IS WIRED, use for "add a streak bonus"), "completionReward": "<text>", "badges": [ badge objects ] (FULL replacement list — badges/achievements unlock AUTOMATICALLY when their rule is met) }. Each badge is { "icon":"<emoji>", "title":"...", "rule": <rule> } where rule is EXACTLY one of: {"type":"lessons","n":<count>} (pass N lessons) · {"type":"xp","n":<amount>} (reach N XP) · {"type":"lesson","lessonNumber":<the lesson's number>} (finish ONE specific lesson) · {"type":"game","gameId":"<id from the school's games>"} (win a specific game) · {"type":"download","n":<count, default 1>} (download N files, n:1 = first download). Use for anything about XP, streaks, badges, achievements or rewards — e.g. "add an achievement for finishing lesson 3", "one for winning the quiz game", "one for their first download". When the user names a lesson or game, resolve it to its number/id from the project you know.
 - "progressSkin": "<a short description of a bespoke PROGRESS-bar metaphor that fits the subject, e.g. 'a shoelace that tightens', 'a rocket climbing toward a planet', 'a plant that grows', 'a jar filling up'>", OR "default" to restore the plain bar. Use whenever they ask to change the progress bar / completion meter / loading bar / how progress looks.
 - "soul": "<a short description of a bespoke animated 'signature' centerpiece for the hero — e.g. 'a glowing constellation of the key ideas', 'an animated crest', 'drifting particles that form the topic'>", OR "remove" to take it away. A hidden delight — use ONLY when they explicitly ask for a hero/signature visual, a 'soul', or something special/animated at the top.
 - "genImage": { "prompt":"<a rich visual description to GENERATE an AI image from — expand their idea into a great image prompt>", "target":"cover"|"background"|"hero" } — use when they ask you to CREATE/generate an image ("generate a cover of…", "make me a background photo of a forest"). target: cover = the big banner image, background = the page background photo, hero = behind the title. The image is generated and placed automatically.
@@ -1738,7 +1779,7 @@ function RewardLink({ reward, T, compact }) {
   if (!reward?.file?.url) return null;
   const f = reward.file;
   return (
-    <a href={f.url} target="_blank" rel="noreferrer" download style={{ display: "inline-flex", alignItems: "center", gap: 7, background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 10, color: T.hi, padding: compact ? "5px 11px" : "10px 15px", textDecoration: "none", fontSize: compact ? 11.5 : 13.5, fontWeight: 700, fontFamily: "inherit" }}>
+    <a href={f.url} target="_blank" rel="noreferrer" download onClick={sxDownloaded} style={{ display: "inline-flex", alignItems: "center", gap: 7, background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 10, color: T.hi, padding: compact ? "5px 11px" : "10px 15px", textDecoration: "none", fontSize: compact ? 11.5 : 13.5, fontWeight: 700, fontFamily: "inherit" }}>
       ⬇️ {reward.label || `Download ${f.name || "your reward"}`}
     </a>
   );
@@ -1834,6 +1875,67 @@ function AchievementsGrid({ unlockedIds = [] }) {
         );
       })}
     </div>
+  );
+}
+
+// Popup to define WHEN a student badge unlocks — any trigger: lessons/xp/specific lesson/win a game/download.
+function BadgeRuleEditor({ index, school, T, onClose, onUpdate }) {
+  const badges = normBadges(school);
+  const isNew = index < 0;
+  const [b, setB] = useState(isNew ? { icon: "🏅", title: "New badge", rule: { type: "lessons", n: badges.length + 1 } } : (badges[index] || { icon: "🏅", title: "Badge", rule: { type: "lessons", n: 1 } }));
+  const games = school.games || [];
+  const lessons = (school.semesters || []).flatMap(s => s.lessons || []);
+  const setRule = (patch) => setB(x => ({ ...x, rule: { ...x.rule, ...patch } }));
+  const TYPES = [["lessons", "🎓 Pass N lessons"], ["lesson", "📗 Finish a specific lesson"], ["xp", `⭐ Reach N ${curLabel(school)}`], ["game", "🎮 Win a game"], ["download", "⬇️ Download files"]];
+  function save() {
+    if (b.rule.type === "game" && !b.rule.gameId && games[0]) b.rule.gameId = games[0].id;
+    if (b.rule.type === "lesson" && b.rule.lessonNumber == null && lessons[0]) b.rule.lessonNumber = lessons[0].number;
+    const next = isNew ? [...badges, b] : badges.map((x, k) => k === index ? b : x);
+    onUpdate({ data: { ...school, gamification: { ...(school.gamification || { preset: "xp", xpPerLesson: 100 }), badges: next } } });
+    onClose();
+  }
+  const inp = { background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.white, fontFamily: "inherit", fontSize: 13, padding: "7px 10px" };
+  return createPortal(
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 2600, background: "rgba(2,2,8,0.72)", backdropFilter: "blur(7px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "max(28px,7vh) 16px 40px", overflowY: "auto", fontFamily: "'Inter',sans-serif" }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 440, background: "var(--surface)", border: `1px solid ${T.ba}`, borderRadius: 20, padding: 20, boxShadow: "0 30px 90px rgba(0,0,0,0.6)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 16, fontWeight: 800, color: B.white }}>{isNew ? "New achievement" : "Edit achievement"}</div>
+          <button onClick={onClose} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "5px 10px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>✕</button>
+        </div>
+        <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+          <input value={b.icon} onChange={e => setB(x => ({ ...x, icon: e.target.value.slice(0, 3) }))} style={{ ...inp, width: 52, textAlign: "center", fontSize: 20 }} />
+          <input value={b.title} onChange={e => setB(x => ({ ...x, title: e.target.value }))} placeholder="Badge name" style={{ ...inp, flex: 1 }} />
+        </div>
+        <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, color: B.muted, marginBottom: 8 }}>Unlocks when the student…</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 7, marginBottom: 14 }}>
+          {TYPES.map(([k, l]) => { const on = b.rule.type === k; const disabled = (k === "game" && !games.length); return (
+            <button key={k} disabled={disabled} onClick={() => setRule({ type: k })} title={disabled ? "Build a game in the Game Lab first" : ""} style={{ textAlign: "left", background: on ? T.ps : B.surface2, border: `1px solid ${on ? T.ba : B.borderMid}`, borderRadius: 10, color: on ? T.hi : B.mutedMid, padding: "9px 11px", cursor: disabled ? "not-allowed" : "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit", opacity: disabled ? 0.45 : 1 }}>{l}</button>
+          ); })}
+        </div>
+        <div style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 12, padding: 13, marginBottom: 16 }}>
+          {(b.rule.type === "lessons" || b.rule.type === "xp" || b.rule.type === "download") && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: B.mutedMid, flexWrap: "wrap" }}>
+              {b.rule.type === "lessons" ? "Pass" : b.rule.type === "xp" ? "Reach" : "Download"}
+              <input type="number" min="1" value={b.rule.n || 1} onChange={e => setRule({ n: Math.max(1, +e.target.value || 1) })} style={{ ...inp, width: 80 }} />
+              {b.rule.type === "lessons" ? "lessons" : b.rule.type === "xp" ? curLabel(school) : "file(s)"}
+            </div>
+          )}
+          {b.rule.type === "lesson" && (
+            <select value={b.rule.lessonNumber ?? (lessons[0]?.number ?? "")} onChange={e => setRule({ lessonNumber: Number(e.target.value) })} style={{ ...inp, width: "100%", cursor: "pointer" }}>
+              {lessons.length === 0 && <option>No lessons yet</option>}
+              {lessons.map(l => <option key={l.number} value={l.number}>#{l.number} · {l.title}</option>)}
+            </select>
+          )}
+          {b.rule.type === "game" && (
+            <select value={b.rule.gameId ?? (games[0]?.id ?? "")} onChange={e => setRule({ gameId: e.target.value })} style={{ ...inp, width: "100%", cursor: "pointer" }}>
+              {games.map(gm => <option key={gm.id} value={gm.id}>{gm.title || "Untitled game"}</option>)}
+            </select>
+          )}
+        </div>
+        <button onClick={save} style={{ width: "100%", background: T.grad, border: "none", borderRadius: 11, color: "#fff", padding: "11px", cursor: "pointer", fontSize: 14, fontWeight: 800, fontFamily: "inherit" }}>{isNew ? "Add achievement" : "Save"}</button>
+      </div>
+    </div>,
+    document.body
   );
 }
 
@@ -4099,6 +4201,11 @@ function GameBlock({ data = {}, T, school, canEdit, onEditData }) {
       {code
         ? <MentorWidget code={code} T={T} height={h} />
         : <div style={{ border: `1px dashed ${B.borderMid}`, borderRadius: 10, padding: "30px 16px", textAlign: "center", color: B.mutedMid, fontSize: 13 }}>{canEdit ? "Choose a game below (build games in the Game Lab)." : (data.gameId ? "This game was removed." : "Game coming soon.")}</div>}
+      {code && !canEdit && (picked?.id || data.gameId) && (
+        <div style={{ marginTop: 10, display: "flex", justifyContent: "flex-end" }}>
+          <button onClick={() => sxGameWon(picked?.id || data.gameId)} title="Mark this game as won to claim any linked achievement" style={{ background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 9, color: T.hi, padding: "6px 13px", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>🏆 I won this</button>
+        </div>
+      )}
       {canEdit && (
         <div style={{ marginTop: 12, borderTop: `1px solid ${B.border}`, paddingTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
           {games.length ? (
@@ -4146,7 +4253,7 @@ function LibraryBlock({ data = {}, T, canEdit, onEditData }) {
           <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 10, padding: "10px 13px" }}>
             <span style={{ fontSize: 16 }}>{FILE_ICON(f.title, f.url)}</span>
             <a href={f.url} target="_blank" rel="noopener noreferrer" style={{ flex: 1, fontSize: 13, color: B.white, textDecoration: "none", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.title}{f.size ? <span style={{ color: B.muted, fontWeight: 400 }}> · {(f.size / 1048576).toFixed(f.size > 1048576 ? 1 : 2)} MB</span> : null}</a>
-            <a href={f.url} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12, color: T.hi, textDecoration: "none", fontWeight: 700 }}>{f.uploaded ? "Download ↓" : "Open ↗"}</a>
+            <a href={f.url} target="_blank" rel="noopener noreferrer" onClick={() => { if (!canEdit && f.uploaded) sxDownloaded(); }} style={{ fontSize: 12, color: T.hi, textDecoration: "none", fontWeight: 700 }}>{f.uploaded ? "Download ↓" : "Open ↗"}</a>
             {canEdit && <button onClick={() => remove(i)} title="Remove" style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 13 }}>✕</button>}
           </div>
         ))}
@@ -6454,6 +6561,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const [bgOpen, setBgOpen] = useState(false); // background popover (color / photo / tint)
   const [vibeOpen, setVibeOpen] = useState(false); // (legacy) vibe popover — vibe now lives inside Styles
   const [showroomOpen, setShowroomOpen] = useState(false); // school-level Showroom studio (like Game Lab)
+  const [badgeEdit, setBadgeEdit] = useState(null); // { i } badge index being edited (-1 = new)
   const [iconEdit, setIconEdit] = useState(false); // school-icon edit popover
   const [iconPick, setIconPick] = useState(false); // school-icon image picker open
   const schoolIcon = (size) => school.iconImage
@@ -6709,8 +6817,11 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
     let bonus = 0;
     if (g.streakEvery > 0 && g.streakXp > 0 && passedNow % g.streakEvery === 0) { bonus = g.streakXp; showToast(`🔥 Streak! +${bonus} bonus ${curLabel(school)}`); }
     const nextXp = xp + (g.xpPerLesson || 100) + bonus;
-    // Badge unlocks — celebrate the moment a rule is met (lessons-passed or XP thresholds).
-    normBadges(school).forEach(b => { if (!badgeEarned(b, passedBefore, xp) && badgeEarned(b, passedNow, nextXp)) setTimeout(() => showToast(`${b.icon} Badge unlocked: ${b.title}`), 600); });
+    // Badge unlocks — celebrate the moment a rule is met (any trigger type).
+    const ts = rec.toolStates || {};
+    const before = badgeCtx(ts, progress, xp);
+    const after = badgeCtx(ts, next, nextXp);
+    normBadges(school).forEach(b => { if (!badgeEarned(b, before) && badgeEarned(b, after)) setTimeout(() => showToast(`${b.icon} Badge unlocked: ${b.title}`), 600); });
     // Branching lesson: the student's chosen fork unlocks the path — skip the linear auto-advance.
     const forked = (school.semesters || []).flatMap(s => s.lessons || []).find(l => l.number === lessonNumber)?.forks?.length;
     if (forked) { onUpdate({ progress: next, xp: nextXp }); return; }
@@ -6724,6 +6835,24 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
     }); });
     onUpdate({ progress: next, xp: nextXp });
   }
+  // Achievement triggers fired from games/downloads anywhere on the page.
+  function recordTrigger(kind, id) {
+    const ts = rec.toolStates || {};
+    let nextTs;
+    if (kind === "game") { if (!id || (ts.__gamesWon || []).includes(id)) return; nextTs = { ...ts, __gamesWon: [...(ts.__gamesWon || []), id] }; showToast("🎮 Game won!"); }
+    else if (kind === "download") { nextTs = { ...ts, __downloads: (ts.__downloads || 0) + 1 }; }
+    else return;
+    const before = badgeCtx(ts, progress, xp);
+    const after = badgeCtx(nextTs, progress, xp);
+    normBadges(school).forEach(b => { if (!badgeEarned(b, before) && badgeEarned(b, after)) setTimeout(() => showToast(`${b.icon} Badge unlocked: ${b.title}`), 500); });
+    onUpdate({ toolStates: nextTs });
+  }
+  useEffect(() => {
+    const gw = (e) => recordTrigger("game", e.detail?.gameId);
+    const dl = () => recordTrigger("download");
+    window.addEventListener("sx-game-won", gw); window.addEventListener("sx-download", dl);
+    return () => { window.removeEventListener("sx-game-won", gw); window.removeEventListener("sx-download", dl); };
+  }); // re-bind each render so it closes over the latest toolStates/progress/xp
   function unlockAll() {
     // Open every lesson at the SCHOOL level so it persists to the published version.
     onUpdate({ data: { ...school, semesters: (school.semesters || []).map(s => ({ ...s, lessons: (s.lessons || []).map(l => ({ ...l, open: true })) })) } });
@@ -6995,6 +7124,8 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
             </div>
           </div>
         )}
+
+        {!readOnly && badgeEdit && <BadgeRuleEditor index={badgeEdit.i} school={school} T={T} onClose={() => setBadgeEdit(null)} onUpdate={onUpdate} />}
 
         {rec.published && !readOnly && (
           <div style={{ marginBottom: 14, background: "rgba(5,150,105,0.07)", border: "1px solid rgba(5,150,105,0.25)", borderRadius: 12, padding: "13px 16px", display: "flex", flexDirection: "column", gap: 11 }}>
@@ -7403,15 +7534,15 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
                   <div style={{ background: B.surface2, borderRadius: 10, padding: "13px 15px", gridColumn: "1 / -1" }}>
                     <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, color: B.muted, marginBottom: 8 }}>Badges {!readOnly && <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: 400 }}>— click a rule to change when it unlocks</span>}</div>
                     <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
-                      {badges.map((b, i) => { const earned = badgeEarned(b, passedCount, xp); return (
+                      {badges.map((b, i) => { const earned = badgeEarned(b, badgeCtx(rec.toolStates, progress, xp)); return (
                         <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: earned ? "rgba(74,222,128,0.1)" : T.ps, border: `1px solid ${earned ? "rgba(74,222,128,0.4)" : T.ba}`, borderRadius: 100, padding: "4px 12px", fontSize: 12, color: earned ? "#4ADE80" : T.hi }}>
                           <span>{earned ? b.icon : "🔒"}</span>
                           <EditableText value={b.title} readOnly={readOnly} onSave={v => setBadge(i, { title: v })} />
-                          <span onClick={() => { if (readOnly) return; const n = window.prompt(`Unlock "${b.title}" after how many ${b.rule.type === "xp" ? curLabel(school) : "passed lessons"}? (number — prefix with "xp:" to switch to an XP rule, e.g. xp:500)`, b.rule.type === "xp" ? `xp:${b.rule.n}` : String(b.rule.n)); if (n == null) return; const m = n.trim().match(/^(xp:)?\s*(\d+)$/i); if (m) setBadge(i, { rule: { type: m[1] ? "xp" : "lessons", n: +m[2] } }); }} title={`Unlocks at ${badgeRuleLabel(b, school)}`} style={{ fontSize: 10, color: B.muted, cursor: readOnly ? "default" : "pointer" }}>· {badgeRuleLabel(b, school)}</span>
+                          <span onClick={() => { if (!readOnly) setBadgeEdit({ i }); }} title={`Unlocks at ${badgeRuleLabel(b, school)} — click to change the trigger`} style={{ fontSize: 10, color: B.muted, cursor: readOnly ? "default" : "pointer" }}>· {badgeRuleLabel(b, school)}</span>
                           {!readOnly && <span onClick={() => setG({ badges: badges.filter((_, k) => k !== i) })} style={{ color: B.muted, cursor: "pointer", fontSize: 11 }}>✕</span>}
                         </span>
                       ); })}
-                      {!readOnly && <button onClick={() => { const t = window.prompt("Badge name:"); if (!t || !t.trim()) return; const n = parseInt(window.prompt("Unlocks after how many passed lessons?", String(badges.length + 1)) || "0", 10); setG({ badges: [...badges, { icon: "🏅", title: t.trim(), rule: { type: "lessons", n: n > 0 ? n : badges.length + 1 } }] }); }} style={{ background: "none", border: `1px dashed ${T.ba}`, borderRadius: 100, color: T.hi, padding: "4px 12px", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>＋ Badge</button>}
+                      {!readOnly && <button onClick={() => setBadgeEdit({ i: -1 })} style={{ background: "none", border: `1px dashed ${T.ba}`, borderRadius: 100, color: T.hi, padding: "4px 12px", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>＋ Badge</button>}
                     </div>
                   </div>
                 </div>
