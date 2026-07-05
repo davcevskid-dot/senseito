@@ -7846,10 +7846,10 @@ function ProfileModal({ viewer, onClose }) {
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 360, background: "rgba(2,2,8,0.78)", backdropFilter: "blur(9px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "max(28px,7vh) 16px 40px", overflowY: "auto", fontFamily: "'Inter',sans-serif" }}>
       <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 460, background: "var(--surface)", border: `1px solid ${T.ba}`, borderRadius: 22, overflow: "hidden", boxShadow: "0 30px 90px rgba(0,0,0,0.6)" }}>
-        <div style={{ height: 84, background: T.grad, position: "relative" }}>
-          <button onClick={onClose} style={{ position: "absolute", top: 12, right: 12, background: "rgba(0,0,0,0.32)", border: "none", borderRadius: 9, color: "#fff", padding: "5px 10px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>✕</button>
+        <div style={{ height: 96, background: data?.profile?.cover_url ? `center/cover no-repeat url(${data.profile.cover_url})` : T.grad, position: "relative", zIndex: 0 }}>
+          <button onClick={onClose} style={{ position: "absolute", top: 12, right: 12, background: "rgba(0,0,0,0.42)", border: "none", borderRadius: 9, color: "#fff", padding: "5px 10px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>✕</button>
         </div>
-        <div style={{ padding: "0 22px 22px", marginTop: -38 }}>
+        <div style={{ padding: "0 22px 22px", marginTop: -38, position: "relative", zIndex: 1 }}>
           <div style={{ display: "flex", alignItems: "flex-end", gap: 14, marginBottom: 14 }}>
             <div style={{ border: "4px solid var(--surface)", borderRadius: "50%", background: "var(--surface)" }}><Avatar name={dName} url={data?.profile?.avatar_url} size={72} T={T} /></div>
             <div style={{ paddingBottom: 6, minWidth: 0 }}>
@@ -7892,7 +7892,7 @@ async function fetchProfiles(ids, token) {
   const uniq = [...new Set(ids)].filter(Boolean);
   if (!uniq.length) return {};
   try {
-    const rows = await supaFetch(`/rest/v1/profiles?id=in.(${uniq.join(",")})&select=id,display_name,avatar_url`, token ? { token } : {});
+    const rows = await supaFetch(`/rest/v1/profiles?id=in.(${uniq.join(",")})&select=id,display_name,avatar_url,cover_url`, token ? { token } : {});
     const map = {}; (rows || []).forEach(r => { map[r.id] = r; }); return map;
   } catch { return {}; }
 }
@@ -8313,6 +8313,8 @@ function ProfileView({ session, profile, onProfile, achStats, schoolCount, syncS
   const [items, setItems] = useState(null);
   const [busy, setBusy] = useState(false);
   const [avatarBusy, setAvatarBusy] = useState(false);
+  const [coverBusy, setCoverBusy] = useState(false);
+  const coverRef = useRef(null);
   const [err, setErr] = useState("");
   const [genPrompt, setGenPrompt] = useState("");
   const [genRatio, setGenRatio] = useState("1:1");
@@ -8347,6 +8349,14 @@ function ProfileView({ session, profile, onProfile, achStats, schoolCount, syncS
     catch (er) { setErr(er.message); }
     setAvatarBusy(false);
   }
+  async function onCover(e) {
+    const f = (e.target.files || [])[0]; e.target.value = ""; if (!f) return;
+    if (!/^image\//.test(f.type)) { setErr("Cover must be an image."); return; }
+    setCoverBusy(true); setErr("");
+    try { const m = await uploadMedia(f, session.token, userId); await saveProfile(session.token, userId, { cover_url: m.url }); onProfile({ ...(profile || {}), cover_url: m.url }); await refresh(); }
+    catch (er) { setErr(er.message); }
+    setCoverBusy(false);
+  }
   async function remove(m) {
     if (!window.confirm(`Delete "${m.name}"? This can't be undone.`)) return;
     try { await deleteMedia(m.path, session.token); setItems(its => (its || []).filter(x => x.path !== m.path)); }
@@ -8358,19 +8368,26 @@ function ProfileView({ session, profile, onProfile, achStats, schoolCount, syncS
     <div style={{ maxWidth: 860, margin: "0 auto", padding: "22px 20px 80px" }}>
       <button onClick={onBack} style={{ background: "none", border: "none", color: B.muted, fontSize: 12.5, cursor: "pointer", fontFamily: "inherit", marginBottom: 16 }}>← Back</button>
 
-      {/* Identity */}
-      <div style={{ display: "flex", gap: 18, alignItems: "center", flexWrap: "wrap", background: B.surface, border: `1px solid ${B.border}`, borderRadius: 18, padding: 20, marginBottom: 18 }}>
-        <button onClick={() => avatarRef.current?.click()} title="Change avatar" style={{ position: "relative", width: 76, height: 76, borderRadius: "50%", border: `2px solid ${T.ba}`, background: profile?.avatar_url ? `center/cover no-repeat url(${profile.avatar_url})` : "linear-gradient(135deg,#7C3AED,#06B6D4)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, fontWeight: 800, color: "#fff", cursor: "pointer", flexShrink: 0, overflow: "hidden" }}>
-          {!profile?.avatar_url && initial}
-          <span style={{ position: "absolute", bottom: -2, right: -2, background: T.p, borderRadius: "50%", width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, border: `2px solid ${B.surface}` }}>{avatarBusy ? "…" : "✎"}</span>
-        </button>
-        <input ref={avatarRef} type="file" accept="image/*" onChange={onAvatar} style={{ display: "none" }} />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <EditableText value={profile?.display_name || session?.user?.user_metadata?.full_name || "Add your name"} onSave={v => { onProfile({ ...(profile || {}), display_name: v }); saveProfile(session.token, userId, { display_name: v }); }} style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 20, fontWeight: 700, color: B.white }} />
-          <div style={{ fontSize: 12.5, color: B.muted, marginTop: 3 }}>{session?.user?.email}</div>
-          <div style={{ fontSize: 11.5, color: syncState === "error" ? "#F87171" : "#4ADE80", marginTop: 4 }}>{syncState === "saving" ? "☁️ Saving…" : syncState === "error" ? "⚠ Sync error" : "☁️ Cloud synced"} · {schoolCount} school{schoolCount === 1 ? "" : "s"}</div>
+      {/* Identity — profile with cover banner (shown on your public profile card too) */}
+      <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 18, overflow: "hidden", marginBottom: 18 }}>
+        <div style={{ height: 120, background: profile?.cover_url ? `center/cover no-repeat url(${profile.cover_url})` : "linear-gradient(135deg,#7C3AED,#06B6D4)", position: "relative", zIndex: 0 }}>
+          <button onClick={() => coverRef.current?.click()} title="Change cover photo" style={{ position: "absolute", top: 12, right: 12, background: "rgba(0,0,0,0.42)", border: "none", borderRadius: 9, color: "#fff", padding: "6px 12px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 700 }}>{coverBusy ? "Uploading…" : profile?.cover_url ? "✎ Cover" : "＋ Add cover"}</button>
+          {profile?.cover_url && <button onClick={() => { saveProfile(session.token, userId, { cover_url: null }); onProfile({ ...(profile || {}), cover_url: null }); }} title="Remove cover" style={{ position: "absolute", top: 12, right: 92, background: "rgba(0,0,0,0.42)", border: "none", borderRadius: 9, color: "#fff", padding: "6px 10px", cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>✕</button>}
+          <input ref={coverRef} type="file" accept="image/*" onChange={onCover} style={{ display: "none" }} />
         </div>
-        <button onClick={onSignOut} style={{ padding: "9px 15px", borderRadius: 10, border: "1px solid rgba(248,113,113,0.3)", background: "rgba(248,113,113,0.07)", color: "#F87171", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}>Sign out</button>
+        <div style={{ display: "flex", gap: 18, alignItems: "flex-end", flexWrap: "wrap", padding: "0 20px 20px", marginTop: -34, position: "relative", zIndex: 1 }}>
+          <button onClick={() => avatarRef.current?.click()} title="Change avatar" style={{ position: "relative", width: 76, height: 76, borderRadius: "50%", border: `3px solid ${B.surface}`, background: profile?.avatar_url ? `center/cover no-repeat url(${profile.avatar_url})` : "linear-gradient(135deg,#7C3AED,#06B6D4)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, fontWeight: 800, color: "#fff", cursor: "pointer", flexShrink: 0, overflow: "hidden" }}>
+            {!profile?.avatar_url && initial}
+            <span style={{ position: "absolute", bottom: -2, right: -2, background: T.p, borderRadius: "50%", width: 24, height: 24, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, border: `2px solid ${B.surface}` }}>{avatarBusy ? "…" : "✎"}</span>
+          </button>
+          <input ref={avatarRef} type="file" accept="image/*" onChange={onAvatar} style={{ display: "none" }} />
+          <div style={{ flex: 1, minWidth: 0, paddingBottom: 2 }}>
+            <EditableText value={profile?.display_name || session?.user?.user_metadata?.full_name || "Add your name"} onSave={v => { onProfile({ ...(profile || {}), display_name: v }); saveProfile(session.token, userId, { display_name: v }); }} style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 20, fontWeight: 700, color: B.white }} />
+            <div style={{ fontSize: 12.5, color: B.muted, marginTop: 3 }}>{session?.user?.email}</div>
+            <div style={{ fontSize: 11.5, color: syncState === "error" ? "#F87171" : "#4ADE80", marginTop: 4 }}>{syncState === "saving" ? "☁️ Saving…" : syncState === "error" ? "⚠ Sync error" : "☁️ Cloud synced"} · {schoolCount} school{schoolCount === 1 ? "" : "s"}</div>
+          </div>
+          <button onClick={onSignOut} style={{ padding: "9px 15px", borderRadius: 10, border: "1px solid rgba(248,113,113,0.3)", background: "rgba(248,113,113,0.07)", color: "#F87171", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, cursor: "pointer", alignSelf: "center" }}>Sign out</button>
+        </div>
       </div>
 
       {/* Achievements */}
