@@ -2056,6 +2056,48 @@ function CertificateModal({ school, T, media, viewerName: vName, earned, onUpdat
   );
 }
 
+// ── Dependency-free PDF generator — enough for a beautiful text handout (Helvetica +
+// Helvetica-Bold, wrapping, pagination, an accent colour). Used for AI-authored lesson PDFs.
+function _pdfEsc(s) {
+  return String(s || "")
+    .replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/[–—]/g, "-").replace(/…/g, "...").replace(/•/g, "-")
+    .replace(/[\\()]/g, m => "\\" + m).replace(/[^\x20-\x7E]/g, "");
+}
+function _hexRgb01(hex) { const m = /^#?([0-9a-f]{6})$/i.exec(hex || ""); if (!m) return [0.29, 0.16, 0.86]; const n = parseInt(m[1], 16); return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255]; }
+function makeTextPdf(doc, accentHex) {
+  const PW = 612, PH = 792, M = 64, maxW = PW - 2 * M;
+  const acc = _hexRgb01(accentHex); const ink = [0.12, 0.12, 0.18], gray = [0.42, 0.42, 0.5];
+  const pages = []; let ops = [], y = PH - M;
+  const wrap = (text, size) => { const maxChars = Math.max(8, Math.floor(maxW / (size * 0.5))); const words = String(text || "").split(/\s+/); const out = []; let cur = ""; for (const w of words) { if ((cur + " " + w).trim().length > maxChars) { if (cur) out.push(cur); cur = w; } else cur = (cur + " " + w).trim(); } if (cur) out.push(cur); return out.length ? out : [""]; };
+  const emit = (x, yy, text, font, size, color) => `BT /${font} ${size} Tf ${color[0]} ${color[1]} ${color[2]} rg 1 0 0 1 ${x.toFixed(1)} ${yy.toFixed(1)} Tm (${_pdfEsc(text)}) Tj ET\n`;
+  const brk = (h) => { if (y - h < M) { pages.push(ops); ops = []; y = PH - M; } };
+  const block = (text, font, size, color, lineH, gap) => { for (const ln of wrap(text, size)) { brk(lineH); ops.push(emit(M, y, ln, font, size, color)); y -= lineH; } y -= gap; };
+  block(doc.title || "Handout", "F2", 22, acc, 27, 4);
+  if (doc.subtitle) block(doc.subtitle, "F1", 12, gray, 16, 14);
+  else y -= 8;
+  (doc.sections || []).forEach(sec => { if (sec.heading) block(sec.heading, "F2", 15, acc, 20, 6); (sec.paragraphs || []).forEach(p => block(p, "F1", 11, ink, 15.5, 9)); });
+  pages.push(ops);
+  const objs = {};
+  objs[1] = "<</Type/Catalog/Pages 2 0 R>>";
+  objs[2] = `<</Type/Pages/Kids[${pages.map((_, i) => `${6 + i * 2} 0 R`).join(" ")}]/Count ${pages.length}>>`;
+  objs[3] = "<</Type/Font/Subtype/Type1/BaseFont/Helvetica/Encoding/WinAnsiEncoding>>";
+  objs[4] = "<</Type/Font/Subtype/Type1/BaseFont/Helvetica-Bold/Encoding/WinAnsiEncoding>>";
+  pages.forEach((pops, i) => { const cn = 5 + i * 2, pn = 6 + i * 2; const stream = pops.join(""); objs[cn] = `<</Length ${stream.length}>>\nstream\n${stream}endstream`; objs[pn] = `<</Type/Page/Parent 2 0 R/MediaBox[0 0 ${PW} ${PH}]/Resources<</Font<</F1 3 0 R/F2 4 0 R>>>>/Contents ${cn} 0 R>>`; });
+  const maxObj = 4 + pages.length * 2; let pdf = "%PDF-1.4\n"; const offsets = [];
+  for (let n = 1; n <= maxObj; n++) { offsets[n] = pdf.length; pdf += `${n} 0 obj\n${objs[n]}\nendobj\n`; }
+  const xref = pdf.length; pdf += `xref\n0 ${maxObj + 1}\n0000000000 65535 f \n`;
+  for (let n = 1; n <= maxObj; n++) pdf += String(offsets[n]).padStart(10, "0") + " 00000 n \n";
+  pdf += `trailer\n<</Size ${maxObj + 1}/Root 1 0 R>>\nstartxref\n${xref}\n%%EOF`;
+  return new Blob([pdf], { type: "application/pdf" });
+}
+const PDF_HANDOUT_SYS = `You are a curriculum designer turning ONE lesson into a beautiful, self-contained PRINT HANDOUT (it becomes a PDF). Return JSON ONLY:
+{ "title": "<handout title>", "subtitle": "<one clear subtitle line>", "sections": [ { "heading": "<section title>", "paragraphs": ["<full, self-contained paragraph>", ...] } ] }
+Rules: 4-7 sections that genuinely TEACH the lesson's content (key ideas, clear explanations, concrete examples), ending with a short "Practice" or "Reflect" section. Plain prose only — NO markdown, NO bullet characters, write complete sentences. Faithful to the lesson and its mentor's spirit.`;
+function lessonContextText(school, lesson) {
+  const blocks = (lesson.blocks || []).map(b => `${b.type}: ${flattenText(b.data?.title || b.data?.prompt || b.data?.question || "")}`.trim()).filter(Boolean).join("; ");
+  return `SCHOOL: ${school.name} — ${flattenText(school.description) || ""}\nMENTOR: ${school.mentor?.name || ""} (${school.voicePreset || "sage"})\nLESSON #${lesson.number}: ${lesson.title}\nWHAT IT TEACHES: ${flattenText(lesson.concept) || ""}\nTHEORY: ${(flattenText(lesson.theory) || "").slice(0, 2500)}\nACTIVITIES: ${blocks || "none"}`;
+}
+
 function LessonView({ school, lesson, T: Tprop, onClose, onPass, onChooseFork, canEdit, onUpdateBlock, chat, onChat, bus, onIngest, outputs: outputsProp, onOutputs, blockOverrides, onOverrideBlock, inline = false }) {
   // Per-lesson accent override (lesson.accent) recolors the whole lesson modal.
   const T = (lesson.accent && HEX_RE.test(lesson.accent))
@@ -9359,6 +9401,30 @@ export default function Senseito() {
         showAToast(`✓ ${target.title} ${un ? "unstuck" : "sticky"}`, "ok");
         return;
       }
+    }
+    // "make/create a (beautiful) PDF / handout / worksheet from lesson N → add to media"
+    if (session && /\b(pdf|hand-?out|worksheet|workbook)\b/i.test(text) && /\b(make|create|generate|build|turn|export|produce|add|design)\b/i.test(text)) {
+      const lessons = (rec.data.semesters || []).flatMap(s => s.lessons || []);
+      if (!lessons.length) { pushMsg({ role: "user", content: text }); pushMsg({ role: "assistant", content: "There are no lessons yet to turn into a PDF — add a lesson first." }); return; }
+      const ord = { one: 1, first: 1, two: 2, second: 2, three: 3, third: 3, four: 4, fourth: 4, five: 5, fifth: 5, six: 6, sixth: 6, seven: 7, seventh: 7, eight: 8, eighth: 8, nine: 9, ninth: 9, ten: 10, tenth: 10 };
+      let n = null;
+      const mNum = text.match(/lesson\s*#?\s*(\d+)/i) || text.match(/\b(\d+)(?:st|nd|rd|th)?\s+lesson/i);
+      if (mNum) n = parseInt(mNum[1], 10);
+      else { const mo = text.toLowerCase().match(/lesson\s+(one|two|three|four|five|six|seven|eight|nine|ten|first|second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth)/); if (mo) n = ord[mo[1]]; }
+      let lesson = n != null ? (lessons.find(l => l.number === n) || lessons[n - 1]) : null;
+      if (!lesson) { const t = text.toLowerCase(); lesson = lessons.find(l => l.title && t.includes(String(l.title).toLowerCase().slice(0, 16))); }
+      if (!lesson) lesson = lessons[0];
+      pushMsg({ role: "user", content: text }); setChatThinking(true);
+      try {
+        const doc = await apiJSON(PDF_HANDOUT_SYS, [{ role: "user", content: lessonContextText(rec.data, lesson) }], 2800, "sonnet");
+        const blob = makeTextPdf(doc, themeFor(rec.data).p);
+        const fname = `${String(doc.title || lesson.title || "lesson").replace(/[^a-z0-9]+/gi, "-").toLowerCase().slice(0, 50) || "handout"}.pdf`;
+        const m = await uploadMedia(new File([blob], fname, { type: "application/pdf" }), session.token, session.user.id);
+        setChatThinking(false);
+        pushMsg({ role: "assistant", content: `✓ Created **${doc.title || lesson.title}** as a PDF and saved it to your media library (\`${fname}\`). Open 📁 Media to grab it — or add a Library section and drop it in as a downloadable.` });
+        showAToast("✓ PDF added to your media", "ok");
+      } catch (e) { setChatThinking(false); pushMsg({ role: "assistant", content: `I couldn't build that PDF (${e.message}). Want me to try again?` }); }
+      return;
     }
     pushMsg({ role: "user", content: text }); setChatThinking(true);
     try {
