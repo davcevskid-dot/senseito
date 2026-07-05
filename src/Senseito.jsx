@@ -2044,6 +2044,7 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, onChooseFork, c
             )}
             <div ref={bottomRef} />
           </div>
+          {msgs.filter(m => m.role === "user").length > 0 && <div style={{ display: "flex", justifyContent: "flex-end", padding: "0 18px 4px" }}><button onClick={() => { if (!window.confirm("Start this conversation over? Your chat with the mentor for this lesson will be cleared (activity progress stays).")) return; const fresh = [{ role: "assistant", content: lesson.openingLine || `Let's begin. ${lesson.concept}` }]; setMsgs(fresh); setChatPassed(false); setChosenFork(null); setMissionShown(false); }} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.muted, padding: "4px 11px", cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>↻ Start over</button></div>}
           {missionShown && !chatPassed && <div style={{ margin: "0 18px 10px", padding: "9px 13px", background: T.as_, border: `1px solid ${T.ba}`, borderRadius: 8, fontSize: 12, color: T.a }}>⚡ Mission active — complete it, then report back with specifics</div>}
           <div style={{ padding: "14px 18px", borderTop: `1px solid ${B.border}`, background: B.surface2, display: "flex", gap: 10, alignItems: "flex-end" }}>
             <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} placeholder={chatPassed ? "Lesson complete" : "Reply to your mentor… (Enter to send)"} disabled={chatPassed} rows={2}
@@ -2130,7 +2131,7 @@ function MentorOffice({ school, T, chat, onChat, bus, onIngest, progress, onUpda
       <div style={{ background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 18, overflow: "hidden", boxShadow: `0 0 40px ${T.pg}` }}>
         <div style={{ padding: "13px 20px", borderBottom: `1px solid ${B.border}`, background: B.surface2, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ fontSize: 13, fontWeight: 700, color: B.white }}>🕰️ Office Hours — ask anything</div>
-          {chat?.length > 0 && <button onClick={() => onChat([])} style={{ background: "none", border: `1px solid ${B.border}`, borderRadius: 7, color: B.muted, padding: "4px 10px", cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>Clear</button>}
+          {chat?.length > 0 && <button onClick={() => { if (window.confirm("Start over? Your office-hours conversation will be cleared.")) onChat([]); }} style={{ background: "none", border: `1px solid ${B.border}`, borderRadius: 7, color: B.muted, padding: "4px 10px", cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>↻ Start over</button>}
         </div>
         <div style={{ maxHeight: 420, minHeight: 220, overflowY: "auto", padding: "18px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
           {msgs.map((m, i) => {
@@ -8245,8 +8246,8 @@ function PublicSchool({ slug }) {
   const saveT = useRef(null);
   // Progress: localStorage for anonymous; synced to the cloud once signed in.
   const [localState, setLocalState] = useState(() => {
-    try { const saved = localStorage.getItem(`senseito_progress_${slug}`); if (saved) return JSON.parse(saved); } catch { }
-    return { progress: {}, xp: 0, toolStates: {}, mentorChat: [] };
+    try { const saved = localStorage.getItem(`senseito_progress_${slug}`); if (saved) return { lessonChats: {}, lessonOutputs: {}, ...JSON.parse(saved) }; } catch { }
+    return { progress: {}, xp: 0, toolStates: {}, mentorChat: [], lessonChats: {}, lessonOutputs: {} };
   });
   useEffect(() => { if (!stud) { try { localStorage.setItem(lsKey, JSON.stringify(localState)); } catch { } } }, [localState, lsKey, stud]);
 
@@ -8281,10 +8282,10 @@ function PublicSchool({ slug }) {
     if (!stud || !rec) return;
     (async () => {
       try {
-        const rows = await supaFetch(`/rest/v1/enrollments?select=progress,xp,tool_states&school_id=eq.${rec.id}&student_id=eq.${stud.user.id}&limit=1`, { token: stud.token });
+        const rows = await supaFetch(`/rest/v1/enrollments?select=progress,xp,tool_states,lesson_chats,mentor_chat,lesson_outputs&school_id=eq.${rec.id}&student_id=eq.${stud.user.id}&limit=1`, { token: stud.token });
         if (rows && rows.length) {
           const e = rows[0];
-          setLocalState(s => ({ ...s, progress: e.progress || s.progress, xp: e.xp || s.xp, toolStates: e.tool_states || s.toolStates }));
+          setLocalState(s => ({ ...s, progress: e.progress || s.progress, xp: e.xp || s.xp, toolStates: e.tool_states || s.toolStates, lessonChats: e.lesson_chats || s.lessonChats || {}, mentorChat: e.mentor_chat || s.mentorChat || [], lessonOutputs: e.lesson_outputs || s.lessonOutputs || {} }));
         } else {
           await supaFetch(`/rest/v1/enrollments?on_conflict=school_id,student_id`, { method: "POST", token: stud.token, headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: [{ school_id: rec.id, student_id: stud.user.id, email: stud.user.email, name: stud.user?.user_metadata?.full_name || null, progress: localState.progress || {}, xp: localState.xp || 0, tool_states: localState.toolStates || {}, updated_at: new Date().toISOString() }] });
         }
@@ -8297,7 +8298,7 @@ function PublicSchool({ slug }) {
     if (!stud || !rec) return;
     clearTimeout(saveT.current);
     saveT.current = setTimeout(async () => {
-      try { await supaFetch(`/rest/v1/enrollments?on_conflict=school_id,student_id`, { method: "POST", token: stud.token, headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: [{ school_id: rec.id, student_id: stud.user.id, email: stud.user.email, name: stud.user?.user_metadata?.full_name || null, progress: localState.progress || {}, xp: localState.xp || 0, tool_states: localState.toolStates || {}, updated_at: new Date().toISOString() }] }); } catch { }
+      try { await supaFetch(`/rest/v1/enrollments?on_conflict=school_id,student_id`, { method: "POST", token: stud.token, headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: [{ school_id: rec.id, student_id: stud.user.id, email: stud.user.email, name: stud.user?.user_metadata?.full_name || null, progress: localState.progress || {}, xp: localState.xp || 0, tool_states: localState.toolStates || {}, lesson_chats: localState.lessonChats || {}, mentor_chat: localState.mentorChat || [], lesson_outputs: localState.lessonOutputs || {}, updated_at: new Date().toISOString() }] }); } catch { }
     }, 1200);
     return () => clearTimeout(saveT.current);
   }, [localState, stud, rec]); // eslint-disable-line
@@ -8607,7 +8608,9 @@ export default function Senseito() {
     const prev = achPrevSchools.current;
     achPrevSchools.current = schools.length;
     const bulk = achSeen.current === null || prev === null || schools.length - prev > 1; // mount / first-load / cloud sync
-    if (bulk) { achSeen.current = earned; try { localStorage.setItem("senseito_ach", JSON.stringify(earned)); } catch { } return; }
+    // UNION, never overwrite: student counts load async (read 0 at first), so overwriting the
+    // saved list here used to forget "First Student" and re-fire it on every reload.
+    if (bulk) { achSeen.current = [...new Set([...(achSeen.current || []), ...earned])]; try { localStorage.setItem("senseito_ach", JSON.stringify(achSeen.current)); } catch { } return; }
     const newly = ACHIEVEMENTS.filter(a => a.test(stats) && !achSeen.current.includes(a.id));
     if (newly.length) {
       achSeen.current = [...achSeen.current, ...newly.map(a => a.id)];
