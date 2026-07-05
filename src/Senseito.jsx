@@ -1046,6 +1046,7 @@ DECIDE which of three modes this message is:
 - "currency": { "word":"<what the points/XP are called, e.g. Energy, Coins, Sparks, Insight>", "icon":"<single emoji>" }. Use for "rename XP to …", "call points coins", "make XP energy". Set "currency": null to reset to "XP".
 - "gamification": patch object — include ONLY the keys being changed: { "xpPerLesson": <number>, "streakEvery": <number>, "streakXp": <number> (every streakEvery passed lessons grants +streakXp bonus — THIS IS WIRED, use for "add a streak bonus"), "completionReward": "<text>", "badges": [ badge objects ] (FULL replacement list — badges/achievements unlock AUTOMATICALLY when their rule is met) }. Each badge is { "icon":"<emoji>", "title":"...", "rule": <rule> } where rule is EXACTLY one of: {"type":"lessons","n":<count>} (pass N lessons) · {"type":"xp","n":<amount>} (reach N XP) · {"type":"lesson","lessonNumber":<the lesson's number>} (finish ONE specific lesson) · {"type":"game","gameId":"<id from the school's games>"} (win a specific game) · {"type":"download","n":<count, default 1>} (download N files, n:1 = first download). Use for anything about XP, streaks, badges, achievements or rewards — e.g. "add an achievement for finishing lesson 3", "one for winning the quiz game", "one for their first download". When the user names a lesson or game, resolve it to its number/id from the project you know.
 - "progressSkin": "<a short description of a bespoke PROGRESS-bar metaphor that fits the subject, e.g. 'a shoelace that tightens', 'a rocket climbing toward a planet', 'a plant that grows', 'a jar filling up'>", OR "default" to restore the plain bar. Use whenever they ask to change the progress bar / completion meter / loading bar / how progress looks.
+- "certificate": patch object for the diploma students earn at 100% completion — include ONLY changed keys: { "title":"...", "org":"<awarding name>", "body":"<the recognition sentence>", "accent":"#hex", "signature":"<name>", "signatureRole":"<e.g. Instructor>", "photoUrl":"<https logo/photo>", "on":true|false }. Use for "design/redesign the certificate", "make the certificate gold", "change the certificate wording", "turn the certificate off".
 - "soul": "<a short description of a bespoke animated 'signature' centerpiece for the hero — e.g. 'a glowing constellation of the key ideas', 'an animated crest', 'drifting particles that form the topic'>", OR "remove" to take it away. A hidden delight — use ONLY when they explicitly ask for a hero/signature visual, a 'soul', or something special/animated at the top.
 - "genImage": { "prompt":"<a rich visual description to GENERATE an AI image from — expand their idea into a great image prompt>", "target":"cover"|"background"|"hero" } — use when they ask you to CREATE/generate an image ("generate a cover of…", "make me a background photo of a forest"). target: cover = the big banner image, background = the page background photo, hero = behind the title. The image is generated and placed automatically.
 IMPORTANT: "brand" is ONLY a company logo + nav links bar. A picture/illustration the user wants INSIDE the page body is NOT brand and NOT a cover — it's a content image: handle that as an "action" ("add an image brick of … to the dashboard/lesson"), not a design field.
@@ -1934,6 +1935,122 @@ function BadgeRuleEditor({ index, school, T, onClose, onUpdate }) {
         </div>
         <button onClick={save} style={{ width: "100%", background: T.grad, border: "none", borderRadius: 11, color: "#fff", padding: "11px", cursor: "pointer", fontSize: 14, fontWeight: 800, fontFamily: "inherit" }}>{isNew ? "Add achievement" : "Save"}</button>
       </div>
+    </div>,
+    document.body
+  );
+}
+
+// ── CERTIFICATE — the diploma a student earns on 100% completion. Creators design it
+// (custom title/body/photo/signature/accent), students download it, it shows on profiles.
+function certConfig(school) {
+  const c = school.certificate || {}; const T = themeFor(school);
+  return {
+    on: c.on !== false,
+    title: c.title || "Certificate of Completion",
+    org: c.org || school.name,
+    body: c.body || `has successfully completed all requirements of ${school.name} and is hereby recognized for their dedication and achievement.`,
+    accent: (c.accent && HEX_RE.test(c.accent)) ? c.accent : T.p,
+    photoUrl: c.photoUrl || school.iconImage || "",
+    signature: c.signature || school.mentor?.name || "",
+    signatureRole: c.signatureRole || "Instructor",
+  };
+}
+const _xesc = (s) => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+function _wrapTspans(text, max, x, y, step) {
+  const words = String(text || "").split(/\s+/); const lines = []; let cur = "";
+  for (const w of words) { if ((cur + " " + w).trim().length > max) { if (cur) lines.push(cur); cur = w; } else cur = (cur + " " + w).trim(); }
+  if (cur) lines.push(cur);
+  return lines.slice(0, 3).map((l, i) => `<tspan x="${x}" y="${y + i * step}">${_xesc(l)}</tspan>`).join("");
+}
+function certSvgString(school, name) {
+  const c = certConfig(school); const A = c.accent; const W = 1000, H = 707;
+  const nm = _xesc(name || "Student Name");
+  const dt = new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" });
+  const photo = /^https?:\/\//i.test(c.photoUrl) ? c.photoUrl : "";
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${A}"/><stop offset="1" stop-color="${A}" stop-opacity="0.55"/></linearGradient>${photo ? `<clipPath id="pc"><circle cx="${W / 2}" cy="150" r="46"/></clipPath>` : ""}</defs>
+<rect width="${W}" height="${H}" fill="#fbfaf6"/>
+<rect x="16" y="16" width="${W - 32}" height="${H - 32}" fill="none" stroke="url(#g)" stroke-width="4"/>
+<rect x="30" y="30" width="${W - 60}" height="${H - 60}" fill="none" stroke="${A}" stroke-width="1" opacity="0.45"/>
+${photo ? `<image href="${_xesc(photo)}" x="${W / 2 - 46}" y="104" width="92" height="92" clip-path="url(#pc)" preserveAspectRatio="xMidYMid slice"/><circle cx="${W / 2}" cy="150" r="46" fill="none" stroke="${A}" stroke-width="2.5"/>` : `<circle cx="${W / 2}" cy="150" r="30" fill="url(#g)"/><text x="${W / 2}" y="162" text-anchor="middle" font-size="30">🎓</text>`}
+<text x="${W / 2}" y="255" text-anchor="middle" font-family="Georgia,'Times New Roman',serif" font-size="40" font-weight="bold" fill="#1a1a2e" letter-spacing="1">${_xesc(c.title)}</text>
+<text x="${W / 2}" y="292" text-anchor="middle" font-family="Georgia,serif" font-size="13" fill="${A}" letter-spacing="4">${_xesc(String(c.org).toUpperCase())}</text>
+<text x="${W / 2}" y="345" text-anchor="middle" font-family="Georgia,serif" font-size="15" fill="#6b6b7b" font-style="italic">This certifies that</text>
+<text x="${W / 2}" y="400" text-anchor="middle" font-family="Georgia,serif" font-size="46" font-weight="bold" fill="${A}">${nm}</text>
+<line x1="${W / 2 - 180}" y1="418" x2="${W / 2 + 180}" y2="418" stroke="${A}" stroke-width="1" opacity="0.4"/>
+<text text-anchor="middle" font-family="Georgia,serif" font-size="16" fill="#44444f">${_wrapTspans(c.body, 70, W / 2, 452, 26)}</text>
+<text x="150" y="620" text-anchor="middle" font-family="Georgia,serif" font-size="15" fill="#1a1a2e">${_xesc(dt)}</text>
+<line x1="70" y1="600" x2="230" y2="600" stroke="#9a9aa5" stroke-width="1"/>
+<text x="150" y="640" text-anchor="middle" font-family="Georgia,serif" font-size="11" fill="#9a9aa5" letter-spacing="1">DATE</text>
+<text x="${W - 150}" y="620" text-anchor="middle" font-family="'Segoe Script','Brush Script MT',cursive" font-size="22" fill="#1a1a2e">${_xesc(c.signature)}</text>
+<line x1="${W - 230}" y1="600" x2="${W - 70}" y2="600" stroke="#9a9aa5" stroke-width="1"/>
+<text x="${W - 150}" y="640" text-anchor="middle" font-family="Georgia,serif" font-size="11" fill="#9a9aa5" letter-spacing="1">${_xesc(String(c.signatureRole).toUpperCase())}</text>
+</svg>`;
+}
+async function downloadCertificate(school, name) {
+  const svg = certSvgString(school, name);
+  const safe = (name || school.name || "certificate").replace(/[^a-z0-9]+/gi, "-").toLowerCase();
+  const svgToPng = () => new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml;charset=utf-8" }));
+    const img = new Image(); img.crossOrigin = "anonymous";
+    img.onload = () => { try { const s = 2, cv = document.createElement("canvas"); cv.width = 1000 * s; cv.height = 707 * s; const ctx = cv.getContext("2d"); ctx.scale(s, s); ctx.drawImage(img, 0, 0); URL.revokeObjectURL(url); cv.toBlob(b => b ? resolve(b) : reject(new Error("blob")), "image/png"); } catch (e) { URL.revokeObjectURL(url); reject(e); } };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error("img")); };
+    img.src = url;
+  });
+  const a = document.createElement("a");
+  try { const b = await svgToPng(); a.href = URL.createObjectURL(b); a.download = `${safe}.png`; }
+  catch { a.href = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" })); a.download = `${safe}.svg`; } // photo may taint canvas → vector fallback
+  a.click();
+}
+// Live certificate preview (rasterised straight from the SVG string).
+function CertificatePreview({ school, name, style }) {
+  const src = "data:image/svg+xml;utf8," + encodeURIComponent(certSvgString(school, name));
+  return <img src={src} alt="Certificate" style={{ width: "100%", display: "block", borderRadius: 10, border: `1px solid ${B.border}`, ...style }} />;
+}
+// Creator's certificate designer (modal) + the student's earned view both use this.
+function CertificateModal({ school, T, media, viewerName: vName, earned, onUpdate, onClose }) {
+  const c = certConfig(school); const readOnly = !onUpdate;
+  const [pick, setPick] = useState(false);
+  const set = (patch) => onUpdate?.({ data: { ...school, certificate: { ...(school.certificate || {}), ...patch } } });
+  const inp = { background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.white, fontFamily: "inherit", fontSize: 13, padding: "8px 10px", width: "100%", boxSizing: "border-box" };
+  const lbl = { fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: B.muted, marginBottom: 5 };
+  return createPortal(
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 2600, background: "rgba(2,2,8,0.74)", backdropFilter: "blur(8px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "max(24px,5vh) 16px 40px", overflowY: "auto", fontFamily: "'Inter',sans-serif" }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: readOnly ? 640 : 860, background: "var(--surface)", border: `1px solid ${T.ba}`, borderRadius: 20, padding: 20, boxShadow: "0 30px 90px rgba(0,0,0,0.6)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 17, fontWeight: 800, color: B.white }}>🎓 {readOnly ? "Your certificate" : "Design the certificate"}</div>
+          <button onClick={onClose} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "5px 10px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>✕</button>
+        </div>
+        <div style={{ display: readOnly ? "block" : "grid", gridTemplateColumns: readOnly ? undefined : "1.1fr 0.9fr", gap: 18, alignItems: "start" }}>
+          <CertificatePreview school={school} name={readOnly ? vName : (vName || "Student Name")} />
+          {!readOnly && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
+              <div><div style={lbl}>Title</div><input value={c.title} onChange={e => set({ title: e.target.value })} style={inp} /></div>
+              <div><div style={lbl}>Awarding name</div><input value={c.org} onChange={e => set({ org: e.target.value })} style={inp} /></div>
+              <div><div style={lbl}>Body text</div><textarea value={c.body} onChange={e => set({ body: e.target.value })} rows={3} style={{ ...inp, resize: "vertical" }} /></div>
+              <div style={{ display: "flex", gap: 10 }}>
+                <div style={{ flex: 1 }}><div style={lbl}>Signature</div><input value={c.signature} onChange={e => set({ signature: e.target.value })} style={inp} /></div>
+                <div style={{ flex: 1 }}><div style={lbl}>Role</div><input value={c.signatureRole} onChange={e => set({ signatureRole: e.target.value })} style={inp} /></div>
+              </div>
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <div><div style={lbl}>Accent</div><input type="color" value={c.accent} onChange={e => set({ accent: e.target.value })} style={{ width: 40, height: 32, border: "none", background: "none", cursor: "pointer", padding: 0 }} /></div>
+                <div style={{ flex: 1 }}><div style={lbl}>Photo / logo</div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    {media ? <button onClick={() => setPick(true)} style={{ ...inp, cursor: "pointer", width: "auto" }}>🖼 Choose</button>
+                      : <button onClick={() => { const u = window.prompt("Image URL (https):", c.photoUrl || ""); if (u != null) set({ photoUrl: u.trim() }); }} style={{ ...inp, cursor: "pointer", width: "auto" }}>🔗 URL</button>}
+                    {c.photoUrl && <button onClick={() => set({ photoUrl: "" })} style={{ ...inp, cursor: "pointer", width: "auto", color: "#F87171" }}>✕</button>}
+                  </div>
+                </div>
+              </div>
+              <div style={{ fontSize: 11, color: B.muted, lineHeight: 1.5 }}>💬 Or ask the Senseito chat: “design a certificate with a gold accent and my logo”. Students who finish 100% can download it.</div>
+            </div>
+          )}
+        </div>
+        <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+          <button onClick={() => downloadCertificate(school, readOnly ? vName : (vName || "Student Name"))} style={{ background: T.grad, border: "none", borderRadius: 11, color: "#fff", padding: "11px 18px", cursor: "pointer", fontSize: 13.5, fontWeight: 800, fontFamily: "inherit" }}>⬇️ Download {readOnly ? "certificate" : "preview"}</button>
+          {!readOnly && <label style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 12.5, color: B.mutedMid, cursor: "pointer" }}><input type="checkbox" checked={c.on} onChange={e => set({ on: e.target.checked })} /> Award a certificate on completion</label>}
+        </div>
+      </div>
+      {pick && media && <MediaPicker token={media.token} userId={media.userId} imagesOnly onPick={m => { set({ photoUrl: m.url }); setPick(false); }} onClose={() => setPick(false)} />}
     </div>,
     document.body
   );
@@ -6562,6 +6679,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const [vibeOpen, setVibeOpen] = useState(false); // (legacy) vibe popover — vibe now lives inside Styles
   const [showroomOpen, setShowroomOpen] = useState(false); // school-level Showroom studio (like Game Lab)
   const [badgeEdit, setBadgeEdit] = useState(null); // { i } badge index being edited (-1 = new)
+  const [certOpen, setCertOpen] = useState(false); // certificate designer / earned-certificate modal
   const [iconEdit, setIconEdit] = useState(false); // school-icon edit popover
   const [iconPick, setIconPick] = useState(false); // school-icon image picker open
   const schoolIcon = (size) => school.iconImage
@@ -7126,6 +7244,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
         )}
 
         {!readOnly && badgeEdit && <BadgeRuleEditor index={badgeEdit.i} school={school} T={T} onClose={() => setBadgeEdit(null)} onUpdate={onUpdate} />}
+        {certOpen && <CertificateModal school={school} T={T} media={media} viewerName={readOnly ? (viewer ? viewerName(viewer) : "Student Name") : "Student Name"} earned={readOnly} onUpdate={readOnly ? undefined : onUpdate} onClose={() => setCertOpen(false)} />}
 
         {rec.published && !readOnly && (
           <div style={{ marginBottom: 14, background: "rgba(5,150,105,0.07)", border: "1px solid rgba(5,150,105,0.25)", borderRadius: 12, padding: "13px 16px", display: "flex", flexDirection: "column", gap: 11 }}>
@@ -7394,6 +7513,17 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
               {[["lms", "LMS", "lms"], ["cards", "Cards", "cards"], ["steps", "Steps", "steps"], ["arcade", "Arcade", "arcade"]].map(([k, l, ic]) => <button key={k} onClick={() => onUpdate({ data: { ...school, shell: k, ...(k === "arcade" ? { progression: "arcade" } : k === "cards" ? { progression: "list" } : {}) } })} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: shell === k ? T.ps : "none", border: `1px solid ${shell === k ? T.ba : B.borderMid}`, borderRadius: 8, color: shell === k ? T.hi : B.mutedMid, padding: "5px 11px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 700 }}><Ico name={ic} size={14} /> {l}</button>)}
             </div>
           )}
+          {activeTab === "lessons" && certConfig(school).on && (() => {
+            const nums = (school.semesters || []).flatMap(s => (s.lessons || []).map(l => l.number));
+            const done = nums.length > 0 && nums.every(n => progress[n] === "passed");
+            if (!done) return null;
+            return (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 14, padding: "14px 18px", marginBottom: 4 }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: B.white }}>🎓 {readOnly ? "You finished the whole school — congratulations!" : "This is what students see on 100% completion."}</div>
+                <button onClick={() => setCertOpen(true)} style={{ background: T.grad, border: "none", borderRadius: 10, color: "#fff", padding: "9px 16px", cursor: "pointer", fontSize: 13, fontWeight: 800, fontFamily: "inherit" }}>🎓 {readOnly ? "Get your certificate" : "Preview certificate"}</button>
+              </div>
+            );
+          })()}
           {activeTab === "lessons" && (stepsShell ? (activeLesson ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -7530,6 +7660,13 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
                   <div style={{ background: B.surface2, borderRadius: 10, padding: "13px 15px", gridColumn: "1 / -1" }}>
                     <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, color: B.muted, marginBottom: 4 }}>Completion reward</div>
                     <div style={{ fontSize: 13, color: B.white }}><EditableText value={g.completionReward} readOnly={readOnly} placeholder="What finishing everything earns…" onSave={v => setG({ completionReward: v })} /></div>
+                  </div>
+                  <div style={{ background: B.surface2, borderRadius: 10, padding: "13px 15px", gridColumn: "1 / -1", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                    <div>
+                      <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, color: B.muted, marginBottom: 3 }}>🎓 Certificate</div>
+                      <div style={{ fontSize: 12.5, color: B.mutedMid }}>{certConfig(school).on ? "Students who finish 100% earn a downloadable certificate." : "Certificate is turned off."}</div>
+                    </div>
+                    {!readOnly && <button onClick={() => setCertOpen(true)} style={{ background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 10, color: T.hi, padding: "8px 14px", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>Design certificate →</button>}
                   </div>
                   <div style={{ background: B.surface2, borderRadius: 10, padding: "13px 15px", gridColumn: "1 / -1" }}>
                     <div style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, color: B.muted, marginBottom: 8 }}>Badges {!readOnly && <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: 400 }}>— click a rule to change when it unlocks</span>}</div>
@@ -9197,6 +9334,7 @@ export default function Senseito() {
     if ("currency" in d) patch.currency = (d.currency && d.currency.word) ? { word: String(d.currency.word).slice(0, 16), icon: String(d.currency.icon || "").slice(0, 4) } : undefined;
     if ("coverHeight" in d) patch.coverHeight = d.coverHeight === null ? undefined : Math.max(120, Math.min(560, Math.round(Number(d.coverHeight)) || 240));
     if ("gamification" in d && d.gamification && typeof d.gamification === "object") patch.gamification = { ...(cur.gamification || { preset: "xp", xpPerLesson: 100 }), ...d.gamification };
+    if ("certificate" in d && d.certificate && typeof d.certificate === "object") patch.certificate = { ...(cur.certificate || {}), ...d.certificate };
     if (!Object.keys(patch).length) return false;
     pushVersion(rec.id, cur); // snapshot for Undo
     updateSchool(rec.id, { data: { ...cur, ...patch } });
