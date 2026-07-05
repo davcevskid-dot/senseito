@@ -7997,8 +7997,19 @@ function MessengerDock({ viewer }) {
   const [msgs, setMsgs] = useState([]);
   const [input, setInput] = useState("");
   const [unreadTotal, setUnreadTotal] = useState(0);
+  const [pos, setPos] = useState(null); // {x,y} top-left when the panel has been dragged (else default bottom-right)
   const bottom = useRef(null);
   const actRef = useRef(null); actRef.current = act;
+  // Drag the panel anywhere by its header.
+  function startDrag(ev) {
+    if (ev.target.closest("button")) return; // don't hijack header buttons
+    const panel = ev.currentTarget.closest("[data-msgpanel]"); if (!panel) return;
+    const r = panel.getBoundingClientRect(); const ox = ev.clientX - r.left, oy = ev.clientY - r.top;
+    try { ev.currentTarget.setPointerCapture(ev.pointerId); } catch { }
+    const move = (m) => { const x = Math.max(6, Math.min(window.innerWidth - r.width - 6, m.clientX - ox)); const y = Math.max(6, Math.min(window.innerHeight - 44, m.clientY - oy)); setPos({ x, y }); };
+    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+  }
   async function loadConvos() {
     try {
       const [rows, frs] = await Promise.all([
@@ -8035,6 +8046,7 @@ function MessengerDock({ viewer }) {
         .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter: `to_id=eq.${me}` }, (payload) => {
           loadConvos();
           const m = payload?.new;
+          setOpen(true); // a new message pops the messenger back up
           if (m && actRef.current && m.from_id === actRef.current.userId) loadThread(actRef.current.userId);
         })
         .subscribe();
@@ -8062,11 +8074,14 @@ function MessengerDock({ viewer }) {
       {open ? "✕" : "💬"}{!open && notifCount > 0 && <span style={{ position: "absolute", top: -3, right: -3, background: "#EF4444", color: "#fff", borderRadius: 100, fontSize: 10.5, fontWeight: 800, padding: "2px 6px" }}>{notifCount}</span>}
     </button>
     {open && (
-      <div style={{ position: "fixed", bottom: 146, right: 20, zIndex: 340, width: 356, maxWidth: "94vw", height: 480, maxHeight: "70vh", background: "var(--surface)", border: `1px solid ${T.ba}`, borderRadius: 18, display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 24px 70px rgba(0,0,0,0.55)", animation: "fadeUp 0.2s ease", fontFamily: "'Inter',sans-serif" }}>
-        <div style={{ padding: "11px 15px", borderBottom: `1px solid ${B.border}`, background: "var(--surface2)", display: "flex", alignItems: "center", gap: 8 }}>
+      <div data-msgpanel style={{ position: "fixed", ...(pos ? { left: pos.x, top: pos.y } : { bottom: 146, right: 20 }), zIndex: 340, width: 356, maxWidth: "94vw", height: 480, maxHeight: "70vh", background: "var(--surface)", border: `1px solid ${T.ba}`, borderRadius: 18, display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 24px 70px rgba(0,0,0,0.55)", animation: "fadeUp 0.2s ease", fontFamily: "'Inter',sans-serif" }}>
+        <div onPointerDown={startDrag} style={{ padding: "11px 15px", borderBottom: `1px solid ${B.border}`, background: "var(--surface2)", display: "flex", alignItems: "center", gap: 8, cursor: "grab", touchAction: "none" }}>
           {act && <button onClick={() => setAct(null)} style={{ background: "none", border: "none", color: B.mutedMid, cursor: "pointer", fontSize: 14, padding: 0 }}>←</button>}
           {act ? <button onClick={() => { openProfile(act.userId, act.name); }} style={{ background: "none", border: "none", color: B.white, cursor: "pointer", fontSize: 13.5, fontWeight: 800, padding: 0, fontFamily: "inherit" }}>{act.name}</button>
             : <span style={{ fontSize: 13.5, fontWeight: 800, color: B.white }}>Messages</span>}
+          <span style={{ flex: 1 }} />
+          <span title="Drag to move" style={{ color: B.muted, fontSize: 13, letterSpacing: 1 }}>⠿</span>
+          <button onClick={() => setOpen(false)} title="Close (reopen from the 💬 button)" style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 7, color: B.mutedMid, padding: "3px 8px", cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>✕</button>
         </div>
         {!act && (
           <div style={{ display: "flex", borderBottom: `1px solid ${B.border}` }}>
