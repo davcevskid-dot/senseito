@@ -7013,6 +7013,15 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
     window.addEventListener("sx-game-won", gw); window.addEventListener("sx-download", dl);
     return () => { window.removeEventListener("sx-game-won", gw); window.removeEventListener("sx-download", dl); };
   }); // re-bind each render so it closes over the latest toolStates/progress/xp
+  // On 100% completion (student), record a certificate so it shows on the learner's public profile.
+  const certWrote = useRef(false);
+  useEffect(() => {
+    if (!readOnly || !viewer || certWrote.current || !certConfig(school).on) return;
+    const nums = (school.semesters || []).flatMap(s => (s.lessons || []).map(l => l.number));
+    if (!(nums.length > 0 && nums.every(n => progress[n] === "passed"))) return;
+    certWrote.current = true;
+    supaFetch(`/rest/v1/certificates?on_conflict=user_id,school_id`, { method: "POST", token: viewer.token, headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: [{ user_id: viewer.user.id, school_id: rec.id, school_name: school.name, recipient: viewerName(viewer) }] }).catch(() => { });
+  }); // eslint-disable-line
   function unlockAll() {
     // Open every lesson at the SCHOOL level so it persists to the published version.
     onUpdate({ data: { ...school, semesters: (school.semesters || []).map(s => ({ ...s, lessons: (s.lessons || []).map(l => ({ ...l, open: true })) })) } });
@@ -8133,16 +8142,25 @@ function ProfileModal({ viewer, onClose }) {
     (async () => {
       const mine = uid === me;
       try {
-        const [profMap, schools, friends, enrolls] = await Promise.all([
+        const [profMap, schools, friends, enrolls, certRows] = await Promise.all([
           fetchProfiles([uid], viewer.token),
           supaFetch(`/rest/v1/schools?select=id,data,published_slug&user_id=eq.${uid}&published=eq.true&order=created_at.desc&limit=24`, { token: viewer.token }).catch(() => []),
           supaFetch(`/rest/v1/friends?or=(requester.eq.${uid},addressee.eq.${uid})&status=eq.accepted`, { token: viewer.token }).catch(() => []),
           mine ? supaFetch(`/rest/v1/enrollments?select=school_id&student_id=eq.${uid}`, { token: viewer.token }).catch(() => []) : Promise.resolve(null),
+          supaFetch(`/rest/v1/certificates?select=school_id,school_name,recipient&user_id=eq.${uid}&order=created_at.desc&limit=12`, { token: viewer.token }).catch(() => []),
         ]);
+        // Fetch the (published) schools behind each certificate so we can render/download them.
+        let certs = [];
+        if ((certRows || []).length) {
+          const ids = [...new Set(certRows.map(c => c.school_id))];
+          const certSchools = await supaFetch(`/rest/v1/schools?select=id,data&id=in.(${ids.map(x => `"${x}"`).join(",")})&published=eq.true`, { token: viewer.token }).catch(() => []);
+          const smap = {}; (certSchools || []).forEach(s => { smap[s.id] = s.data; });
+          certs = certRows.map(c => ({ ...c, school: smap[c.school_id] })).filter(c => c.school);
+        }
         if (!alive) return;
         const myFriend = (friends || []).find(f => (f.requester === me && f.addressee === uid) || (f.addressee === me && f.requester === uid));
-        setData({ profile: profMap[uid] || {}, schools: schools || [], friendCount: (friends || []).length, enrolledCount: enrolls ? enrolls.length : null, friend: myFriend || null });
-      } catch { if (alive) setData({ profile: {}, schools: [], friendCount: 0, enrolledCount: null, friend: null }); }
+        setData({ profile: profMap[uid] || {}, schools: schools || [], friendCount: (friends || []).length, enrolledCount: enrolls ? enrolls.length : null, friend: myFriend || null, certs });
+      } catch { if (alive) setData({ profile: {}, schools: [], friendCount: 0, enrolledCount: null, friend: null, certs: [] }); }
     })();
     return () => { alive = false; };
   }, [uid]); // eslint-disable-line
@@ -8178,6 +8196,20 @@ function ProfileModal({ viewer, onClose }) {
               <button onClick={() => { onClose(); openDM(uid, dName); }} style={{ flex: 1, background: T.grad, border: "none", borderRadius: 11, color: "#fff", padding: "10px", cursor: "pointer", fontSize: 13, fontWeight: 800, fontFamily: "inherit" }}>💬 Message</button>
               <button onClick={addFriend} disabled={busy || !!data.friend} style={{ flex: 1, background: data.friend ? "var(--surface2)" : T.ps, border: `1px solid ${data.friend ? B.border : T.ba}`, borderRadius: 11, color: data.friend ? B.mutedMid : T.hi, padding: "10px", cursor: data.friend ? "default" : "pointer", fontSize: 13, fontWeight: 800, fontFamily: "inherit", opacity: busy ? 0.6 : 1 }}>{friendLabel}</button>
             </div>}
+            {(data.certs || []).length > 0 && <>
+              <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.4, color: T.hi, marginBottom: 9 }}>🎓 Certificates earned</div>
+              <div style={{ display: "grid", gap: 10, marginBottom: 16 }}>
+                {data.certs.map((c, k) => (
+                  <div key={k} style={{ background: "var(--surface2)", border: `1px solid ${B.border}`, borderRadius: 12, overflow: "hidden" }}>
+                    <CertificatePreview school={c.school} name={c.recipient || dName} />
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "9px 12px" }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 700, color: B.white, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.school_name || c.school?.name}</div>
+                      <button onClick={() => downloadCertificate(c.school, c.recipient || dName)} style={{ flexShrink: 0, background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 8, color: T.hi, padding: "5px 11px", cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit" }}>⬇️ Download</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>}
             <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.4, color: T.hi, marginBottom: 9 }}>Published schools</div>
             {data.schools.length === 0 && <div style={{ fontSize: 12.5, color: B.muted, padding: "4px 0 8px" }}>No published schools yet.</div>}
             <div style={{ display: "grid", gap: 8 }}>
