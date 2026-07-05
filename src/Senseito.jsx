@@ -3787,32 +3787,35 @@ function ShowroomBlock({ data = {}, T, school, canEdit, onEditData, disabled }) 
     node.addEventListener("pointermove", move); node.addEventListener("pointerup", up); node.addEventListener("pointercancel", up);
   };
   const isLegacy = cur && cur.code && !cur.els;
-  // ▶ PRESENT MODE — fullscreen deck: ←/→ (or click edges) to navigate, Esc to leave.
-  const [present, setPresent] = useState(false);
+  // 🎨 STUDIO ROOM — a focused, fullscreen "room" (like Game Lab) where the creator builds
+  // the slider in peace with every tool. Students never present — they just swipe the slider.
+  const [room, setRoom] = useState(false);
+  const openStudio = () => { setRoom(true); setEdit(true); setSel(null); };
+  const closeStudio = () => { setRoom(false); setEdit(false); setSel(null); setEditingText(false); };
   useEffect(() => {
-    if (!present) return;
-    const onKey = (e) => {
-      if (e.key === "Escape") setPresent(false);
-      else if (e.key === "ArrowRight" || e.key === " ") setI(v => Math.min(slides.length - 1, v + 1));
-      else if (e.key === "ArrowLeft") setI(v => Math.max(0, v - 1));
-    };
+    if (!room) return;
+    const onKey = (e) => { if (e.key === "Escape") closeStudio(); };
     window.addEventListener("keydown", onKey);
     const prevOverflow = document.body.style.overflow; document.body.style.overflow = "hidden";
     return () => { window.removeEventListener("keydown", onKey); document.body.style.overflow = prevOverflow; };
-  }, [present, slides.length]);
+  }, [room]); // eslint-disable-line
   const pill = (active) => ({ background: active ? T.ps : B.surface3, border: `1px solid ${active ? T.ba : B.borderMid}`, borderRadius: 8, color: active ? T.hi : B.mutedMid, padding: "6px 11px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 700 });
   return (
-    <div style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 14, padding: 14 }}>
+    <div style={room
+      ? { position: "fixed", inset: 0, zIndex: 300, background: "rgba(4,4,12,0.9)", backdropFilter: "blur(10px)", overflowY: "auto", padding: "max(16px,3vh) 16px 40px", fontFamily: "'Inter',sans-serif" }
+      : { background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 14, padding: 14 }}
+      onClick={room ? (e) => { if (e.target === e.currentTarget) closeStudio(); } : undefined}>
+    <div style={room ? { maxWidth: 1000, margin: "0 auto", background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 20, padding: 20, boxShadow: `0 30px 90px rgba(0,0,0,0.6)` } : {}}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
-        <div style={{ fontSize: 13, fontWeight: 700, color: B.white }}>🎬 {data.title || "Showroom"}</div>
+        <div style={{ fontSize: room ? 16 : 13, fontWeight: 800, color: B.white, fontFamily: room ? "'Space Grotesk',sans-serif" : "inherit" }}>🎬 {data.title || "Showroom"}{room && <span style={{ fontSize: 12, fontWeight: 400, color: B.muted }}> · Studio</span>}</div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          {cur && !isLegacy && slides.length > 0 && <button onClick={() => { setPresent(true); setEdit(false); setSel(null); }} title="Fullscreen — ←/→ to move, Esc to leave" style={pill(false)}>▶ Present</button>}
-          {canEdit && !isLegacy && (cur?.scene || cur?.els?.length > 0) && <button onClick={beautify} disabled={!!busy} title="One tap — let the AI make this slide more beautiful (keeps your content)" style={{ background: T.grad, border: "none", borderRadius: 8, color: "#fff", padding: "6px 12px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 700, boxShadow: `0 3px 12px ${T.pg}`, opacity: busy ? 0.6 : 1 }}>{busy === "beautify" ? <><Spinner color="#fff" />Beautifying…</> : "✨ Make beautiful"}</button>}
-          {canEdit && edit && !isLegacy && <button onClick={() => setSnap(s => !s)} title={snap ? "Magnetic aligner ON — snaps to guides; click for free-form" : "Free-form — click to turn the magnetic aligner on"} style={pill(snap)}>{snap ? "🧲 Aligner on" : "🧲 Aligner off"}</button>}
-          {canEdit && cur && !isLegacy && <button onClick={() => { setEdit(!edit); setEditingText(false); setSel(null); }} style={pill(edit)}>{edit ? "✓ Done editing" : "✎ Edit slide"}</button>}
+          {canEdit && !room && !isLegacy && <button onClick={openStudio} title="Open the slide studio — build your slider with every tool" style={{ background: T.grad, border: "none", borderRadius: 9, color: "#fff", padding: "7px 14px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 800, boxShadow: `0 3px 12px ${T.pg}` }}>🎨 Edit in Studio</button>}
+          {room && canEdit && !isLegacy && (cur?.scene || cur?.els?.length > 0) && <button onClick={beautify} disabled={!!busy} title="One tap — let the AI make this slide more beautiful (keeps your content)" style={{ background: T.grad, border: "none", borderRadius: 8, color: "#fff", padding: "6px 12px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 700, boxShadow: `0 3px 12px ${T.pg}`, opacity: busy ? 0.6 : 1 }}>{busy === "beautify" ? <><Spinner color="#fff" />Beautifying…</> : "✨ Make beautiful"}</button>}
+          {room && canEdit && !isLegacy && <button onClick={() => setSnap(s => !s)} title={snap ? "Magnetic aligner ON — snaps to guides; click for free-form" : "Free-form — click to turn the magnetic aligner on"} style={pill(snap)}>{snap ? "🧲 Aligner on" : "🧲 Aligner off"}</button>}
+          {room && <button onClick={closeStudio} title="Close the studio (Esc)" style={pill(false)}>✓ Done</button>}
         </div>
       </div>
-      {slides.length === 0 && <div style={{ fontSize: 13, color: B.muted, textAlign: "center", padding: "20px 0" }}>{canEdit ? "Add your first slide below." : "No slides yet."}</div>}
+      {slides.length === 0 && <div style={{ fontSize: 13, color: B.muted, textAlign: "center", padding: "20px 0" }}>{canEdit ? (room ? "Add your first slide below." : "No slides yet — tap “🎨 Edit in Studio” to build your slider.") : "No slides yet."}</div>}
 
       {/* Legacy HTML slides render read-only (sanitized); offer a one-click rebuild into the editable format. */}
       {isLegacy ? (
@@ -3821,10 +3824,8 @@ function ShowroomBlock({ data = {}, T, school, canEdit, onEditData, disabled }) 
           {canEdit && <button onClick={() => ai("regen")} disabled={!!busy} style={{ ...pBtn(T), marginTop: 8, opacity: busy ? 0.6 : 1 }}>{busy ? <><Spinner color="#fff" />Rebuilding…</> : "↻ Rebuild as an editable slide"}</button>}
         </>
       ) : cur && (
-        <div style={present ? { position: "fixed", inset: 0, zIndex: 420, background: "#000", display: "flex", alignItems: "center", justifyContent: "center" } : { position: "relative" }}>
-          <div onPointerDown={() => { setSel(null); setEditingText(false); }} style={present
-            ? { position: "relative", width: "100vw", height: "100vh", background: cur.bg || defaultSlideBg(T), overflow: "hidden" }
-            : { position: "relative", width: "100%", height: cur.h || 360, background: cur.bg || defaultSlideBg(T), borderRadius: 12, overflow: "hidden", border: `1px solid ${B.border}` }}>
+        <div style={{ position: "relative" }}>
+          <div onPointerDown={() => { setSel(null); setEditingText(false); }} style={{ position: "relative", width: "100%", height: cur.h || 360, background: cur.bg || defaultSlideBg(T), borderRadius: 12, overflow: "hidden", border: `1px solid ${B.border}` }}>
             {/* The AI-designed scene fills the frame; non-interactive while editing so overlays stay draggable */}
             {cur.scene && <MentorWidget code={cur.scene} T={T} fill interactive={!edit} />}
             {/* Alignment guides (centre + thirds) shown while the magnetic aligner is on */}
@@ -3838,13 +3839,10 @@ function ShowroomBlock({ data = {}, T, school, canEdit, onEditData, disabled }) 
             ))}
             {!cur.scene && (cur.els || []).length === 0 && <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: hexA("#ffffff", 0.5), fontSize: 13 }}>{canEdit ? "Write a prompt below and Generate a beautiful slide — then add text & shapes on top." : ""}</div>}
           </div>
-          {present && (<>
-            <button onClick={() => setPresent(false)} title="Exit (Esc)" style={{ position: "absolute", top: 16, right: 18, zIndex: 10, background: "rgba(0,0,0,0.55)", border: "1px solid rgba(255,255,255,0.25)", borderRadius: 10, color: "#fff", padding: "8px 14px", cursor: "pointer", fontSize: 13, fontFamily: "inherit", fontWeight: 700 }}>✕ Exit</button>
-            {idx > 0 && <button onClick={() => setI(idx - 1)} style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)", zIndex: 10, background: "rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.2)", borderRadius: "50%", width: 46, height: 46, color: "#fff", fontSize: 19, cursor: "pointer" }}>‹</button>}
-            {idx < slides.length - 1 && <button onClick={() => setI(idx + 1)} style={{ position: "absolute", right: 14, top: "50%", transform: "translateY(-50%)", zIndex: 10, background: "rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.2)", borderRadius: "50%", width: 46, height: 46, color: "#fff", fontSize: 19, cursor: "pointer" }}>›</button>}
-            <div style={{ position: "absolute", bottom: 16, left: "50%", transform: "translateX(-50%)", zIndex: 10, background: "rgba(0,0,0,0.55)", borderRadius: 100, padding: "6px 16px", color: "rgba(255,255,255,0.85)", fontSize: 12.5, fontWeight: 700, fontFamily: "'Inter',sans-serif" }}>{idx + 1} / {slides.length}</div>
-          </>)}
-          {edit && !present && <div data-handle="1" onPointerDown={resizeCanvas} title="Drag to resize the slide" style={{ height: 16, marginTop: 2, display: "flex", alignItems: "center", justifyContent: "center", cursor: "ns-resize", color: B.muted, fontSize: 11, touchAction: "none" }}>⇕ drag to resize</div>}
+          {/* Slider arrows overlaid on the slide (both creator preview & student view) */}
+          {slides.length > 1 && idx > 0 && <button onClick={() => { setI(idx - 1); setSel(null); }} title="Previous slide" style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)", zIndex: 8, background: "rgba(0,0,0,0.42)", border: "1px solid rgba(255,255,255,0.2)", borderRadius: "50%", width: 38, height: 38, color: "#fff", fontSize: 17, cursor: "pointer" }}>‹</button>}
+          {slides.length > 1 && idx < slides.length - 1 && <button onClick={() => { setI(idx + 1); setSel(null); }} title="Next slide" style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", zIndex: 8, background: "rgba(0,0,0,0.42)", border: "1px solid rgba(255,255,255,0.2)", borderRadius: "50%", width: 38, height: 38, color: "#fff", fontSize: 17, cursor: "pointer" }}>›</button>}
+          {edit && <div data-handle="1" onPointerDown={resizeCanvas} title="Drag to resize the slide" style={{ height: 16, marginTop: 2, display: "flex", alignItems: "center", justifyContent: "center", cursor: "ns-resize", color: B.muted, fontSize: 11, touchAction: "none" }}>⇕ drag to resize</div>}
         </div>
       )}
 
@@ -3906,8 +3904,8 @@ function ShowroomBlock({ data = {}, T, school, canEdit, onEditData, disabled }) 
         </div>
       )}
 
-      {/* AI + slide management */}
-      {canEdit && (
+      {/* AI + slide management — studio only */}
+      {canEdit && room && (
         <div style={{ marginTop: 12, borderTop: `1px solid ${B.border}`, paddingTop: 12 }}>
           <textarea value={draft} onChange={e => setDraft(e.target.value)} placeholder={cur?.els?.length ? 'Tell the AI what to change… e.g. "make this more beautiful" or "add a subtitle under the title"' : 'Describe the slide… e.g. "Title slide: The Water Cycle, big bold title + 3 labelled stages"'} rows={2} style={{ width: "100%", background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, fontFamily: "inherit", fontSize: 12.5, padding: "8px 11px", resize: "vertical", boxSizing: "border-box" }} />
           <div style={{ display: "flex", gap: 7, marginTop: 8, flexWrap: "wrap" }}>
@@ -3917,9 +3915,10 @@ function ShowroomBlock({ data = {}, T, school, canEdit, onEditData, disabled }) 
             {slides.length > 0 && <button onClick={addSlide} style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, padding: "9px 13px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit" }}>＋ Add slide</button>}
             {slides.length > 0 && <button onClick={delSlide} style={{ background: "none", border: "1px solid rgba(248,113,113,0.3)", borderRadius: 9, color: "#F87171", padding: "9px 13px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit" }}>Delete slide</button>}
           </div>
-          <div style={{ fontSize: 11, color: B.muted, marginTop: 7 }}>Regenerate redesigns the whole slide · Iterate changes only what you ask · students just watch.</div>
+          <div style={{ fontSize: 11, color: B.muted, marginTop: 7 }}>Regenerate redesigns the whole slide · Iterate changes only what you ask · students swipe through as a slider.</div>
         </div>
       )}
+    </div>
     </div>
   );
 }
