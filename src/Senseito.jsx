@@ -6106,9 +6106,9 @@ function GuideButton({ T, onClick, pulse }) {
 // Design → Suggestions → Publish.
 // ─────────────────────────────────────────────────────────────
 const WIZ_CARDS = ["basics", "mentor", "activities", "theory", "pass", "branching"];
-const WIZ_PHASES = ["lessons", "schoolmentor", "tools", "library", "events", "games", "design", "publish"];
-const WIZ_PHASE_LABEL = { lessons: "Check your lessons", schoolmentor: "Say hi to your mentor", tools: "Tools", library: "Library", events: "Events", games: "Games", design: "Design", publish: "Publish" };
-function SchoolWizard({ school, T, media, published, onUpdate, saveLesson, authorBlock, addFeatureSection, addSection, hasKind, onIterate, onPublish, openGameLab, onClose }) {
+const WIZ_PHASES = ["lessons", "schoolmentor", "tools", "library", "events", "games", "design", "review", "publish"];
+const WIZ_PHASE_LABEL = { lessons: "Check your lessons", schoolmentor: "Say hi to your mentor", tools: "Tools", library: "Library", events: "Events", games: "Games", design: "Design", review: "Review", publish: "Publish" };
+function SchoolWizard({ school, T, media, published, rec, onUpdate, saveLesson, authorBlock, addFeatureSection, addSection, hasKind, buildTool, buildingTool, reloadIdeas, removeSection, onIterate, onPublish, openGameLab, onClose }) {
   const lessons = (school.semesters || []).flatMap(s => s.lessons || []);
   const [phase, setPhase] = useState(lessons.length ? "lessons" : "schoolmentor");
   const [li, setLi] = useState(null); // null = the lesson PICKER; a number = setting up that lesson
@@ -6270,7 +6270,39 @@ function SchoolWizard({ school, T, media, published, onUpdate, saveLesson, autho
     </>);
   } else if (phase === "tools") {
     heading = "🛠️ Tools"; sup = "Build-your-own interactive tools";
-    body = hasKind("tools") ? <div style={{ fontSize: 13, color: B.mutedMid }}>You already have a Tools section. ✓</div> : <>{<div style={{ fontSize: 12.5, color: B.mutedMid, marginBottom: 4 }}>Add a Tools section where you (or AI) can build interactive tools?</div>}{yn("＋ Add Tools section", () => addSection("tools"))}</>;
+    const hasT = hasKind("tools");
+    const ideas = (school.toolIdeas || []);
+    const builtNames = new Set((rec?.tools || []).map(t => t.title));
+    body = (<>
+      {!hasT && <>
+        <div style={{ fontSize: 12.5, color: B.mutedMid, marginBottom: 4 }}>Add a Tools section where you (or AI) can build interactive tools — calculators, checklists, planners, quizzes and more, tuned to your subject.</div>
+        {yn("＋ Add Tools section", () => addSection("tools"))}
+      </>}
+      {hasT && <div style={{ fontSize: 12.5, color: B.mutedMid }}>Your Tools section is ready. ✓ Tap a suggestion below to build it right now.</div>}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 4 }}>
+        <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.4, color: T.hi }}>✨ Suggested tools for this school</div>
+        {reloadIdeas && <button disabled={!!buildingTool} onClick={reloadIdeas} style={{ background: "none", border: `1px solid ${T.ba}`, borderRadius: 7, color: T.hi, padding: "3px 9px", cursor: "pointer", fontSize: 10.5, fontFamily: "inherit", opacity: buildingTool ? 0.5 : 1 }}>{buildingTool === "reload" ? "…" : "↻ New"}</button>}
+      </div>
+      {ideas.length === 0 && <div style={{ fontSize: 12, color: B.muted }}>No suggestions yet — tap "↻ New" for ideas, or build your own from the Tools section.</div>}
+      <div style={{ display: "grid", gap: 8, maxHeight: 260, overflowY: "auto" }}>
+        {ideas.map((idea, i) => {
+          const built = builtNames.has(idea.name);
+          const isBuilding = buildingTool === `idea-${i}`;
+          return (
+            <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 11, padding: "10px 13px" }}>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: B.white }}>{typeof toolIcon === "function" ? toolIcon(idea.type) : "🛠️"} {idea.name}</div>
+                <div style={{ fontSize: 11.5, color: B.muted, marginTop: 2, lineHeight: 1.45 }}>{idea.why}</div>
+              </div>
+              <button disabled={built || !!buildingTool || !buildTool} onClick={() => { if (!hasT) addSection("tools"); buildTool(`Build "${idea.name}" (type: ${idea.type}). Purpose: ${idea.why}`, `idea-${i}`); }}
+                style={{ flexShrink: 0, background: built ? "rgba(74,222,128,0.1)" : T.p, border: built ? "1px solid rgba(74,222,128,0.3)" : "none", borderRadius: 8, padding: "7px 13px", color: built ? "#4ADE80" : "#fff", fontFamily: "inherit", fontSize: 12, fontWeight: 700, cursor: built ? "default" : "pointer", opacity: buildingTool && !isBuilding ? 0.5 : 1 }}>
+                {built ? "✓ Built" : isBuilding ? "Building…" : "⚒ Build"}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </>);
   } else if (phase === "library") {
     heading = "📚 Library"; sup = "Files & links for your students";
     body = hasKind("library") ? <div style={{ fontSize: 13, color: B.mutedMid }}>Library added. ✓</div> : yn("＋ Add a Library", () => addFeatureSection("library", "library", "Library", "📚"));
@@ -6290,6 +6322,37 @@ function SchoolWizard({ school, T, media, published, onUpdate, saveLesson, autho
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>{school.suggestions.slice(0, 4).map((s, i) => <button key={i} onClick={() => { onIterate(s); }} style={{ textAlign: "left", background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 9, color: T.hi, padding: "8px 11px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", lineHeight: 1.4 }}>✨ {s}</button>)}</div>
       </>}
       <div style={{ fontSize: 11.5, color: B.muted, marginTop: 4 }}>💬 Want something custom? Close the wizard and just tell the Senseito chat.</div>
+    </>);
+  } else if (phase === "review") {
+    heading = "🧭 Review your sections"; sup = "Everything in your school — tweak, or clear what you don't need";
+    const secs = getSections(school);
+    const tools = rec?.tools || [];
+    const lessonCount = (school.semesters || []).reduce((n, s) => n + (s.lessons?.length || 0), 0);
+    const describe = (s) => {
+      if (s.kind === "lessons") return `${lessonCount} lesson${lessonCount === 1 ? "" : "s"} across ${(school.semesters || []).length} part${(school.semesters || []).length === 1 ? "" : "s"}`;
+      if (s.kind === "tools") return tools.length ? tools.map(t => t.title).join(" · ") : "no tools built yet";
+      if (s.kind === "mentor") return `${school.mentor?.name || "Mentor"} · ${school.voicePreset || "sage"} voice`;
+      if (s.kind === "dashboard") return (s.blocks || []).length ? `${s.blocks.length} brick${s.blocks.length === 1 ? "" : "s"}: ${(s.blocks || []).map(b => b.type).join(", ")}` : "empty — add bricks from the section";
+      if (s.kind === "library") return "files & links for students";
+      if (s.kind === "events") return "live sessions & RSVP";
+      if (s.kind === "community") return "student discussion feed";
+      return s.kind;
+    };
+    body = (<>
+      <div style={{ fontSize: 12.5, color: B.mutedMid, marginBottom: 2 }}>These are the sections students will see. Remove any that don't fit, or open the builder to tweak them.</div>
+      <div style={{ display: "grid", gap: 8, maxHeight: 320, overflowY: "auto" }}>
+        {secs.map((s) => (
+          <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 11, background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 12, padding: "11px 13px" }}>
+            <div style={{ fontSize: 20, flexShrink: 0 }}>{s.icon || "▪️"}</div>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 700, color: B.white }}>{s.title}</div>
+              <div style={{ fontSize: 11.5, color: B.muted, marginTop: 2, lineHeight: 1.4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{describe(s)}</div>
+            </div>
+            {removeSection && secs.length > 1 && <button onClick={() => { if (window.confirm(`Remove the "${s.title}" section? Students won't see it. You can always add it back later.`)) removeSection(s.id); }} title="Remove this section" style={{ flexShrink: 0, background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.3)", borderRadius: 8, color: "#F87171", padding: "6px 11px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit", fontWeight: 700 }}>🗑 Remove</button>}
+          </div>
+        ))}
+      </div>
+      <div style={{ fontSize: 11.5, color: B.muted, marginTop: 2 }}>💬 To rename, reorder or add bricks to a section, close the wizard and use the section tabs — or tell the Senseito chat.</div>
     </>);
   } else if (phase === "publish") {
     heading = "🚀 Publish"; sup = "Share your school with the world";
@@ -6776,9 +6839,10 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
       <Toast toast={toast} />
       {!readOnly && reveal && <SchoolReveal school={school} T={T} onClose={() => { setReveal(false); onRevealSeen?.(); }} onExplore={() => { setReveal(false); onRevealSeen?.(); setWizardOpen(true); }} onTour={() => { setReveal(false); onRevealSeen?.(); openGuide(); }} />}
       {!readOnly && landingOpen && <LandingStudio school={school} T={T} media={media} publicUrl={rec.published && rec.published_slug ? `${publicBase}/s/${rec.published_slug}` : null} onUpdate={onUpdate} onClose={() => setLandingOpen(false)} />}
-      {!readOnly && wizardOpen && <SchoolWizard school={school} T={T} media={media} published={!!rec.published}
+      {!readOnly && wizardOpen && <SchoolWizard school={school} T={T} media={media} published={!!rec.published} rec={rec}
         onUpdate={onUpdate} saveLesson={saveLesson} authorBlock={(type, ctx) => authorBlock(ctx || {}, type, "")}
         addFeatureSection={addFeatureSection} addSection={addSection} hasKind={hasKind}
+        buildTool={buildTool} buildingTool={buildingTool} reloadIdeas={reloadIdeas} removeSection={removeSection}
         onIterate={applyIteration} onPublish={() => onPublish(rec)} openGameLab={() => setGamelabOpen(true)}
         onClose={() => setWizardOpen(false)} />}
       {!readOnly && guideOpen && <CreatorGuide school={school} T={T} onClose={() => onGuideClose?.()} onSetup={() => setWizardOpen(true)} onPublish={() => onPublish(rec)} />}
