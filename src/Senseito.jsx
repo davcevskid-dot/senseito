@@ -434,6 +434,29 @@ function SenseitoMark({ size = 32, breathe = true, glow = true, style }) {
   );
 }
 
+// Clean line-icons for the builder toolbar — always render (unlike emoji, which are
+// missing/broken on some systems) and look modern & consistent. currentColor + stroke.
+const ICO_PATHS = {
+  wand: "M15 4V2M15 16v-2M8 9h2M20 9h2M17.8 11.8L19 13M15 9h0M17.8 6.2L19 5M3 21l9-9M12.2 6.2L11 5",
+  palette: "M12 2C6.5 2 2 6 2 11c0 4 3 7 7 7 1.5 0 2-1 2-2 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.3 0-1 .9-2 2-2h2c2.2 0 4-1.8 4-4 0-3.6-3.6-6.5-8-6.5zM6.5 12a1 1 0 100-2 1 1 0 000 2zm3-4a1 1 0 100-2 1 1 0 000 2zm5 0a1 1 0 100-2 1 1 0 000 2z",
+  sparkle: "M12 3l1.9 4.6L18.5 9.5 13.9 11.4 12 16l-1.9-4.6L5.5 9.5l4.6-1.9zM19 14l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z",
+  image: "M3 5h18v14H3zM3 15l5-5 4 4 3-3 6 6M16 9a1.4 1.4 0 100-2.8A1.4 1.4 0 0016 9z",
+  rocket: "M5 15c-1.5 1.5-2 5-2 5s3.5-.5 5-2c.8-.8.8-2 0-2.8s-2-.8-3 .8zM9 15l-3-3c1-4 4-8 9-9 0 5-4 8-6 12zM14 8a1.5 1.5 0 100-3 1.5 1.5 0 000 3z",
+  folder: "M3 6a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2z",
+  game: "M7 11h4M9 9v4M15 10h.01M18 12h.01M7 7h10a4 4 0 014 4v2a4 4 0 01-7 3l-1-1h-2l-1 1a4 4 0 01-7-3v-2a4 4 0 014-4z",
+  publish: "M12 3v12M12 3l-4 4M12 3l4 4M4 15v4a2 2 0 002 2h12a2 2 0 002-2v-4",
+  check: "M20 6L9 17l-5-5",
+  undo: "M9 14l-4-4 4-4M5 10h9a5 5 0 010 10h-3",
+};
+function Ico({ name, size = 15, fill = false, style }) {
+  const d = ICO_PATHS[name]; if (!d) return null;
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={fill ? "currentColor" : "none"} stroke={fill ? "none" : "currentColor"} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" style={{ display: "block", flexShrink: 0, ...style }} aria-hidden="true">
+      <path d={d} />
+    </svg>
+  );
+}
+
 const TM = {
   Dialogue: { c: "#A78BFA", bg: "rgba(167,139,250,0.1)", icon: "💬" },
   RolePlay: { c: "#22D3EE", bg: "rgba(34,211,238,0.1)", icon: "🎭" },
@@ -6344,6 +6367,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const [bgPick, setBgPick] = useState(false); // background-photo picker open
   const [stylesOpen, setStylesOpen] = useState(false); // quick-styles popover (theme/font/density)
   const [bgOpen, setBgOpen] = useState(false); // background popover (color / photo / tint)
+  const [vibeOpen, setVibeOpen] = useState(false); // vibe/experience popover (styled, no native select)
   const [iconEdit, setIconEdit] = useState(false); // school-icon edit popover
   const [iconPick, setIconPick] = useState(false); // school-icon image picker open
   const schoolIcon = (size) => school.iconImage
@@ -6800,25 +6824,40 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
           const hover = { onMouseEnter: e => { e.currentTarget.style.background = "rgba(255,255,255,0.06)"; e.currentTarget.style.color = "var(--text)"; }, onMouseLeave: e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--mutedMid)"; } };
           const sep = <div style={{ width: 1, height: 18, background: B.borderMid, margin: "0 5px", flexShrink: 0 }} />;
           const applyVibe = (k) => { const t = TEMPLATES[k]; if (!t) return; onUpdate({ data: { ...school, template: k, theme: t.theme, skin: t.skin, font: t.font, density: t.density, ...(t.progression ? { progression: t.progression } : {}) } }); };
+          const activeVibe = school.template && TEMPLATES[school.template];
           return (
-          <div style={{ padding: "14px 0 12px" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 2, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: 6, flexWrap: "wrap", boxShadow: "0 6px 24px rgba(0,0,0,0.18)" }}>
-              <button onClick={() => setWizardOpen(true)} title="Guided setup — review every lesson, your mentor, tools, design & publish" style={{ display: "inline-flex", alignItems: "center", gap: 6, height: 30, background: T.grad, border: "none", borderRadius: 9, color: "#fff", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, padding: "0 14px", cursor: "pointer", boxShadow: `0 4px 14px ${T.pg}`, whiteSpace: "nowrap" }}>🪄 Set up</button>
+          <div style={{ padding: "14px 0 12px", position: "sticky", top: 8, zIndex: 40 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 2, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: 6, flexWrap: "wrap", boxShadow: "0 6px 24px rgba(0,0,0,0.28)", backdropFilter: "blur(6px)" }}>
+              <button onClick={() => setWizardOpen(true)} title="Guided setup — review every lesson, your mentor, tools, design & publish" style={{ display: "inline-flex", alignItems: "center", gap: 6, height: 30, background: T.grad, border: "none", borderRadius: 9, color: "#fff", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, padding: "0 14px", cursor: "pointer", boxShadow: `0 4px 14px ${T.pg}`, whiteSpace: "nowrap" }}><Ico name="wand" /> Set up</button>
               {sep}
-              <button onClick={() => { setStylesOpen(o => !o); setBgOpen(false); }} title="Theme, font & spacing" style={ghost(stylesOpen)} {...(stylesOpen ? {} : hover)}>🎨 Styles</button>
-              <label title="Experience vibe" style={{ ...ghost(false), gap: 4 }} {...hover}>🪩 Vibe
-                <select value={school.template || ""} onChange={e => e.target.value && applyVibe(e.target.value)} style={{ background: "none", border: "none", color: "inherit", fontFamily: "inherit", fontSize: 12.5, fontWeight: 600, cursor: "pointer", maxWidth: 118 }}><option value="">Auto</option>{Object.entries(TEMPLATES).map(([k, t]) => <option key={k} value={k}>{t.emoji} {t.label}</option>)}</select>
-              </label>
-              <button onClick={() => { setBgOpen(o => !o); setStylesOpen(false); }} title="Background — colour, photo, tint" style={ghost(bgOpen)} {...(bgOpen ? {} : hover)}>🖼️ Background</button>
+              <button onClick={() => { setStylesOpen(o => !o); setBgOpen(false); setVibeOpen(false); }} title="Theme, font & spacing" style={ghost(stylesOpen)} {...(stylesOpen ? {} : hover)}><Ico name="palette" /> Styles</button>
+              <button onClick={() => { setVibeOpen(o => !o); setStylesOpen(false); setBgOpen(false); }} title="Experience vibe" style={ghost(vibeOpen)} {...(vibeOpen ? {} : hover)}><Ico name="sparkle" fill /> {activeVibe ? activeVibe.label : "Vibe"}</button>
+              <button onClick={() => { setBgOpen(o => !o); setStylesOpen(false); setVibeOpen(false); }} title="Background — colour, photo, tint" style={ghost(bgOpen)} {...(bgOpen ? {} : hover)}><Ico name="image" /> Background</button>
               {sep}
-              <button onClick={() => setLandingOpen(true)} title="Design a high-converting landing page" style={ghost(false)} {...hover}>🚀 Landing{school.landing?.sections?.length && school.landing?.on !== false ? <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#4ADE80", display: "inline-block" }} /> : null}</button>
-              <button onClick={() => onOpenMedia?.()} title="Your media library" style={ghost(false)} {...hover}>📁 Media</button>
-              <button onClick={() => setGamelabOpen(true)} title="Build games, then drop them in with a Game brick" style={ghost(false)} {...hover}>🎮 Game Lab{(school.games || []).length ? ` · ${school.games.length}` : ""}</button>
+              <button onClick={() => setLandingOpen(true)} title="Design a high-converting landing page" style={ghost(false)} {...hover}><Ico name="rocket" /> Landing{school.landing?.sections?.length && school.landing?.on !== false ? <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#4ADE80", display: "inline-block" }} /> : null}</button>
+              <button onClick={() => onOpenMedia?.()} title="Your media library" style={ghost(false)} {...hover}><Ico name="folder" /> Media</button>
+              <button onClick={() => setGamelabOpen(true)} title="Build games, then drop them in with a Game brick" style={ghost(false)} {...hover}><Ico name="game" /> Game Lab{(school.games || []).length ? ` · ${school.games.length}` : ""}</button>
               <div style={{ flex: 1, minWidth: 6 }} />
               <button data-guide="publish" onClick={() => onPublish(rec)} disabled={publishing} style={{ display: "inline-flex", alignItems: "center", gap: 6, height: 30, background: rec.published ? "rgba(74,222,128,0.12)" : "linear-gradient(135deg,#059669,#047857)", border: rec.published ? "1px solid rgba(74,222,128,0.35)" : "none", borderRadius: 9, color: rec.published ? "#4ADE80" : "#fff", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, padding: "0 14px", cursor: "pointer", whiteSpace: "nowrap" }}>
-                {publishing ? "Publishing…" : rec.published ? "✓ Published" : "Publish"}
+                {publishing ? <><Ico name="check" /> Published</> : rec.published ? <><Ico name="check" /> Published</> : <><Ico name="publish" /> Publish</>}
               </button>
             </div>
+            {vibeOpen && (
+              <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 12, padding: "12px 14px", marginTop: 8, animation: "fadeUp 0.2s ease" }}>
+                <div style={{ fontSize: 11, color: B.muted, fontWeight: 700, marginBottom: 9 }}>EXPERIENCE VIBE — sets a matching theme, font & feel in one tap</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(150px,1fr))", gap: 8 }}>
+                  <button onClick={() => { onUpdate({ data: { ...school, template: undefined } }); }} style={{ textAlign: "left", background: !school.template ? T.ps : B.surface3, border: `1px solid ${!school.template ? T.ba : B.borderMid}`, borderRadius: 10, padding: "9px 11px", cursor: "pointer", fontFamily: "inherit", color: !school.template ? T.hi : B.mutedMid }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 700 }}>◐ Auto</div><div style={{ fontSize: 10.5, color: B.muted, marginTop: 2 }}>Keep current look</div>
+                  </button>
+                  {Object.entries(TEMPLATES).map(([k, t]) => { const on = school.template === k; return (
+                    <button key={k} onClick={() => { applyVibe(k); }} style={{ textAlign: "left", background: on ? T.ps : B.surface3, border: `1px solid ${on ? T.ba : B.borderMid}`, borderRadius: 10, padding: "9px 11px", cursor: "pointer", fontFamily: "inherit", color: on ? T.hi : B.white, transition: "border-color 0.15s" }}
+                      onMouseEnter={e => { if (!on) e.currentTarget.style.borderColor = T.ba; }} onMouseLeave={e => { if (!on) e.currentTarget.style.borderColor = B.borderMid; }}>
+                      <div style={{ fontSize: 12.5, fontWeight: 700 }}>{t.emoji} {t.label}</div>{t.desc && <div style={{ fontSize: 10.5, color: B.muted, marginTop: 2, lineHeight: 1.4 }}>{t.desc}</div>}
+                    </button>
+                  ); })}
+                </div>
+              </div>
+            )}
             {stylesOpen && (
               <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "center", background: B.surface, border: `1px solid ${B.border}`, borderRadius: 12, padding: "12px 15px", marginTop: 8, animation: "fadeUp 0.2s ease" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 7 }}><span style={{ fontSize: 11, color: B.muted, fontWeight: 700 }}>Theme</span>{Object.keys(THEMES).map(k => <button key={k} onClick={() => onUpdate({ data: { ...school, theme: k, palette: undefined } })} title={THEMES[k].label} style={{ width: 22, height: 22, borderRadius: "50%", border: school.theme === k ? `2px solid ${B.white}` : `1px solid ${B.borderMid}`, background: THEMES[k].p, cursor: "pointer" }} />)}</div>
