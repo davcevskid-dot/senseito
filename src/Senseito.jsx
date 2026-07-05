@@ -1837,7 +1837,7 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, onChooseFork, c
   const [manualDone, setManualDone] = useState(false);
   const [missionShown, setMissionShown] = useState(false);
   const bottomRef = useRef(null);
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs]);
+  useEffect(() => { const el = bottomRef.current?.parentElement; if (el) el.scrollTop = el.scrollHeight; }, [msgs]);
   useEffect(() => { if (onChat) onChat(msgs); }, [msgs]); // persist the lesson conversation
   function replaceLessonBlock(i, nb) { setBlocks(bs => bs.map((b, j) => j === i ? nb : b)); onUpdateBlock?.(i, nb); }
 
@@ -2098,7 +2098,7 @@ function MentorOffice({ school, T, chat, onChat, bus, onIngest, progress, onUpda
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const bottomRef = useRef(null);
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs, loading]);
+  useEffect(() => { const el = bottomRef.current?.parentElement; if (el) el.scrollTop = el.scrollHeight; }, [msgs, loading]);
 
   async function send() {
     if (!input.trim() || loading) return;
@@ -2163,7 +2163,7 @@ function MentorOffice({ school, T, chat, onChat, bus, onIngest, progress, onUpda
           <div style={{ fontSize: 13, fontWeight: 700, color: B.white }}>🕰️ Office Hours — ask anything</div>
           {chat?.length > 0 && <button onClick={() => { if (window.confirm("Start over? Your office-hours conversation will be cleared.")) onChat([]); }} style={{ background: "none", border: `1px solid ${B.border}`, borderRadius: 7, color: B.muted, padding: "4px 10px", cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>↻ Start over</button>}
         </div>
-        <div style={{ maxHeight: 420, minHeight: 220, overflowY: "auto", padding: "18px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{ maxHeight: "min(58vh, 600px)", minHeight: 360, overflowY: "auto", padding: "18px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
           {msgs.map((m, i) => {
             const isU = m.role === "user";
             return (
@@ -2399,11 +2399,12 @@ function ChatBubble({ m, T }) {
 }
 
 // Reusable evaluated chat for roleplay / debate.
-function EvalChat({ system, opener, criteria, minUser, T, disabled, placeholder, onPassed, height = 240 }) {
+function EvalChat({ system, opener, criteria, minUser, T, disabled, placeholder, onPassed, height = 340 }) {
   const [msgs, setMsgs] = useState(opener ? [{ role: "assistant", content: opener }] : []);
   const [input, setInput] = useState(""); const [loading, setLoading] = useState(false); const [done, setDone] = useState(false);
   const bottom = useRef(null);
-  useEffect(() => { bottom.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs, loading]);
+  // Scroll only the message container (never the page) — same jank fix as the sidebar chat.
+  useEffect(() => { const el = bottom.current?.parentElement; if (el) el.scrollTop = el.scrollHeight; }, [msgs, loading]);
   async function send() {
     if (!input.trim() || loading || done || disabled) return;
     const um = input.trim(); setInput("");
@@ -4830,7 +4831,7 @@ function MentorFab({ school, bus, T, progress }) {
   const [msgs, setMsgs] = useState([{ role: "assistant", content: greeting }]);
   const [input, setInput] = useState(""); const [loading, setLoading] = useState(false);
   const bottom = useRef(null);
-  useEffect(() => { bottom.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs, loading, open]);
+  useEffect(() => { const el = bottom.current?.parentElement; if (el) el.scrollTop = el.scrollHeight; }, [msgs, loading, open]);
   async function send() {
     const t = input.trim(); if (!t || loading) return; setInput("");
     const next = [...msgs, { role: "user", content: t }]; setMsgs(next); setLoading(true);
@@ -5958,7 +5959,7 @@ function CreatorGuide({ school, T, onClose, onSetup, onPublish }) {
   // Measure the actual tooltip height so placement never runs off-screen.
   useLayoutEffect(() => { if (ttRef.current) setTtH(ttRef.current.offsetHeight); }, [i, chatOpen, msgs.length, loading, rect, vw]);
 
-  useEffect(() => { bottom.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs, loading, chatOpen]);
+  useEffect(() => { const el = bottom.current?.parentElement; if (el) el.scrollTop = el.scrollHeight; }, [msgs, loading, chatOpen]);
 
   async function ask() {
     const t = input.trim(); if (!t || loading) return; setInput("");
@@ -8002,7 +8003,7 @@ function MessengerDock({ viewer }) {
     const h = (e) => { setOpen(true); const d = e.detail || {}; setAct({ userId: d.userId, name: d.name || "Member" }); loadThread(d.userId); };
     window.addEventListener("sx-dm", h); return () => window.removeEventListener("sx-dm", h);
   }, []); // eslint-disable-line
-  useEffect(() => { bottom.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs.length, open, act]);
+  useEffect(() => { const el = bottom.current?.parentElement; if (el) el.scrollTop = el.scrollHeight; }, [msgs.length, open, act]);
   async function send() {
     const t = input.trim(); if (!t || !act) return; setInput("");
     setMsgs(m => [...m, { id: "tmp" + Date.now(), from_id: me, to_id: act.userId, body: t, created_at: new Date().toISOString() }]);
