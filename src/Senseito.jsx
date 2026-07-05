@@ -983,7 +983,7 @@ DECIDE which of three modes this message is:
 - "progression": "list" | "map" | "arcade" — how the lessons section is laid out. "map" = a Duolingo-style winding path of lesson nodes ("make the lessons a map/journey/path"). "arcade" = a gamified single "run" screen with an XP/streak HUD that auto-advances to the next lesson as you clear each ("make it a game", "arcade mode", "play it like a game", "one continuous game"). (Add-anywhere — works on any theme.)
 - "effect": an ambient animated background effect for the whole school — one of ${EFFECT_KEYS.join(", ")}. Use when the user asks for atmosphere/vibes ("add an aurora effect", "make it feel cosmic/starry" → starfield, "add a glow", "floating embers/sparks" → embers, "subtle grid", "flowing gradient" → mesh). Set "effect": "none" to remove it.
 - "navStyle": "pills" | "topbar" | "chunky" | "minimal" | "soft" | "sidebar" — override the section navigation style independently of the theme. "sidebar" = a left vertical nav with content beside it (two-column).
-- "lessonGrid": { "cols": 1|2|3 } — how lesson cards are laid out in the lessons section. Use for "lessons as square cards", "3 in a row", "grid of lessons" (cols 3), "two columns" (2). Set { "cols": 1 } to restore the full-width rows. (Creators can also widen ONE card to span 2 columns with the ⤢ button on the card — mention that if they ask to resize a single lesson.)
+- "lessonGrid": { "cols": 1|2|3 } — how lesson cards are laid out in the lessons section. Use for "lessons as square cards", "3 in a row", "grid of lessons" (cols 3), "two columns" (2). Set { "cols": 1 } to restore the full-width rows. (Creators can also widen ONE card with the ⤢ button on the card, cycling 1 col → 2 cols → FULL WIDTH across every column → back — mention that if they ask to resize a single lesson or make one span the whole row.)
 - "tabScale": number 0.8–1.4 — size of the section tabs/nav. Use for "make the tabs bigger/smaller" (1 = default).
 - "navGrad": a CSS gradient string for the navigation/sidebar background, e.g. "linear-gradient(180deg,#ef4444,#3b82f6)". Use for "make the sidebar a red→blue gradient". "" to clear.
 - "currency": { "word":"<what the points/XP are called, e.g. Energy, Coins, Sparks, Insight>", "icon":"<single emoji>" }. Use for "rename XP to …", "call points coins", "make XP energy". Set "currency": null to reset to "XP".
@@ -4946,7 +4946,7 @@ function LessonCardSq({ lesson, idx, T, progress, onEnter, onEdit, onToggleSpan,
   const st = progress[lesson.number] || "locked";
   const locked = !lesson.open && st === "locked" && (idx > 0 || readOnly);
   return (
-    <div style={{ gridColumn: lesson.span === 2 ? "span 2" : undefined, background: B.surface, border: `1px solid ${st === "passed" ? "rgba(74,222,128,0.3)" : st === "active" ? T.ba : B.border}`, borderRadius: 16, overflow: "hidden", display: "flex", flexDirection: "column", opacity: locked && readOnly ? 0.55 : 1, boxShadow: st === "active" ? `0 0 20px ${T.pg}` : "none", animation: "fadeUp 0.4s ease backwards", animationDelay: `${Math.min(idx, 8) * 40}ms` }}>
+    <div style={{ gridColumn: lesson.span === "full" ? "1 / -1" : lesson.span === 2 ? "span 2" : undefined, background: B.surface, border: `1px solid ${st === "passed" ? "rgba(74,222,128,0.3)" : st === "active" ? T.ba : B.border}`, borderRadius: 16, overflow: "hidden", display: "flex", flexDirection: "column", opacity: locked && readOnly ? 0.55 : 1, boxShadow: st === "active" ? `0 0 20px ${T.pg}` : "none", animation: "fadeUp 0.4s ease backwards", animationDelay: `${Math.min(idx, 8) * 40}ms` }}>
       {lesson.cover
         ? <img src={lesson.cover} alt="" style={{ width: "100%", height: 88, objectFit: "cover", objectPosition: lesson.coverPos || "center" }} />
         : <div style={{ height: 62, background: T.gr, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, borderBottom: `1px solid ${B.border}` }}>{tm.icon}</div>}
@@ -4954,7 +4954,7 @@ function LessonCardSq({ lesson, idx, T, progress, onEnter, onEdit, onToggleSpan,
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
           <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", color: st === "passed" ? "#4ADE80" : T.p }}>{st === "passed" ? "✓ Done" : `Lesson ${lesson.number || idx + 1}`}</span>
           {!readOnly && <span style={{ display: "flex", gap: 4 }}>
-            <button onClick={() => onToggleSpan?.(lesson)} title={lesson.span === 2 ? "Shrink to 1 column" : "Make this card wider (2 columns)"} style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 11, padding: 2 }}>{lesson.span === 2 ? "⇥" : "⤢"}</button>
+            <button onClick={() => onToggleSpan?.(lesson)} title={lesson.span === "full" ? "Full width → back to 1 column" : lesson.span === 2 ? "Widen to full width (all columns)" : "Make this card wider (2 columns)"} style={{ background: "none", border: "none", color: lesson.span ? T.hi : B.muted, cursor: "pointer", fontSize: 11, padding: 2 }}>{lesson.span === "full" ? "▭" : lesson.span === 2 ? "⇥" : "⤢"}</button>
             <button onClick={() => onEdit(lesson)} title="Edit lesson" style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 11, padding: 2 }}>✎</button>
           </span>}
         </div>
@@ -7199,9 +7199,14 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
             })()}
             {!readOnly && addSecOpen && (() => {
               const mi = { textAlign: "left", background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 9, color: B.white, padding: "9px 12px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" };
-              return (
-                <div style={{ position: "absolute", right: 0, top: "calc(100% + 6px)", zIndex: 95, background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 12, padding: 11, width: 250, maxHeight: "min(60vh, 420px)", overflowY: "auto", boxShadow: "0 14px 44px rgba(0,0,0,0.45)" }}>
-                  <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: B.muted, marginBottom: 8 }}>Add a section</div>
+              // Portal + centered popup so the bottom (Remove section) is never clipped off shallow screens.
+              return createPortal(
+                <div onClick={() => setAddSecOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 400, background: "rgba(2,2,8,0.6)", backdropFilter: "blur(5px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, fontFamily: "'Inter',sans-serif" }}>
+                <div onClick={e => e.stopPropagation()} style={{ background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 14, padding: 14, width: 300, maxWidth: "94vw", maxHeight: "86vh", overflowY: "auto", boxShadow: "0 26px 74px rgba(0,0,0,0.55)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                    <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: B.muted }}>Add a section</div>
+                    <button onClick={() => setAddSecOpen(false)} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 7, color: B.mutedMid, padding: "3px 8px", cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>✕</button>
+                  </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                     <button onClick={() => addSection("dashboard")} style={mi}>🧭 Dashboard — grid of bricks</button>
                     {!hasKind("lessons") && <button onClick={() => addSection("lessons")} style={mi}>📚 Lessons</button>}
@@ -7230,6 +7235,8 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
                   <button onClick={singleChatPreset} style={{ ...mi, width: "100%" }}>💬 Single centered chat (no tabs)</button>
                   {SECTIONS.length > 1 && <button onClick={() => removeSection(activeTab)} style={{ ...mi, width: "100%", marginTop: 8, color: "#F87171", border: "1px solid rgba(248,113,113,0.3)", background: "rgba(248,113,113,0.06)" }}>🗑 Remove “{(SECTIONS.find(s => s.id === activeTab)?.title) || "this section"}”</button>}
                 </div>
+                </div>,
+                document.body
               );
             })()}
           </div>)}
@@ -7315,7 +7322,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
                   const baseIdx = (school.semesters || []).slice(0, si).reduce((a, s2) => a + (s2.lessons?.length || 0), 0);
                   if (cols > 1) return (
                     <div style={{ display: "grid", gridTemplateColumns: `repeat(${cols}, minmax(0,1fr))`, gap: 12 }}>
-                      {sem.lessons?.map((l, li) => <LessonCardSq key={li} lesson={l} idx={baseIdx + li} T={T} progress={progress} onEnter={enterLesson} onEdit={setEditingLesson} onToggleSpan={(ls) => saveLesson(ls.number, { span: ls.span === 2 ? 1 : 2 })} readOnly={readOnly} />)}
+                      {sem.lessons?.map((l, li) => <LessonCardSq key={li} lesson={l} idx={baseIdx + li} T={T} progress={progress} onEnter={enterLesson} onEdit={setEditingLesson} onToggleSpan={(ls) => saveLesson(ls.number, { span: ls.span === 2 ? "full" : ls.span === "full" ? 1 : 2 })} readOnly={readOnly} />)}
                     </div>
                   );
                   return sem.lessons?.map((l, li) => <LessonRow key={li} lesson={l} idx={baseIdx + li} T={T} progress={progress} mentorName={school.mentor?.name} games={school.games || []} school={school} onEnter={enterLesson} onEdit={setEditingLesson} onToggleLock={toggleLock} readOnly={readOnly} />);
