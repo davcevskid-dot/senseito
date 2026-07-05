@@ -7759,6 +7759,92 @@ function sbRealtime(token) {
   return _sbClient;
 }
 const openDM = (userId, name) => { try { window.dispatchEvent(new CustomEvent("sx-dm", { detail: { userId, name } })); } catch { } };
+// Click any person's name anywhere → open their profile card.
+const openProfile = (userId, name) => { try { window.dispatchEvent(new CustomEvent("sx-profile", { detail: { userId, name } })); } catch { } };
+
+// A beautiful, account-level profile card: avatar, the schools they've published,
+// friends/message actions. Hosted once inside MessengerDock (which has the viewer token).
+function ProfileModal({ viewer, onClose }) {
+  const me = viewer.user.id;
+  const [uid, setUid] = useState(null);
+  const [name, setName] = useState("");
+  const [data, setData] = useState(null); // { profile, schools, friendCount, enrolledCount, friend }
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    const h = (e) => { const d = e.detail || {}; setUid(d.userId); setName(d.name || "Member"); };
+    window.addEventListener("sx-profile", h); return () => window.removeEventListener("sx-profile", h);
+  }, []);
+  useEffect(() => {
+    if (!uid) { setData(null); return; }
+    let alive = true;
+    (async () => {
+      const mine = uid === me;
+      try {
+        const [profMap, schools, friends, enrolls] = await Promise.all([
+          fetchProfiles([uid], viewer.token),
+          supaFetch(`/rest/v1/schools?select=id,data,published_slug&user_id=eq.${uid}&published=eq.true&order=created_at.desc&limit=24`, { token: viewer.token }).catch(() => []),
+          supaFetch(`/rest/v1/friends?or=(requester.eq.${uid},addressee.eq.${uid})&status=eq.accepted`, { token: viewer.token }).catch(() => []),
+          mine ? supaFetch(`/rest/v1/enrollments?select=school_id&student_id=eq.${uid}`, { token: viewer.token }).catch(() => []) : Promise.resolve(null),
+        ]);
+        if (!alive) return;
+        const myFriend = (friends || []).find(f => (f.requester === me && f.addressee === uid) || (f.addressee === me && f.requester === uid));
+        setData({ profile: profMap[uid] || {}, schools: schools || [], friendCount: (friends || []).length, enrolledCount: enrolls ? enrolls.length : null, friend: myFriend || null });
+      } catch { if (alive) setData({ profile: {}, schools: [], friendCount: 0, enrolledCount: null, friend: null }); }
+    })();
+    return () => { alive = false; };
+  }, [uid]); // eslint-disable-line
+  if (!uid) return null;
+  const mine = uid === me;
+  const dName = data?.profile?.display_name || name;
+  const T = { grad: "linear-gradient(135deg,#7C3AED,#06B6D4)", ps: "rgba(124,58,237,0.09)", ba: "rgba(124,58,237,0.4)", hi: "#C4B5FD", p: "#7C3AED" };
+  const addFriend = async () => { setBusy(true); try { await supaFetch(`/rest/v1/friends`, { method: "POST", token: viewer.token, headers: { Prefer: "return=minimal,resolution=ignore-duplicates" }, body: [{ requester: me, addressee: uid }] }); setData(d => ({ ...d, friend: { status: "pending", requester: me, addressee: uid } })); } catch { } setBusy(false); };
+  const stat = (n, l) => <div style={{ textAlign: "center" }}><div style={{ fontSize: 19, fontWeight: 800, color: B.white, fontFamily: "'Space Grotesk',sans-serif" }}>{n}</div><div style={{ fontSize: 10.5, color: B.muted, marginTop: 1 }}>{l}</div></div>;
+  const friendLabel = data?.friend ? (data.friend.status === "accepted" ? "✓ Friends" : data.friend.requester === me ? "Request sent" : "Respond in Messages") : "＋ Add friend";
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 360, background: "rgba(2,2,8,0.78)", backdropFilter: "blur(9px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "max(28px,7vh) 16px 40px", overflowY: "auto", fontFamily: "'Inter',sans-serif" }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 460, background: "var(--surface)", border: `1px solid ${T.ba}`, borderRadius: 22, overflow: "hidden", boxShadow: "0 30px 90px rgba(0,0,0,0.6)" }}>
+        <div style={{ height: 84, background: T.grad, position: "relative" }}>
+          <button onClick={onClose} style={{ position: "absolute", top: 12, right: 12, background: "rgba(0,0,0,0.32)", border: "none", borderRadius: 9, color: "#fff", padding: "5px 10px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>✕</button>
+        </div>
+        <div style={{ padding: "0 22px 22px", marginTop: -38 }}>
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 14, marginBottom: 14 }}>
+            <div style={{ border: "4px solid var(--surface)", borderRadius: "50%", background: "var(--surface)" }}><Avatar name={dName} url={data?.profile?.avatar_url} size={72} T={T} /></div>
+            <div style={{ paddingBottom: 6, minWidth: 0 }}>
+              <div style={{ fontSize: 18, fontWeight: 800, color: B.white, fontFamily: "'Space Grotesk',sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{dName}</div>
+              <div style={{ fontSize: 11.5, color: B.muted }}>{mine ? "This is you" : "Senseito member"}</div>
+            </div>
+          </div>
+          {!data && <div style={{ textAlign: "center", color: B.muted, fontSize: 12.5, padding: 20 }}>Loading profile…</div>}
+          {data && <>
+            <div style={{ display: "flex", justifyContent: "space-around", background: "var(--surface2)", border: `1px solid ${B.border}`, borderRadius: 14, padding: "13px 8px", marginBottom: 14 }}>
+              {stat(data.schools.length, data.schools.length === 1 ? "School" : "Schools")}
+              {stat(data.friendCount, "Friends")}
+              {data.enrolledCount != null && stat(data.enrolledCount, "Enrolled")}
+            </div>
+            {!mine && <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+              <button onClick={() => { onClose(); openDM(uid, dName); }} style={{ flex: 1, background: T.grad, border: "none", borderRadius: 11, color: "#fff", padding: "10px", cursor: "pointer", fontSize: 13, fontWeight: 800, fontFamily: "inherit" }}>💬 Message</button>
+              <button onClick={addFriend} disabled={busy || !!data.friend} style={{ flex: 1, background: data.friend ? "var(--surface2)" : T.ps, border: `1px solid ${data.friend ? B.border : T.ba}`, borderRadius: 11, color: data.friend ? B.mutedMid : T.hi, padding: "10px", cursor: data.friend ? "default" : "pointer", fontSize: 13, fontWeight: 800, fontFamily: "inherit", opacity: busy ? 0.6 : 1 }}>{friendLabel}</button>
+            </div>}
+            <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.4, color: T.hi, marginBottom: 9 }}>Published schools</div>
+            {data.schools.length === 0 && <div style={{ fontSize: 12.5, color: B.muted, padding: "4px 0 8px" }}>No published schools yet.</div>}
+            <div style={{ display: "grid", gap: 8 }}>
+              {data.schools.map(s => { const sd = s.data || {}; return (
+                <a key={s.id} href={s.published_slug ? `/s/${s.published_slug}` : undefined} onClick={onClose} style={{ display: "flex", alignItems: "center", gap: 11, background: "var(--surface2)", border: `1px solid ${B.border}`, borderRadius: 12, padding: "10px 12px", textDecoration: "none", cursor: s.published_slug ? "pointer" : "default", transition: "border-color 0.15s" }}
+                  onMouseEnter={e => e.currentTarget.style.borderColor = T.ba} onMouseLeave={e => e.currentTarget.style.borderColor = "var(--border)"}>
+                  <span style={{ fontSize: 22, flexShrink: 0 }}>{sd.emoji || "🏫"}</span>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: B.white, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sd.name || "Untitled school"}</div>
+                    {sd.tagline && <div style={{ fontSize: 11, color: B.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{sd.tagline}</div>}
+                  </div>
+                </a>
+              ); })}
+            </div>
+          </>}
+        </div>
+      </div>
+    </div>
+  );
+}
 async function fetchProfiles(ids, token) {
   const uniq = [...new Set(ids)].filter(Boolean);
   if (!uniq.length) return {};
@@ -7809,10 +7895,10 @@ function CommunityBoard({ school, schoolId, T, viewer, onSignIn, isCreator }) {
   const chipBtn = { background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 11, fontFamily: "inherit", padding: "2px 5px" };
   const PostCard = ({ p, isReply }) => (
     <div style={{ display: "flex", gap: 10, background: isReply ? "transparent" : B.surface, border: isReply ? "none" : `1px solid ${p.pinned ? T.ba : B.border}`, borderRadius: 14, padding: isReply ? "8px 0 0" : "13px 15px" }}>
-      <Avatar name={nameOf(p)} url={profiles[p.author_id]?.avatar_url} size={isReply ? 26 : 32} T={T} />
+      <div onClick={() => openProfile(p.author_id, nameOf(p))} style={{ cursor: "pointer" }} title="View profile"><Avatar name={nameOf(p)} url={profiles[p.author_id]?.avatar_url} size={isReply ? 26 : 32} T={T} /></div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 12.5, fontWeight: 700, color: B.white }}>{nameOf(p)}</span>
+          <span onClick={() => openProfile(p.author_id, nameOf(p))} style={{ fontSize: 12.5, fontWeight: 700, color: B.white, cursor: "pointer" }} title="View profile">{nameOf(p)}</span>
           {p.pinned && <span style={{ fontSize: 10, color: T.hi, fontWeight: 700 }}>📌 Pinned</span>}
           <span style={{ fontSize: 10.5, color: B.muted }}>{ago(p.created_at)}</span>
           <span style={{ marginLeft: "auto", display: "flex", gap: 2 }}>
@@ -7862,6 +7948,7 @@ function MessengerDock({ viewer }) {
   const me = viewer.user.id;
   const T = { p: "#7C3AED", grad: "linear-gradient(135deg,#7C3AED,#06B6D4)", ps: "rgba(124,58,237,0.09)", ba: "rgba(124,58,237,0.4)", hi: "#C4B5FD", pg: "rgba(124,58,237,0.18)" };
   const [open, setOpen] = useState(false);
+  const [tab, setTab] = useState("chats"); // "chats" | "requests"
   const [convos, setConvos] = useState([]); // [{id,name,avatar,last,unread,pending,friend}]
   const [act, setAct] = useState(null);     // { userId, name }
   const [msgs, setMsgs] = useState([]);
@@ -7922,32 +8009,61 @@ function MessengerDock({ viewer }) {
     try { await supaFetch(`/rest/v1/messages`, { method: "POST", token: viewer.token, headers: { Prefer: "return=minimal" }, body: [{ from_id: me, to_id: act.userId, body: t.slice(0, 2000) }] }); loadThread(act.userId); } catch { }
   }
   const accept = async (fr) => { try { await supaFetch(`/rest/v1/friends?id=eq.${fr.id}`, { method: "PATCH", token: viewer.token, headers: { Prefer: "return=minimal" }, body: { status: "accepted" } }); loadConvos(); } catch { } };
+  const decline = async (fr) => { try { await supaFetch(`/rest/v1/friends?id=eq.${fr.id}`, { method: "DELETE", token: viewer.token }); loadConvos(); } catch { } };
+  const pendingReqs = convos.filter(c => c.fr?.status === "pending" && c.fr.addressee === me);
+  const chatConvos = convos.filter(c => !(c.fr?.status === "pending" && c.fr.addressee === me));
+  const notifCount = unreadTotal + pendingReqs.length;
   return (<>
-    <button onClick={() => setOpen(o => !o)} title="Messages" style={{ position: "fixed", bottom: 20, right: 86, zIndex: 340, width: 52, height: 52, borderRadius: "50%", background: T.grad, border: "none", color: "#fff", fontSize: 20, cursor: "pointer", boxShadow: `0 8px 28px ${T.pg}` }}>
-      {open ? "✕" : "💬"}{!open && unreadTotal > 0 && <span style={{ position: "absolute", top: -3, right: -3, background: "#EF4444", color: "#fff", borderRadius: 100, fontSize: 10.5, fontWeight: 800, padding: "2px 6px" }}>{unreadTotal}</span>}
+    <ProfileModal viewer={viewer} onClose={() => openProfile(null)} />
+    <button onClick={() => setOpen(o => !o)} title="Messages & requests" style={{ position: "fixed", bottom: 84, right: 20, zIndex: 340, width: 52, height: 52, borderRadius: "50%", background: T.grad, border: "none", color: "#fff", fontSize: 20, cursor: "pointer", boxShadow: `0 8px 28px ${T.pg}` }}>
+      {open ? "✕" : "💬"}{!open && notifCount > 0 && <span style={{ position: "absolute", top: -3, right: -3, background: "#EF4444", color: "#fff", borderRadius: 100, fontSize: 10.5, fontWeight: 800, padding: "2px 6px" }}>{notifCount}</span>}
     </button>
     {open && (
-      <div style={{ position: "fixed", bottom: 82, right: 20, zIndex: 340, width: 356, maxWidth: "94vw", height: 480, maxHeight: "74vh", background: "var(--surface)", border: `1px solid ${T.ba}`, borderRadius: 18, display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 24px 70px rgba(0,0,0,0.55)", animation: "fadeUp 0.2s ease", fontFamily: "'Inter',sans-serif" }}>
+      <div style={{ position: "fixed", bottom: 146, right: 20, zIndex: 340, width: 356, maxWidth: "94vw", height: 480, maxHeight: "70vh", background: "var(--surface)", border: `1px solid ${T.ba}`, borderRadius: 18, display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 24px 70px rgba(0,0,0,0.55)", animation: "fadeUp 0.2s ease", fontFamily: "'Inter',sans-serif" }}>
         <div style={{ padding: "11px 15px", borderBottom: `1px solid ${B.border}`, background: "var(--surface2)", display: "flex", alignItems: "center", gap: 8 }}>
           {act && <button onClick={() => setAct(null)} style={{ background: "none", border: "none", color: B.mutedMid, cursor: "pointer", fontSize: 14, padding: 0 }}>←</button>}
-          <span style={{ fontSize: 13.5, fontWeight: 800, color: B.white }}>{act ? act.name : "Messages"}</span>
+          {act ? <button onClick={() => { openProfile(act.userId, act.name); }} style={{ background: "none", border: "none", color: B.white, cursor: "pointer", fontSize: 13.5, fontWeight: 800, padding: 0, fontFamily: "inherit" }}>{act.name}</button>
+            : <span style={{ fontSize: 13.5, fontWeight: 800, color: B.white }}>Messages</span>}
         </div>
+        {!act && (
+          <div style={{ display: "flex", borderBottom: `1px solid ${B.border}` }}>
+            {[["chats", "Chats", unreadTotal], ["requests", "Requests", pendingReqs.length]].map(([k, lbl, n]) => (
+              <button key={k} onClick={() => setTab(k)} style={{ flex: 1, background: "none", border: "none", borderBottom: `2px solid ${tab === k ? T.p : "transparent"}`, color: tab === k ? B.white : B.mutedMid, padding: "9px 0", cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700 }}>{lbl}{n > 0 && <span style={{ marginLeft: 6, background: k === "requests" ? "#EF4444" : T.p, color: "#fff", borderRadius: 100, fontSize: 10, fontWeight: 800, padding: "1px 6px" }}>{n}</span>}</button>
+            ))}
+          </div>
+        )}
         {!act ? (
+          tab === "requests" ? (
+            <div style={{ flex: 1, overflowY: "auto", padding: 8 }}>
+              {pendingReqs.length === 0 && <div style={{ textAlign: "center", color: B.muted, fontSize: 12.5, padding: 26, lineHeight: 1.6 }}>No new requests.<br />Friend requests show up here.</div>}
+              {pendingReqs.map(c => (
+                <div key={c.id} style={{ display: "flex", gap: 10, alignItems: "center", padding: "9px 10px", borderRadius: 11 }}>
+                  <div onClick={() => openProfile(c.id, c.name)} style={{ cursor: "pointer" }}><Avatar name={c.name} url={c.avatar} size={36} /></div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div onClick={() => openProfile(c.id, c.name)} style={{ fontSize: 13, fontWeight: 700, color: B.white, cursor: "pointer" }}>{c.name}</div>
+                    <div style={{ fontSize: 11, color: B.muted }}>wants to be friends</div>
+                  </div>
+                  <button onClick={() => accept(c.fr)} style={{ background: "rgba(74,222,128,0.14)", border: "1px solid rgba(74,222,128,0.4)", borderRadius: 8, color: "#4ADE80", padding: "5px 10px", cursor: "pointer", fontSize: 11, fontWeight: 800, fontFamily: "inherit" }}>Accept</button>
+                  <button onClick={() => decline(c.fr)} title="Decline" style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "5px 9px", cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>✕</button>
+                </div>
+              ))}
+            </div>
+          ) : (
           <div style={{ flex: 1, overflowY: "auto", padding: 8 }}>
-            {convos.length === 0 && <div style={{ textAlign: "center", color: B.muted, fontSize: 12.5, padding: 26, lineHeight: 1.6 }}>No conversations yet.<br />Message someone from a community board.</div>}
-            {convos.map(c => (
+            {chatConvos.length === 0 && <div style={{ textAlign: "center", color: B.muted, fontSize: 12.5, padding: 26, lineHeight: 1.6 }}>No conversations yet.<br />Message someone from a community board.</div>}
+            {chatConvos.map(c => (
               <div key={c.id} onClick={() => { setAct({ userId: c.id, name: c.name }); loadThread(c.id); }} style={{ display: "flex", gap: 10, alignItems: "center", padding: "9px 10px", borderRadius: 11, cursor: "pointer" }}
                 onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.04)"} onMouseLeave={e => e.currentTarget.style.background = "transparent"}>
-                <Avatar name={c.name} url={c.avatar} size={36} />
+                <div onClick={e => { e.stopPropagation(); openProfile(c.id, c.name); }} style={{ cursor: "pointer" }}><Avatar name={c.name} url={c.avatar} size={36} /></div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13, fontWeight: c.unread ? 800 : 600, color: B.white }}>{c.name}{c.fr?.status === "accepted" && <span style={{ fontSize: 10, color: "#4ADE80", marginLeft: 6 }}>friends</span>}</div>
                   <div style={{ fontSize: 11.5, color: c.unread ? B.white : B.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.last}</div>
                 </div>
                 {c.unread > 0 && <span style={{ background: T.p, color: "#fff", borderRadius: 100, fontSize: 10, fontWeight: 800, padding: "2px 7px" }}>{c.unread}</span>}
-                {c.fr?.status === "pending" && c.fr.addressee === me && <button onClick={e => { e.stopPropagation(); accept(c.fr); }} style={{ background: "rgba(74,222,128,0.14)", border: "1px solid rgba(74,222,128,0.4)", borderRadius: 8, color: "#4ADE80", padding: "4px 9px", cursor: "pointer", fontSize: 10.5, fontWeight: 800, fontFamily: "inherit" }}>Accept</button>}
               </div>
             ))}
           </div>
+          )
         ) : (<>
           <div style={{ flex: 1, overflowY: "auto", padding: "12px 13px", display: "flex", flexDirection: "column", gap: 7 }}>
             {msgs.map(m => { const mine = m.from_id === me; return (
