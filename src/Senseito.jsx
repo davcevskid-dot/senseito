@@ -4448,36 +4448,91 @@ function icsHref(e) {
   const body = `BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Senseito//EN\nBEGIN:VEVENT\nDTSTART:${fmt(d)}\nDTEND:${fmt(new Date(d.getTime() + 3600000))}\nSUMMARY:${(e.title || "Session").replace(/\n/g, " ")}\n${/^https?:\/\//i.test(e.url || "") ? `LOCATION:${e.url}\n` : ""}END:VEVENT\nEND:VCALENDAR`;
   return `data:text/calendar;charset=utf8,${encodeURIComponent(body)}`;
 }
+// Streaming platforms a creator can attach to a live session.
+const EVENT_PLATFORMS = {
+  zoom: { label: "Zoom", icon: "🎥", host: /zoom\.us/i, ph: "https://us02web.zoom.us/j/…" },
+  meet: { label: "Google Meet", icon: "📹", host: /meet\.google\.com/i, ph: "https://meet.google.com/…" },
+  teams: { label: "MS Teams", icon: "👥", host: /teams\.(microsoft|live)\.com/i, ph: "https://teams.microsoft.com/l/…" },
+  youtube: { label: "YouTube Live", icon: "▶️", host: /(youtube\.com|youtu\.be)/i, ph: "https://youtube.com/live/…" },
+  other: { label: "Other link", icon: "🔗", host: /^/, ph: "https://…" },
+};
+const fmtEventWhen = (when) => { const d = new Date(when); if (isNaN(d.getTime())) return when || ""; return d.toLocaleString(undefined, { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); };
+// datetime-local <input> wants "YYYY-MM-DDTHH:mm" in LOCAL time.
+const toLocalInput = (when) => { const d = new Date(when); if (isNaN(d.getTime())) return ""; const p = n => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`; };
+function EventForm({ draft, T, onSave, onCancel }) {
+  const [e, setE] = useState(draft || { title: "", when: "", platform: "zoom", url: "", desc: "" });
+  const set = (patch) => setE(x => ({ ...x, ...patch }));
+  const plat = EVENT_PLATFORMS[e.platform] || EVENT_PLATFORMS.other;
+  const urlOk = !e.url || /^https?:\/\//i.test(e.url);
+  const hostOk = !e.url || e.platform === "other" || plat.host.test(e.url);
+  const inp = { width: "100%", boxSizing: "border-box", background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, fontFamily: "inherit", fontSize: 13, padding: "9px 11px" };
+  const lbl = { fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: B.muted, marginBottom: 5 };
+  return (
+    <div style={{ background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 12, padding: 14, display: "flex", flexDirection: "column", gap: 11 }}>
+      <div><div style={lbl}>Session title</div><input autoFocus value={e.title} onChange={ev => set({ title: ev.target.value })} placeholder="e.g. Live Q&A: scaling your offer" style={inp} /></div>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ flex: "1 1 180px" }}><div style={lbl}>Date & time</div><input type="datetime-local" value={toLocalInput(e.when)} onChange={ev => set({ when: ev.target.value ? new Date(ev.target.value).toISOString() : "" })} style={{ ...inp, colorScheme: "dark" }} /></div>
+        <div style={{ flex: "1 1 140px" }}><div style={lbl}>Stream on</div><select value={e.platform || "zoom"} onChange={ev => set({ platform: ev.target.value })} style={{ ...inp, cursor: "pointer" }}>{Object.entries(EVENT_PLATFORMS).map(([k, p]) => <option key={k} value={k}>{p.icon} {p.label}</option>)}</select></div>
+      </div>
+      <div>
+        <div style={lbl}>{plat.icon} {plat.label} link</div>
+        <input value={e.url} onChange={ev => set({ url: ev.target.value.trim() })} placeholder={plat.ph} style={{ ...inp, borderColor: (urlOk && hostOk) ? B.borderMid : "rgba(248,113,113,0.5)" }} />
+        {e.platform === "zoom" && <div style={{ fontSize: 11, color: B.muted, marginTop: 5, lineHeight: 1.5 }}>Connect Zoom: in Zoom, <b>Schedule a meeting/webinar</b> → copy the <b>invite link</b> and paste it here. Students join (and watch your live stream) right from the school.</div>}
+        {!hostOk && e.url && <div style={{ fontSize: 11, color: "#F87171", marginTop: 4 }}>That doesn't look like a {plat.label} link.</div>}
+      </div>
+      <div><div style={lbl}>Description (optional)</div><textarea value={e.desc} onChange={ev => set({ desc: ev.target.value })} rows={2} placeholder="What's this session about?" style={{ ...inp, resize: "vertical" }} /></div>
+      <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+        <button onClick={onCancel} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.mutedMid, padding: "8px 14px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit" }}>Cancel</button>
+        <button onClick={() => e.title.trim() && urlOk && onSave({ ...e, title: e.title.trim() })} disabled={!e.title.trim() || !urlOk} style={{ background: T.grad, border: "none", borderRadius: 9, color: "#fff", padding: "8px 16px", cursor: "pointer", fontSize: 12.5, fontWeight: 800, fontFamily: "inherit", opacity: (e.title.trim() && urlOk) ? 1 : 0.5 }}>Save session</button>
+      </div>
+    </div>
+  );
+}
 function EventsBlock({ data = {}, T, canEdit, onEditData, state, onState }) {
   const events = data.events || [];
   const rsvp = state?.rsvp || {};
+  const [editing, setEditing] = useState(null); // index, "new", or null
   const toggleRsvp = (i) => onState?.({ rsvp: { ...rsvp, [i]: !rsvp[i] } });
-  const add = () => { const title = window.prompt("Event title (e.g. Live Q&A):"); if (!title) return; const when = window.prompt("When (e.g. Fri Jun 20, 6pm PT):") || ""; const url = window.prompt("Join link (Zoom/Meet URL):") || ""; onEditData?.({ ...data, events: [...events, { title: title.trim(), when: when.trim(), url: url.trim() }] }); };
+  const save = (ev, idx) => { const next = idx === "new" || idx == null ? [...events, ev] : events.map((x, j) => j === idx ? ev : x); onEditData?.({ ...data, events: next }); setEditing(null); };
   const remove = (i) => onEditData?.({ ...data, events: events.filter((_, j) => j !== i) });
+  const isLive = (e) => { const d = new Date(e.when); if (isNaN(d)) return false; const ms = d - Date.now(); return ms <= 0 && ms > -90 * 60000; };
   return (
     <div style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 14, padding: 14 }}>
       <div style={{ fontSize: 13, fontWeight: 700, color: B.white, marginBottom: 10 }}>📅 {data.title || "Upcoming live sessions"}</div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {events.map((e, i) => (
-          <div key={i} style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 11, padding: "11px 13px" }}>
-            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}><span style={{ fontSize: 13.5, fontWeight: 700, color: B.white }}>{e.title}</span>{e.when && <EventCountdown when={e.when} />}</div>
-                {e.when && <div style={{ fontSize: 12, color: T.a, marginTop: 2 }}>🕒 {e.when}</div>}
-                {e.desc && <div style={{ fontSize: 12, color: B.mutedMid, marginTop: 4, lineHeight: 1.5 }}>{e.desc}</div>}
+      <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+        {events.map((e, i) => editing === i ? (
+          <EventForm key={i} draft={e} T={T} onSave={ev => save(ev, i)} onCancel={() => setEditing(null)} />
+        ) : (() => {
+          const plat = EVENT_PLATFORMS[e.platform] || EVENT_PLATFORMS.other; const live = isLive(e);
+          const d = new Date(e.when); const valid = !isNaN(d.getTime());
+          return (
+            <div key={i} style={{ background: B.surface, border: `1px solid ${live ? "rgba(248,113,113,0.4)" : B.border}`, borderRadius: 12, padding: "12px 14px", position: "relative", overflow: "hidden" }}>
+              {live && <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: "linear-gradient(90deg,#EF4444,#FB923C)" }} />}
+              <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+                {valid && <div style={{ flexShrink: 0, width: 52, textAlign: "center", background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 10, padding: "6px 0" }}>
+                  <div style={{ fontSize: 10, fontWeight: 800, color: T.hi, textTransform: "uppercase", letterSpacing: 0.5 }}>{d.toLocaleDateString(undefined, { month: "short" })}</div>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: B.white, lineHeight: 1 }}>{d.getDate()}</div>
+                </div>}
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}><span style={{ fontSize: 14, fontWeight: 700, color: B.white }}>{e.title}</span>{e.when && <EventCountdown when={e.when} />}</div>
+                  <div style={{ fontSize: 12, color: T.a, marginTop: 3 }}>{plat.icon} {valid ? fmtEventWhen(e.when) : (e.when || "Time TBA")}{e.url ? ` · ${plat.label}` : ""}</div>
+                  {e.desc && <div style={{ fontSize: 12, color: B.mutedMid, marginTop: 5, lineHeight: 1.5 }}>{e.desc}</div>}
+                  <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                    <button onClick={() => toggleRsvp(i)} style={{ background: rsvp[i] ? "rgba(74,222,128,0.12)" : T.ps, border: `1px solid ${rsvp[i] ? "rgba(74,222,128,0.4)" : T.ba}`, borderRadius: 8, color: rsvp[i] ? "#4ADE80" : T.hi, padding: "6px 13px", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>{rsvp[i] ? "✓ You're going" : "RSVP"}</button>
+                    {/^https?:\/\//i.test(e.url || "") && <a href={e.url} target="_blank" rel="noopener noreferrer" style={{ background: live ? "linear-gradient(135deg,#EF4444,#DC2626)" : T.grad, color: "white", borderRadius: 8, padding: "6px 14px", fontSize: 12.5, fontWeight: 700, textDecoration: "none" }}>{live ? "🔴 Join live now" : `${plat.icon} Join ↗`}</a>}
+                    {icsHref(e) && <a href={icsHref(e)} download={`${(e.title || "event").replace(/[^a-z0-9]+/gi, "-")}.ics`} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "6px 12px", fontSize: 12, fontWeight: 700, textDecoration: "none" }}>📆 Calendar</a>}
+                    {canEdit && <><button onClick={() => setEditing(i)} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "6px 11px", cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>✎ Edit</button>
+                      <button onClick={() => remove(i)} title="Remove" style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: "#F87171", padding: "6px 10px", cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>✕</button></>}
+                  </div>
+                </div>
               </div>
-              {canEdit && <button onClick={() => remove(i)} title="Remove" style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 13, flexShrink: 0 }}>✕</button>}
             </div>
-            <div style={{ display: "flex", gap: 8, marginTop: 9, flexWrap: "wrap" }}>
-              <button onClick={() => toggleRsvp(i)} style={{ background: rsvp[i] ? "rgba(74,222,128,0.12)" : T.ps, border: `1px solid ${rsvp[i] ? "rgba(74,222,128,0.4)" : T.ba}`, borderRadius: 8, color: rsvp[i] ? "#4ADE80" : T.hi, padding: "6px 13px", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>{rsvp[i] ? "✓ You're going" : "RSVP"}</button>
-              {/^https?:\/\//i.test(e.url || "") && <a href={e.url} target="_blank" rel="noopener noreferrer" style={{ background: T.grad, color: "white", borderRadius: 8, padding: "6px 14px", fontSize: 12.5, fontWeight: 700, textDecoration: "none" }}>Join ↗</a>}
-              {icsHref(e) && <a href={icsHref(e)} download={`${(e.title || "event").replace(/[^a-z0-9]+/gi, "-")}.ics`} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "6px 12px", fontSize: 12, fontWeight: 700, textDecoration: "none" }}>📆 Add to calendar</a>}
-            </div>
-          </div>
-        ))}
-        {events.length === 0 && <div style={{ fontSize: 12.5, color: B.muted, padding: "10px 0" }}>{canEdit ? "No events yet — add upcoming lives, webinars or calls." : "No upcoming sessions yet."}</div>}
+          );
+        })())}
+        {editing === "new" && <EventForm T={T} onSave={ev => save(ev, "new")} onCancel={() => setEditing(null)} />}
+        {events.length === 0 && editing !== "new" && <div style={{ fontSize: 12.5, color: B.muted, padding: "10px 0" }}>{canEdit ? "No events yet — add upcoming lives, webinars or calls." : "No upcoming sessions yet."}</div>}
       </div>
-      {canEdit && <button onClick={add} style={{ marginTop: 10, width: "100%", background: "none", border: `1px dashed ${B.borderMid}`, borderRadius: 10, color: B.mutedMid, padding: "9px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 700 }}>＋ Add an event</button>}
+      {canEdit && editing !== "new" && <button onClick={() => setEditing("new")} style={{ marginTop: 10, width: "100%", background: "none", border: `1px dashed ${B.borderMid}`, borderRadius: 10, color: B.mutedMid, padding: "9px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 700 }}>＋ Add a live session</button>}
     </div>
   );
 }
