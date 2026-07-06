@@ -8148,9 +8148,9 @@ function MediaPicker({ token, userId, imagesOnly = false, onPick, onClose }) {
             : shown.length === 0 ? <div style={{ fontSize: 13, color: B.muted, textAlign: "center", padding: 30, lineHeight: 1.6 }}>No {imagesOnly ? "images" : "files"} yet.<br />Hit <b style={{ color: T.hi }}>⬆ Upload</b> to add some.</div>
             : <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(120px,1fr))", gap: 10 }}>
               {shown.map(m => (
-                <button key={m.path} onClick={() => { onPick(m); onClose(); }} title={m.name} style={{ background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 12, padding: 0, cursor: "pointer", overflow: "hidden", textAlign: "left", fontFamily: "inherit" }}>
+                <button key={m.path} onClick={() => { onPick({ ...m, alt: getMediaAlt(m.url) }); onClose(); }} title={m.name} style={{ background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 12, padding: 0, cursor: "pointer", overflow: "hidden", textAlign: "left", fontFamily: "inherit" }}>
                   <div style={{ height: 86, background: B.surface3, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
-                    {isImageFile(m) ? <img src={m.url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontSize: 30 }}>{FILE_ICON(m.name, m.url)}</span>}
+                    {isImageFile(m) ? <img src={m.url} alt={getMediaAlt(m.url)} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontSize: 30 }}>{FILE_ICON(m.name, m.url)}</span>}
                   </div>
                   <div style={{ padding: "7px 9px" }}><div style={{ fontSize: 11, color: B.white, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{m.name}</div><div style={{ fontSize: 10, color: B.muted }}>{fmtBytes(m.size)}</div></div>
                 </button>
@@ -8668,6 +8668,10 @@ function StudentProfileModal({ viewer, T, xp, passed, total, schoolName, onClose
 
 // CROP TOOL — pan + zoom an image inside a fixed-ratio window, save as a NEW
 // media file (original untouched). Used from the media library on any image.
+// Alt-text lives client-side (no DB via MCP right now) keyed by media URL, and is
+// attached to picked images so blocks can render meaningful alt attributes.
+function getMediaAlt(url) { try { return (JSON.parse(localStorage.getItem("senseito_media_alt") || "{}"))[url] || ""; } catch { return ""; } }
+function setMediaAlt(url, alt) { try { const m = JSON.parse(localStorage.getItem("senseito_media_alt") || "{}"); if (alt) m[url] = alt; else delete m[url]; localStorage.setItem("senseito_media_alt", JSON.stringify(m)); } catch { } }
 function CropModal({ item, token, userId, onSaved, onClose }) {
   const T = { grad: "linear-gradient(135deg,#7C3AED,#06B6D4)", ba: "rgba(124,58,237,0.4)", ps: "rgba(124,58,237,0.12)", hi: "#C4B5FD" };
   const [ratio, setRatio] = useState("16:9");
@@ -8675,12 +8679,24 @@ function CropModal({ item, token, userId, onSaved, onClose }) {
   const [off, setOff] = useState({ x: 0, y: 0 });
   const [img, setImg] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [rotBusy, setRotBusy] = useState(false);
   const [err, setErr] = useState("");
+  const [alt, setAlt] = useState(() => getMediaAlt(item.url));
   useEffect(() => {
     const i = new Image(); i.crossOrigin = "anonymous";
     i.onload = () => setImg(i); i.onerror = () => setErr("Couldn't load this image for cropping.");
     i.src = item.url;
   }, [item.url]);
+  // Rotate the working image 90° (swaps dimensions) — export & preview then use the rotated copy.
+  function rotate(dir) {
+    if (!img || rotBusy) return; setRotBusy(true); setErr("");
+    try {
+      const w = img.naturalWidth, h = img.naturalHeight;
+      const c = document.createElement("canvas"); c.width = h; c.height = w;
+      const ctx = c.getContext("2d"); ctx.translate(c.width / 2, c.height / 2); ctx.rotate((dir > 0 ? 90 : -90) * Math.PI / 180); ctx.drawImage(img, -w / 2, -h / 2);
+      const ni = new Image(); ni.onload = () => { setImg(ni); setOff({ x: 0, y: 0 }); setZoom(1); setRotBusy(false); }; ni.onerror = () => setRotBusy(false); ni.src = c.toDataURL("image/png");
+    } catch { setErr("Rotate needs a CORS-clean image."); setRotBusy(false); }
+  }
   const [rw, rh] = IMG_RATIOS[ratio];
   const VW = Math.min(380, (typeof window !== "undefined" ? window.innerWidth : 400) - 72), VH = Math.round(VW * rh / rw);
   const base = img ? Math.max(VW / img.naturalWidth, VH / img.naturalHeight) : 1; // cover-fit at zoom 1
@@ -8709,7 +8725,8 @@ function CropModal({ item, token, userId, onSaved, onClose }) {
       const blob = await new Promise(r => c.toBlob(r, "image/jpeg", 0.92));
       if (!blob) throw new Error("Couldn't export the crop (the image may block cross-origin use).");
       const f = new File([blob], `${(item.name || "image").replace(/\.[a-z0-9]+$/i, "")}-${ratio.replace(":", "x")}.jpg`, { type: "image/jpeg" });
-      await uploadMedia(f, token, userId);
+      const m = await uploadMedia(f, token, userId);
+      if (m?.url && alt.trim()) setMediaAlt(m.url, alt.trim());
       onSaved?.(); onClose();
     } catch (e) { setErr(e.message || "Crop failed"); }
     setBusy(false);
@@ -8719,15 +8736,19 @@ function CropModal({ item, token, userId, onSaved, onClose }) {
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 340, background: "rgba(2,2,8,0.78)", backdropFilter: "blur(7px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, fontFamily: "'Inter',sans-serif" }}>
       <div onClick={e => e.stopPropagation()} style={{ background: "var(--surface)", border: `1px solid ${T.ba}`, borderRadius: 18, padding: 18, width: "auto", maxWidth: "94vw" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 12 }}>
-          <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 15, fontWeight: 800, color: B.white }}>✂ Crop image</div>
+          <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 15, fontWeight: 800, color: B.white }}>🖼️ Edit image</div>
           <button onClick={onClose} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "5px 10px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>✕</button>
         </div>
-        <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
+          <span style={{ fontSize: 11, color: B.muted, fontWeight: 700 }}>Crop</span>
           {Object.keys(IMG_RATIOS).map(r => <button key={r} onClick={() => { setRatio(r); setZoom(1); }} style={{ background: ratio === r ? T.ps : "var(--surface2)", border: `1px solid ${ratio === r ? T.ba : B.borderMid}`, borderRadius: 8, color: ratio === r ? T.hi : B.mutedMid, padding: "5px 12px", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>{r}</button>)}
+          <span style={{ width: 1, height: 18, background: B.borderMid, margin: "0 2px" }} />
+          <button onClick={() => rotate(-1)} disabled={!img || rotBusy} title="Rotate left" style={{ background: "var(--surface2)", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "5px 10px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>⟲</button>
+          <button onClick={() => rotate(1)} disabled={!img || rotBusy} title="Rotate right" style={{ background: "var(--surface2)", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "5px 10px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>⟳</button>
         </div>
         <div onPointerDown={img ? onDrag : undefined} style={{ position: "relative", width: VW, height: VH, maxWidth: "88vw", overflow: "hidden", borderRadius: 12, border: `1px solid ${B.borderMid}`, background: "#000", cursor: img ? "grab" : "default", touchAction: "none" }}>
           {img
-            ? <img src={item.url} alt="" draggable={false} style={{ position: "absolute", width: imgW, height: imgH, left: (VW - imgW) / 2 + off.x, top: (VH - imgH) / 2 + off.y, maxWidth: "none", userSelect: "none", pointerEvents: "none" }} />
+            ? <img src={img.src} alt="" draggable={false} style={{ position: "absolute", width: imgW, height: imgH, left: (VW - imgW) / 2 + off.x, top: (VH - imgH) / 2 + off.y, maxWidth: "none", userSelect: "none", pointerEvents: "none" }} />
             : <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: B.muted, fontSize: 13 }}>{err || "Loading…"}</div>}
           <div style={{ position: "absolute", inset: 0, border: "1px dashed rgba(255,255,255,0.35)", borderRadius: 12, pointerEvents: "none" }} />
         </div>
@@ -8735,9 +8756,16 @@ function CropModal({ item, token, userId, onSaved, onClose }) {
           <span style={{ fontSize: 11.5, color: B.muted }}>Zoom</span>
           <input type="range" min="1" max="3" step="0.01" value={zoom} onChange={e => setZoom(+e.target.value)} style={{ flex: 1 }} />
         </div>
-        <div style={{ fontSize: 11, color: B.muted, margin: "8px 0 12px" }}>Drag the photo to position it · saved as a NEW file, the original stays.</div>
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: B.muted, marginBottom: 5 }}>Alt text <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: 400 }}>— describes the image for accessibility & SEO</span></div>
+          <input value={alt} onChange={e => setAlt(e.target.value)} onBlur={() => setMediaAlt(item.url, alt.trim())} placeholder="e.g. Coach smiling during a group session" style={{ width: "100%", boxSizing: "border-box", background: "var(--surface3)", border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, fontFamily: "inherit", fontSize: 13, padding: "9px 11px" }} />
+        </div>
+        <div style={{ fontSize: 11, color: B.muted, margin: "10px 0 12px" }}>Alt text saves to this image · crop/rotate save a NEW file, the original stays.</div>
         {err && img && <div style={{ fontSize: 12, color: "#F87171", marginBottom: 8 }}>{err}</div>}
-        <button onClick={save} disabled={!img || busy} style={{ width: "100%", background: T.grad, border: "none", borderRadius: 10, color: "#fff", padding: "11px", cursor: "pointer", fontSize: 13.5, fontWeight: 800, fontFamily: "inherit", opacity: !img || busy ? 0.6 : 1 }}>{busy ? <><Spinner color="#fff" />Saving…</> : `💾 Save ${ratio} copy`}</button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={() => { setMediaAlt(item.url, alt.trim()); onSaved?.(); onClose(); }} style={{ flex: 1, background: "var(--surface2)", border: `1px solid ${B.borderMid}`, borderRadius: 10, color: B.white, padding: "11px", cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit" }}>Save alt text</button>
+          <button onClick={save} disabled={!img || busy} style={{ flex: 1, background: T.grad, border: "none", borderRadius: 10, color: "#fff", padding: "11px", cursor: "pointer", fontSize: 13.5, fontWeight: 800, fontFamily: "inherit", opacity: !img || busy ? 0.6 : 1 }}>{busy ? <><Spinner color="#fff" />Saving…</> : `💾 Save ${ratio} copy`}</button>
+        </div>
       </div>
     </div>
   );
@@ -8858,7 +8886,7 @@ function ProfileView({ session, profile, onProfile, achStats, schoolCount, syncS
             {items.map(m => (
               <div key={m.path} style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 12, overflow: "hidden", position: "relative" }}>
                 <button onClick={() => remove(m)} title="Delete" style={{ position: "absolute", top: 6, right: 6, zIndex: 2, background: "rgba(0,0,0,0.5)", border: "none", borderRadius: 7, color: "#F87171", width: 24, height: 22, cursor: "pointer", fontSize: 12 }}>🗑</button>
-                {isImageFile(m) && <button onClick={() => setCropItem(m)} title="Crop — save a copy in another ratio" style={{ position: "absolute", top: 6, right: 34, zIndex: 2, background: "rgba(0,0,0,0.5)", border: "none", borderRadius: 7, color: "#fff", width: 24, height: 22, cursor: "pointer", fontSize: 11 }}>✂</button>}
+                {isImageFile(m) && <button onClick={() => setCropItem(m)} title="Edit — crop, rotate & alt text" style={{ position: "absolute", top: 6, right: 34, zIndex: 2, background: "rgba(0,0,0,0.5)", border: "none", borderRadius: 7, color: "#fff", width: 24, height: 22, cursor: "pointer", fontSize: 11 }}>✎</button>}
                 <a href={m.url} target="_blank" rel="noreferrer" style={{ display: "block", textDecoration: "none" }}>
                   <div style={{ height: 100, background: B.surface3, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
                     {isImageFile(m) ? <img src={m.url} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontSize: 34 }}>{FILE_ICON(m.name, m.url)}</span>}
