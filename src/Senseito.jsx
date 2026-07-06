@@ -8181,8 +8181,15 @@ const openProfile = (userId, name) => { try { window.dispatchEvent(new CustomEve
 
 // A beautiful, account-level profile card: avatar, the schools they've published,
 // friends/message actions. Hosted once inside MessengerDock (which has the viewer token).
+// Reactive "is the viewport narrow (phone)" — shared by the profile & media UIs.
+function useNarrow(bp = 560) {
+  const [n, setN] = useState(() => typeof window !== "undefined" && window.innerWidth < bp);
+  useEffect(() => { const f = () => setN(window.innerWidth < bp); window.addEventListener("resize", f); return () => window.removeEventListener("resize", f); }, [bp]);
+  return n;
+}
 function ProfileModal({ viewer, onClose }) {
   const me = viewer.user.id;
+  const narrow = useNarrow(520);
   const [uid, setUid] = useState(null);
   const [name, setName] = useState("");
   const [data, setData] = useState(null); // { profile, schools, friendCount, enrolledCount, friend }
@@ -8228,15 +8235,15 @@ function ProfileModal({ viewer, onClose }) {
   const friendLabel = data?.friend ? (data.friend.status === "accepted" ? "✓ Friends" : data.friend.requester === me ? "Request sent" : "Respond in Messages") : "＋ Add friend";
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 360, background: "rgba(2,2,8,0.78)", backdropFilter: "blur(9px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "max(28px,7vh) 16px 40px", overflowY: "auto", fontFamily: "'Inter',sans-serif" }}>
-      <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 460, background: "var(--surface)", border: `1px solid ${T.ba}`, borderRadius: 22, overflow: "hidden", boxShadow: "0 30px 90px rgba(0,0,0,0.6)" }}>
-        <div style={{ height: 96, background: data?.profile?.cover_url ? `center/cover no-repeat url(${data.profile.cover_url})` : T.grad, position: "relative", zIndex: 0 }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 460, background: "var(--surface)", border: `1px solid ${T.ba}`, borderRadius: narrow ? 18 : 22, overflow: "hidden", boxShadow: "0 30px 90px rgba(0,0,0,0.6)" }}>
+        <div style={{ height: narrow ? 78 : 96, background: data?.profile?.cover_url ? `center/cover no-repeat url(${data.profile.cover_url})` : T.grad, position: "relative", zIndex: 0 }}>
           <button onClick={onClose} style={{ position: "absolute", top: 12, right: 12, background: "rgba(0,0,0,0.42)", border: "none", borderRadius: 9, color: "#fff", padding: "5px 10px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>✕</button>
         </div>
-        <div style={{ padding: "0 22px 22px", marginTop: -38, position: "relative", zIndex: 1 }}>
-          <div style={{ display: "flex", alignItems: "flex-end", gap: 14, marginBottom: 14 }}>
-            <div style={{ border: "4px solid var(--surface)", borderRadius: "50%", background: "var(--surface)" }}><Avatar name={dName} url={data?.profile?.avatar_url} size={72} T={T} /></div>
+        <div style={{ padding: narrow ? "0 16px 18px" : "0 22px 22px", marginTop: narrow ? -32 : -38, position: "relative", zIndex: 1 }}>
+          <div style={{ display: "flex", alignItems: "flex-end", gap: narrow ? 11 : 14, marginBottom: 14 }}>
+            <div style={{ border: "4px solid var(--surface)", borderRadius: "50%", background: "var(--surface)" }}><Avatar name={dName} url={data?.profile?.avatar_url} size={narrow ? 60 : 72} T={T} /></div>
             <div style={{ paddingBottom: 6, minWidth: 0 }}>
-              <div style={{ fontSize: 18, fontWeight: 800, color: B.white, fontFamily: "'Space Grotesk',sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{dName}</div>
+              <div style={{ fontSize: narrow ? 16 : 18, fontWeight: 800, color: B.white, fontFamily: "'Space Grotesk',sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{dName}</div>
               <div style={{ fontSize: 11.5, color: B.muted }}>{mine ? "This is you" : "Senseito member"}</div>
             </div>
           </div>
@@ -8675,7 +8682,7 @@ function CropModal({ item, token, userId, onSaved, onClose }) {
     i.src = item.url;
   }, [item.url]);
   const [rw, rh] = IMG_RATIOS[ratio];
-  const VW = 380, VH = Math.round(VW * rh / rw);
+  const VW = Math.min(380, (typeof window !== "undefined" ? window.innerWidth : 400) - 72), VH = Math.round(VW * rh / rw);
   const base = img ? Math.max(VW / img.naturalWidth, VH / img.naturalHeight) : 1; // cover-fit at zoom 1
   const scale = base * zoom;
   const clampOff = (o, s = scale) => {
