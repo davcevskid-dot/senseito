@@ -8340,6 +8340,8 @@ function MessengerDock({ viewer }) {
   const [input, setInput] = useState("");
   const [unreadTotal, setUnreadTotal] = useState(0);
   const [pos, setPos] = useState(null); // {x,y} top-left when the panel has been dragged (else default bottom-right)
+  const [fabPos, setFabPos] = useState(null); // {x,y} top-left of the FAB when dragged (else default corner)
+  const draggedRef = useRef(false); // true right after a FAB drag → suppress the click-open
   const bottom = useRef(null);
   const actRef = useRef(null); actRef.current = act;
   // Drag the panel anywhere by its header.
@@ -8350,6 +8352,22 @@ function MessengerDock({ viewer }) {
     try { ev.currentTarget.setPointerCapture(ev.pointerId); } catch { }
     const move = (m) => { const x = Math.max(6, Math.min(window.innerWidth - r.width - 6, m.clientX - ox)); const y = Math.max(6, Math.min(window.innerHeight - 44, m.clientY - oy)); setPos({ x, y }); };
     const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+  }
+  // Drag the FAB itself; a small movement counts as a click (open/close), a large one repositions.
+  function startFabDrag(ev) {
+    const btn = ev.currentTarget; const r = btn.getBoundingClientRect();
+    const ox = ev.clientX - r.left, oy = ev.clientY - r.top; const sx = ev.clientX, sy = ev.clientY;
+    let moved = false;
+    try { btn.setPointerCapture(ev.pointerId); } catch { }
+    const move = (m) => {
+      if (!moved && Math.hypot(m.clientX - sx, m.clientY - sy) < 5) return; // below threshold = still a click
+      moved = true;
+      const x = Math.max(6, Math.min(window.innerWidth - r.width - 6, m.clientX - ox));
+      const y = Math.max(6, Math.min(window.innerHeight - r.height - 6, m.clientY - oy));
+      setFabPos({ x, y });
+    };
+    const up = () => { draggedRef.current = moved; window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
     window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
   }
   async function loadConvos() {
@@ -8412,7 +8430,7 @@ function MessengerDock({ viewer }) {
   const notifCount = unreadTotal + pendingReqs.length;
   return (<>
     <ProfileModal viewer={viewer} onClose={() => openProfile(null)} />
-    <button onClick={() => setOpen(o => !o)} title="Messages & requests" style={{ position: "fixed", bottom: 84, right: 20, zIndex: 340, width: 52, height: 52, borderRadius: "50%", background: T.grad, border: "none", color: "#fff", fontSize: 20, cursor: "pointer", boxShadow: `0 8px 28px ${T.pg}` }}>
+    <button onPointerDown={startFabDrag} onClick={() => { if (draggedRef.current) { draggedRef.current = false; return; } setOpen(o => !o); }} title="Messages & requests — drag to move" style={{ position: "fixed", ...(fabPos ? { left: fabPos.x, top: fabPos.y } : { bottom: 84, right: 20 }), zIndex: 340, width: 52, height: 52, borderRadius: "50%", background: T.grad, border: "none", color: "#fff", fontSize: 20, cursor: "grab", touchAction: "none", boxShadow: `0 8px 28px ${T.pg}` }}>
       {open ? "✕" : "💬"}{!open && notifCount > 0 && <span style={{ position: "absolute", top: -3, right: -3, background: "#EF4444", color: "#fff", borderRadius: 100, fontSize: 10.5, fontWeight: 800, padding: "2px 6px" }}>{notifCount}</span>}
     </button>
     {open && (
