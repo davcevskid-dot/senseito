@@ -9686,29 +9686,31 @@ function paypalPayUrl(pricing, schoolName) {
 // Paywall shown to signed-in students of a PAID school with no active entitlement.
 function Paywall({ rec, stud, T, onEntitled }) {
   const p = rec.data.pricing || {}; const cur = p.currency || "USD"; const sym = CURR_SYM[cur] || "";
-  const [busy, setBusy] = useState(""); const [initiated, setInitiated] = useState(false); const [err, setErr] = useState("");
-  async function grant(status, days, ref) {
+  const [busy, setBusy] = useState(""); const [initiated, setInitiated] = useState(""); const [err, setErr] = useState("");
+  async function grant(status, days, provider, ref) {
     setBusy(status); setErr("");
     try {
       const trial_ends = days ? new Date(Date.now() + days * 86400000).toISOString() : null;
-      await supaFetch(`/rest/v1/entitlements?on_conflict=school_id,user_id`, { method: "POST", token: stud.token, headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: [{ school_id: rec.id, user_id: stud.user.id, status, trial_ends, provider: "paypal", ref: ref || null, updated_at: new Date().toISOString() }] });
+      await supaFetch(`/rest/v1/entitlements?on_conflict=school_id,user_id`, { method: "POST", token: stud.token, headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: [{ school_id: rec.id, user_id: stud.user.id, status, trial_ends, provider: provider || "manual", ref: ref || null, updated_at: new Date().toISOString() }] });
       onEntitled({ status, trial_ends });
     } catch (e) { setErr("Couldn't unlock: " + e.message); }
     setBusy("");
   }
   const payUrl = paypalPayUrl(p, rec.data.name);
+  const stripeUrl = /^https?:\/\//i.test(p.stripe || "") ? p.stripe.trim() : "";
   return (
     <div style={{ maxWidth: 460, margin: "26px auto 0", padding: "0 20px" }}>
       <div style={{ background: T.heroGrad || T.gr, border: `1px solid ${T.ba}`, borderRadius: 20, padding: "28px 24px", textAlign: "center" }}>
         <div style={{ fontSize: 40, marginBottom: 8 }}>{rec.data.emoji || "🔒"}</div>
         <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 22, fontWeight: 800, color: "#fff", marginBottom: 6 }}>{rec.data.name}</div>
         <div style={{ fontSize: 13, color: "rgba(255,255,255,0.85)", marginBottom: 18, lineHeight: 1.6 }}>This school is <b>{sym}{p.price} {cur}</b>. Unlock full access below.</div>
-        {payUrl && <a href={payUrl} target="_blank" rel="noreferrer" onClick={() => setInitiated(true)} style={{ display: "block", background: "#0070BA", color: "#fff", borderRadius: 12, padding: "13px", fontSize: 15, fontWeight: 800, textDecoration: "none", marginBottom: 10 }}>Pay {sym}{p.price} with PayPal →</a>}
-        {!payUrl && <div style={{ fontSize: 12.5, color: "#FBBF24", marginBottom: 10 }}>The creator hasn't connected PayPal yet.</div>}
-        {initiated && <button onClick={() => grant("paid", 0, "self-confirmed")} disabled={busy} style={{ width: "100%", background: "rgba(74,222,128,0.15)", border: "1px solid rgba(74,222,128,0.45)", borderRadius: 12, color: "#4ADE80", padding: "11px", cursor: "pointer", fontSize: 13.5, fontWeight: 800, fontFamily: "inherit", marginBottom: 10 }}>{busy === "paid" ? "Unlocking…" : "✓ I've completed payment — unlock"}</button>}
-        {Number(p.trialDays) > 0 && <button onClick={() => grant("trial", Number(p.trialDays))} disabled={busy} style={{ width: "100%", background: "rgba(255,255,255,0.12)", border: "1px solid rgba(255,255,255,0.28)", borderRadius: 12, color: "#fff", padding: "11px", cursor: "pointer", fontSize: 13.5, fontWeight: 800, fontFamily: "inherit" }}>{busy === "trial" ? "Starting…" : `Start your ${p.trialDays}-day free trial`}</button>}
+        {stripeUrl && <a href={stripeUrl} target="_blank" rel="noreferrer" onClick={() => setInitiated("stripe")} style={{ display: "block", background: "#635BFF", color: "#fff", borderRadius: 12, padding: "13px", fontSize: 15, fontWeight: 800, textDecoration: "none", marginBottom: 10 }}>Pay {sym}{p.price} with card (Stripe) →</a>}
+        {payUrl && <a href={payUrl} target="_blank" rel="noreferrer" onClick={() => setInitiated("paypal")} style={{ display: "block", background: "#0070BA", color: "#fff", borderRadius: 12, padding: "13px", fontSize: 15, fontWeight: 800, textDecoration: "none", marginBottom: 10 }}>Pay {sym}{p.price} with PayPal →</a>}
+        {!payUrl && !stripeUrl && <div style={{ fontSize: 12.5, color: "#FBBF24", marginBottom: 10 }}>The creator hasn't connected a payment method yet.</div>}
+        {initiated && <button onClick={() => grant("paid", 0, initiated, "self-confirmed")} disabled={busy} style={{ width: "100%", background: "rgba(74,222,128,0.15)", border: "1px solid rgba(74,222,128,0.45)", borderRadius: 12, color: "#4ADE80", padding: "11px", cursor: "pointer", fontSize: 13.5, fontWeight: 800, fontFamily: "inherit", marginBottom: 10 }}>{busy === "paid" ? "Unlocking…" : "✓ I've completed payment — unlock"}</button>}
+        {Number(p.trialDays) > 0 && <button onClick={() => grant("trial", Number(p.trialDays), "trial")} disabled={busy} style={{ width: "100%", background: "rgba(255,255,255,0.12)", border: "1px solid rgba(255,255,255,0.28)", borderRadius: 12, color: "#fff", padding: "11px", cursor: "pointer", fontSize: 13.5, fontWeight: 800, fontFamily: "inherit" }}>{busy === "trial" ? "Starting…" : `Start your ${p.trialDays}-day free trial`}</button>}
         {err && <div style={{ fontSize: 12, color: "#FCA5A5", marginTop: 10 }}>{err}</div>}
-        <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.5)", marginTop: 14, lineHeight: 1.5 }}>Payments are handled on PayPal. After paying, tap “I've completed payment”. (Automatic payment verification is coming.)</div>
+        <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.5)", marginTop: 14, lineHeight: 1.5 }}>Payment is handled securely on {stripeUrl && payUrl ? "Stripe / PayPal" : stripeUrl ? "Stripe" : "PayPal"}. After paying, tap “I've completed payment”. (Automatic verification is coming.)</div>
       </div>
     </div>
   );
@@ -9738,9 +9740,15 @@ function PricingModal({ school, T, onUpdate, onClose }) {
           <div>
             <div style={lbl}>Connect PayPal</div>
             <input value={p.paypal || ""} onChange={e => set({ paypal: e.target.value.trim() })} placeholder="paypal.me/yourname  ·  or your PayPal email" style={{ ...inp, borderColor: linkOk ? B.borderMid : "rgba(248,113,113,0.5)" }} />
-            <div style={{ fontSize: 11, color: B.muted, marginTop: 5, lineHeight: 1.5 }}>Paste your <b>paypal.me</b> link (easiest) or your PayPal email. Students pay you directly; the school unlocks after payment.</div>
+            <div style={{ fontSize: 11, color: B.muted, marginTop: 5, lineHeight: 1.5 }}>Paste your <b>paypal.me</b> link (easiest) or your PayPal email.</div>
             {!linkOk && <div style={{ fontSize: 11, color: "#F87171", marginTop: 4 }}>Enter a paypal.me link or a valid email.</div>}
           </div>
+          <div>
+            <div style={lbl}>Connect Stripe</div>
+            <input value={p.stripe || ""} onChange={e => set({ stripe: e.target.value.trim() })} placeholder="https://buy.stripe.com/…  (Stripe Payment Link)" style={{ ...inp, borderColor: (!p.stripe || /^https?:\/\//i.test(p.stripe)) ? B.borderMid : "rgba(248,113,113,0.5)" }} />
+            <div style={{ fontSize: 11, color: B.muted, marginTop: 5, lineHeight: 1.5 }}>In your <b>Stripe Dashboard → Payment Links</b>, create a link for this price and paste it here. Money goes straight to your Stripe account.</div>
+          </div>
+          <div style={{ fontSize: 11, color: B.muted, background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 9, padding: "9px 11px", lineHeight: 1.5 }}>Connect either or both — students pick a method. Payment is confirmed on the provider; automatic verification (webhooks) is coming next.</div>
           <div>
             <div style={lbl}>Free trial</div>
             <div style={{ display: "flex", gap: 7 }}>{[[0, "None"], [7, "7 days"], [14, "14 days"]].map(([d, l]) => <button key={d} onClick={() => set({ trialDays: d })} style={{ flex: 1, background: (p.trialDays || 0) === d ? T.ps : B.surface2, border: `1px solid ${(p.trialDays || 0) === d ? T.ba : B.borderMid}`, borderRadius: 9, color: (p.trialDays || 0) === d ? T.hi : B.mutedMid, padding: "9px", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>{l}</button>)}</div>
