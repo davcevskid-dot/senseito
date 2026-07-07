@@ -455,6 +455,13 @@ const ICO_PATHS = {
   arcade: "M7 11h4M9 9v4M15 10h.01M18 12h.01M7 7h10a4 4 0 014 4v2a4 4 0 01-7 3l-1-1h-2l-1 1a4 4 0 01-7-3v-2a4 4 0 014-4z",
   brain: "M9 3a3 3 0 00-3 3 3 3 0 00-2 5 3 3 0 001 5 3 3 0 005 2V4.5A2.5 2.5 0 009 3zM15 3a3 3 0 013 3 3 3 0 012 5 3 3 0 01-1 5 3 3 0 01-5 2V4.5A2.5 2.5 0 0115 3z",
   chart: "M4 20V4M4 20h16M8 20v-6M13 20V9M18 20v-9",
+  heading: "M6 5v14M18 5v14M6 12h12M6 5h4M14 5h4M6 19h4M14 19h4",
+  text: "M4 6h16M4 10h16M4 14h11M4 18h7",
+  video: "M4 5h16v14H4zM10 9l5 3-5 3z",
+  iframe: "M4 5h16v14H4zM4 8h16M7 6.5h.01M9.5 6.5h.01",
+  button: "M3 9h18v6H3zM7 12h10",
+  folder2: "M3 6a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2z",
+  file: "M6 2h8l4 4v16H6zM14 2v4h4M9 13h6M9 17h6",
 };
 function Ico({ name, size = 15, fill = false, style }) {
   const d = ICO_PATHS[name]; if (!d) return null;
@@ -7922,7 +7929,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
               {!readOnly && (bodyAddOpen ? (
                 <div style={{ background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 12, padding: 11, display: "flex", flexWrap: "wrap", gap: 7, alignItems: "center" }}>
                   <span style={{ fontSize: 11.5, color: B.mutedMid, fontWeight: 700, marginRight: 2 }}>Add a block:</span>
-                  {[["divider", "🔤 Title"], ["callout", "📝 Text"], ["image", "🖼️ Image"], ["video_embed", "▶️ Video"], ["embed", "🔗 Iframe"], ["cta_button", "🔘 Button"]].map(([t, l]) => <button key={t} onClick={() => addBodyBrick(t)} style={{ background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, padding: "7px 11px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit" }}>{l}</button>)}
+                  {[["divider", "Title", "heading"], ["callout", "Text", "text"], ["image", "Image", "image"], ["video_embed", "Video", "video"], ["embed", "Iframe", "iframe"], ["cta_button", "Button", "button"]].map(([t, l, ic]) => <button key={t} onClick={() => addBodyBrick(t)} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, padding: "7px 11px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit" }}><Ico name={ic} size={14} /> {l}</button>)}
                   <button onClick={() => setBodyAddOpen(false)} style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 14, marginLeft: "auto" }}>✕</button>
                 </div>
               ) : (
