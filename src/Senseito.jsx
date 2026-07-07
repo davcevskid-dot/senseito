@@ -8754,6 +8754,14 @@ function CommunityWidgets({ school, T, isCreator, onUpdate }) {
   const setCfg = (patch) => onUpdate?.({ data: { ...school, community: { ...cfg, ...patch } } });
   const upsert = (w) => { const i = widgets.findIndex(x => x.id === w.id); save(i < 0 ? [...widgets, w] : widgets.map(x => x.id === w.id ? w : x)); };
   const reorder = (from, to) => { if (from == null || to == null || from === to) return; const a = [...widgets]; const [x] = a.splice(from, 1); a.splice(to, 0, x); save(a); };
+  // Drop a widget ONTO a folder → it becomes a nested item (subfolder / link / button / file inside).
+  const nestInto = (targetIdx, fromIdx) => {
+    if (fromIdx == null || fromIdx === targetIdx) return;
+    const dragged = widgets[fromIdx]; if (!dragged) return;
+    const withChild = widgets.map((w, k) => k === targetIdx ? { ...w, items: [...(w.items || []), { ...dragged, addedAt: Date.now() }] } : w);
+    save(withChild.filter((_, k) => k !== fromIdx));
+  };
+  const handleDrop = (i) => { const from = dragI.current; dragI.current = null; const tgt = widgets[i]; const drg = widgets[from]; if (tgt?.type === "folder" && drg && drg.id !== tgt.id) nestInto(i, from); else reorder(from, i); };
   if (cfg.on === false && !isCreator) return null;
   if (!widgets.length && !isCreator) return null;
   const wIcon = (w) => w.icon || (w.type === "folder" ? "📁" : w.type === "embed" ? "▶️" : w.type === "file" ? "📄" : "🔗");
@@ -8779,8 +8787,8 @@ function CommunityWidgets({ school, T, isCreator, onUpdate }) {
       <div style={layout === "grid" ? { display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(180px,1fr))", gap: 10 } : { display: "flex", flexDirection: "column", gap: 8 }}>
         {widgets.map((w, i) => (
           <div key={w.id}>
-            <div draggable={isCreator} onDragStart={() => (dragI.current = i)} onDragOver={e => e.preventDefault()} onDrop={() => { reorder(dragI.current, i); dragI.current = null; }}
-              onClick={() => openW(w)} style={{ ...cardStyle, flexDirection: (w.thumb && w.thumbPos === "top") ? "column" : (w.thumb && w.thumbPos === "right") ? "row-reverse" : "row", alignItems: (w.thumb && w.thumbPos === "top") ? "stretch" : "center" }}
+            <div draggable={isCreator} onDragStart={() => (dragI.current = i)} onDragOver={e => e.preventDefault()} onDrop={() => handleDrop(i)}
+              onClick={() => openW(w)} title={isCreator && w.type === "folder" ? "Drag another card onto this folder to nest it inside" : undefined} style={{ ...cardStyle, flexDirection: (w.thumb && w.thumbPos === "top") ? "column" : (w.thumb && w.thumbPos === "right") ? "row-reverse" : "row", alignItems: (w.thumb && w.thumbPos === "top") ? "stretch" : "center" }}
               onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.borderColor = T.ba; }}
               onMouseLeave={e => { e.currentTarget.style.transform = "none"; e.currentTarget.style.borderColor = "var(--border)"; }}>
               {thumbEl(w)}
@@ -8843,11 +8851,20 @@ function CommunityBlocks({ school, T, isCreator, onUpdate, zone }) {
     </div>
   );
 }
-function FolderContents({ w, T }) {
+function FolderContents({ w, T, depth = 0 }) {
   const [sort, setSort] = useState(w.sort || "custom");
+  const [openSub, setOpenSub] = useState({});
   const items = sortItems(w.items, sort);
-  const photos = items.filter(it => it.kind === "image");
-  const files = items.filter(it => it.kind !== "image");
+  const nested = items.filter(it => it.type);      // widgets dragged into this folder (folder/link/button/embed/file)
+  const media = items.filter(it => !it.type);      // legacy file/photo items
+  const photos = media.filter(it => it.kind === "image");
+  const files = media.filter(it => it.kind !== "image");
+  const openItem = (it) => {
+    if (it.type === "folder") { setOpenSub(s => ({ ...s, [it.id]: !s[it.id] })); return; }
+    let url = it.type === "embed" ? communityEmbedUrl(it.url) : it.url;
+    if (/^https?:\/\//i.test(url || "")) { if (it.type === "file") sxDownloaded(); window.open(url, "_blank", "noopener"); }
+  };
+  const nIcon = (it) => it.icon || (it.type === "folder" ? "📁" : it.type === "embed" ? "▶️" : it.type === "file" ? "📄" : "🔗");
   return (
     <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 12, padding: 13 }}>
       <div style={{ display: "flex", gap: 6, marginBottom: 11, alignItems: "center" }}>
@@ -8855,7 +8872,20 @@ function FolderContents({ w, T }) {
         {[["custom", "Custom"], ["name", "Name"], ["date", "Newest"]].map(([k, l]) => <button key={k} onClick={() => setSort(k)} style={{ background: sort === k ? T.ps : "none", border: `1px solid ${sort === k ? T.ba : B.borderMid}`, borderRadius: 7, color: sort === k ? T.hi : B.mutedMid, padding: "3px 9px", cursor: "pointer", fontSize: 11, fontFamily: "inherit", fontWeight: 700 }}>{l}</button>)}
       </div>
       {items.length === 0 && <div style={{ fontSize: 12, color: B.muted }}>Empty folder.</div>}
-      {photos.length > 0 && <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(90px,1fr))", gap: 7, marginBottom: files.length ? 10 : 0 }}>
+      {nested.map((it, i) => (
+        <div key={it.id || i} style={{ marginBottom: 7 }}>
+          <div onClick={() => openItem(it)} style={{ display: "flex", alignItems: "center", gap: 10, background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 10, padding: "9px 11px", cursor: "pointer" }}>
+            <span style={{ width: 30, height: 30, borderRadius: 8, background: T.ps, border: `1px solid ${T.ba}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16, flexShrink: 0, overflow: "hidden" }}>{it.thumb ? <img src={it.thumb} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : nIcon(it)}</span>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontSize: 12.5, fontWeight: 700, color: B.white, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{it.title || "Untitled"}</div>
+              {it.description && <div style={{ fontSize: 11, color: B.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{it.description}</div>}
+            </div>
+            {it.type === "folder" && <span style={{ color: T.p, fontSize: 12, transform: openSub[it.id] ? "rotate(180deg)" : "none" }}>▾</span>}
+          </div>
+          {it.type === "folder" && openSub[it.id] && depth < 4 && <div style={{ marginTop: 6, marginLeft: 12 }}><FolderContents w={it} T={T} depth={depth + 1} /></div>}
+        </div>
+      ))}
+      {photos.length > 0 && <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(90px,1fr))", gap: 7, margin: "6px 0", ...(files.length ? { marginBottom: 10 } : {}) }}>
         {photos.map((it, i) => <a key={i} href={it.url} target="_blank" rel="noreferrer" title={it.name} style={{ display: "block", borderRadius: 8, overflow: "hidden", border: `1px solid ${B.border}`, aspectRatio: "1" }}><img src={it.url} alt={it.name || ""} style={{ width: "100%", height: "100%", objectFit: "cover" }} /></a>)}
       </div>}
       {files.map((it, i) => (
@@ -8963,19 +8993,24 @@ function WidgetEditor({ draft, isNew, T, media, school, onSave, onDelete, onClos
             <div style={{ flex: 1, minWidth: 130 }}><div style={lbl}>Default sort</div><select value={w.sort || "custom"} onChange={e => set({ sort: e.target.value })} style={{ ...inp, cursor: "pointer" }}><option value="custom">Custom</option><option value="name">Name</option><option value="date">Newest</option></select></div>
           </div>
           <div style={lbl}>Items ({items.length})</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10, maxHeight: 200, overflowY: "auto" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10, maxHeight: 220, overflowY: "auto" }}>
             {items.map((it, i) => (
               <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 9, padding: "7px 10px" }}>
-                <span style={{ fontSize: 14 }}>{it.kind === "image" ? "🖼️" : FILE_ICON(it.name, it.url)}</span>
-                <input value={it.name || ""} onChange={e => set({ items: items.map((x, j) => j === i ? { ...x, name: e.target.value } : x) })} placeholder="Name" style={{ flex: 1, background: "none", border: "none", color: B.white, fontFamily: "inherit", fontSize: 12.5, outline: "none" }} />
+                <span style={{ fontSize: 14 }}>{it.type ? (it.icon || (it.type === "folder" ? "📁" : it.type === "embed" ? "▶️" : it.type === "file" ? "📄" : "🔗")) : it.kind === "image" ? "🖼️" : FILE_ICON(it.name, it.url)}</span>
+                <input value={it.title || it.name || ""} onChange={e => set({ items: items.map((x, j) => j === i ? { ...x, [x.type ? "title" : "name"]: e.target.value } : x) })} placeholder="Name" style={{ flex: 1, background: "none", border: "none", color: B.white, fontFamily: "inherit", fontSize: 12.5, outline: "none" }} />
+                {it.type && it.type !== "folder" && <input value={it.url || ""} onChange={e => set({ items: items.map((x, j) => j === i ? { ...x, url: e.target.value.trim() } : x) })} placeholder="https://…" style={{ flex: 1, minWidth: 0, background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 7, color: B.mutedMid, fontFamily: "inherit", fontSize: 11.5, outline: "none", padding: "4px 7px" }} />}
                 <button onClick={() => set({ items: items.filter((_, j) => j !== i) })} style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 12 }}>✕</button>
               </div>
             ))}
           </div>
           <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
-            {media && <button onClick={() => setPick(true)} style={{ background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 9, color: T.hi, padding: "8px 12px", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>🖼 From media</button>}
-            <button onClick={() => { const u = window.prompt("File / photo URL (https):"); if (u && /^https?:\/\//i.test(u.trim())) { const url = u.trim(); addItem({ name: url.split("/").pop() || "Item", url, kind: /\.(png|jpe?g|gif|webp|svg)($|\?)/i.test(url) ? "image" : "file" }); } }} style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, padding: "8px 12px", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>🔗 From URL</button>
+            {media && <button onClick={() => setPick(true)} style={{ background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 9, color: T.hi, padding: "8px 12px", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>🖼 Media</button>}
+            <button onClick={() => { const u = window.prompt("File / photo URL (https):"); if (u && /^https?:\/\//i.test(u.trim())) { const url = u.trim(); addItem({ name: url.split("/").pop() || "Item", url, kind: /\.(png|jpe?g|gif|webp|svg)($|\?)/i.test(url) ? "image" : "file" }); } }} style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, padding: "8px 12px", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>🔗 URL</button>
+            <button onClick={() => addItem({ id: uid(), type: "folder", title: "Subfolder", items: [] })} style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, padding: "8px 12px", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>📁 Subfolder</button>
+            <button onClick={() => addItem({ id: uid(), type: "link", title: "Link", url: "" })} style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, padding: "8px 12px", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>🔗 Button</button>
+            <button onClick={() => addItem({ id: uid(), type: "embed", title: "Recording", url: "" })} style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, padding: "8px 12px", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>▶️ Embed</button>
           </div>
+          <div style={{ fontSize: 11, color: B.muted, marginTop: 7 }}>Tip: you can also drag any card from the panel <b>onto a folder</b> to nest it inside.</div>
         </>}
         <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
           <button onClick={() => onSave(w)} style={{ flex: 1, background: T.grad, border: "none", borderRadius: 10, color: "#fff", padding: "11px", cursor: "pointer", fontSize: 13.5, fontWeight: 800, fontFamily: "inherit" }}>{isNew ? "Add" : "Save"}</button>
