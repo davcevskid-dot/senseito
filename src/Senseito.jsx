@@ -7973,7 +7973,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
           {activeTab === "mentor" && <MentorOffice school={school} T={T} chat={rec.mentorChat || []} onChat={(msgs) => onUpdate({ mentorChat: msgs })} bus={bus} onIngest={ingestOutput} progress={progress} onUpdate={onUpdate} readOnly={readOnly} />}
           {activeTab === "tools" && <ToolsSection rec={rec} T={T} onUpdate={onUpdate} buildTool={buildTool} buildingTool={buildingTool} readOnly={readOnly} onReloadIdeas={reloadIdeas} onEditTool={editTool} />}
           {SECTIONS.filter(s => s.kind === "community").map(sec => activeTab === sec.id
-            ? <CommunityBoard key={sec.id} school={school} schoolId={rec.id} T={T} viewer={viewer} onSignIn={onSignIn} isCreator={!readOnly} />
+            ? <CommunityBoard key={sec.id} school={school} schoolId={rec.id} T={T} viewer={viewer} onSignIn={onSignIn} isCreator={!readOnly} onUpdate={onUpdate} />
             : null)}
           {SECTIONS.filter(s => s.kind === "dashboard").map(sec => activeTab === sec.id
             ? <DashboardSection key={sec.id} section={sec} rec={rec} T={T} onUpdate={onUpdate} readOnly={readOnly} school={school} onIngest={ingestOutput} />
@@ -8484,7 +8484,185 @@ function Avatar({ name, url, size = 30, T }) {
     : <div style={{ width: size, height: size, borderRadius: "50%", background: T?.grad || "linear-gradient(135deg,#7C3AED,#06B6D4)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: size * 0.42, fontWeight: 800, color: "#fff", flexShrink: 0 }}>{(name || "?")[0].toUpperCase()}</div>;
 }
 
-function CommunityBoard({ school, schoolId, T, viewer, onSignIn, isCreator }) {
+// Normalise common share links into an embeddable player URL (YouTube/Vimeo/Loom/Drive/Zoom).
+function communityEmbedUrl(u) {
+  u = String(u || "").trim(); let m;
+  if ((m = u.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/live\/)([\w-]+)/))) return `https://www.youtube.com/embed/${m[1]}`;
+  if ((m = u.match(/vimeo\.com\/(\d+)/))) return `https://player.vimeo.com/video/${m[1]}`;
+  if ((m = u.match(/loom\.com\/share\/([\w-]+)/))) return `https://www.loom.com/embed/${m[1]}`;
+  if ((m = u.match(/drive\.google\.com\/file\/d\/([\w-]+)/))) return `https://drive.google.com/file/d/${m[1]}/preview`;
+  return u;
+}
+const sortItems = (items, mode) => {
+  const a = [...(items || [])];
+  if (mode === "name") a.sort((x, y) => (x.name || "").localeCompare(y.name || ""));
+  else if (mode === "date") a.sort((x, y) => (y.addedAt || 0) - (x.addedAt || 0));
+  return a; // "custom" = insertion order
+};
+
+// A creator-arranged panel of resource widgets on the community page: folders (files/photos),
+// shortcut buttons, and embeds (Zoom/YouTube recordings that play inline). Like a private group.
+function CommunityWidgets({ school, T, isCreator, onUpdate }) {
+  const cfg = school.community || {};
+  const widgets = cfg.widgets || [];
+  const layout = cfg.layout || "grid";
+  const media = useContext(MediaAuthCtx);
+  const [edit, setEdit] = useState(null);   // widget object being edited, or { _new: type }
+  const [open, setOpen] = useState(null);   // widget opened in a popup
+  const [inlineOpen, setInlineOpen] = useState({}); // folder id → expanded inline
+  const dragI = useRef(null);
+  const save = (list) => onUpdate?.({ data: { ...school, community: { ...cfg, widgets: list } } });
+  const setCfg = (patch) => onUpdate?.({ data: { ...school, community: { ...cfg, ...patch } } });
+  const upsert = (w) => { const i = widgets.findIndex(x => x.id === w.id); save(i < 0 ? [...widgets, w] : widgets.map(x => x.id === w.id ? w : x)); };
+  const reorder = (from, to) => { if (from == null || to == null || from === to) return; const a = [...widgets]; const [x] = a.splice(from, 1); a.splice(to, 0, x); save(a); };
+  if (cfg.on === false && !isCreator) return null;
+  if (!widgets.length && !isCreator) return null;
+  const wIcon = (w) => w.icon || (w.type === "folder" ? "📁" : w.type === "embed" ? "▶️" : "🔗");
+  const openW = (w) => {
+    if (w.type === "link") { if (/^https?:\/\//i.test(w.url || "")) window.open(w.url, "_blank", "noopener"); return; }
+    if (w.type === "folder" && w.openMode === "inline") { setInlineOpen(s => ({ ...s, [w.id]: !s[w.id] })); return; }
+    setOpen(w);
+  };
+  const cardStyle = { position: "relative", background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: layout === "list" ? "12px 14px" : 16, cursor: "pointer", transition: "transform 0.14s, border-color 0.2s", display: "flex", alignItems: "center", gap: 12, textAlign: "left" };
+  return (
+    <div style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 16, padding: 15 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 12, flexWrap: "wrap" }}>
+        <div style={{ fontSize: 13.5, fontWeight: 800, color: B.white, fontFamily: "'Space Grotesk',sans-serif" }}>{cfg.title || "📌 Resources & rooms"}</div>
+        {isCreator && <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <button onClick={() => setCfg({ layout: layout === "grid" ? "list" : "grid" })} title="Toggle layout" style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "5px 10px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit", fontWeight: 700 }}>{layout === "grid" ? "▦ Grid" : "☰ List"}</button>
+          <button onClick={() => setCfg({ on: cfg.on === false })} title="Show/hide this panel to students" style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: cfg.on === false ? "#F87171" : "#4ADE80", padding: "5px 10px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit", fontWeight: 700 }}>{cfg.on === false ? "Hidden" : "Visible"}</button>
+        </div>}
+      </div>
+      {widgets.length === 0 && isCreator && <div style={{ fontSize: 12.5, color: B.muted, marginBottom: 12 }}>Build your group space — add folders of files/photos, shortcut buttons, or embeds (Zoom/YouTube recordings that play right here).</div>}
+      <div style={layout === "grid" ? { display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(180px,1fr))", gap: 10 } : { display: "flex", flexDirection: "column", gap: 8 }}>
+        {widgets.map((w, i) => (
+          <div key={w.id}>
+            <div draggable={isCreator} onDragStart={() => (dragI.current = i)} onDragOver={e => e.preventDefault()} onDrop={() => { reorder(dragI.current, i); dragI.current = null; }}
+              onClick={() => openW(w)} style={cardStyle}
+              onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.borderColor = T.ba; }}
+              onMouseLeave={e => { e.currentTarget.style.transform = "none"; e.currentTarget.style.borderColor = "var(--border)"; }}>
+              <div style={{ width: 40, height: 40, borderRadius: 11, background: T.ps, border: `1px solid ${T.ba}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 }}>{wIcon(w)}</div>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 700, color: B.white, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{w.title || "Untitled"}</div>
+                <div style={{ fontSize: 11, color: B.muted }}>{w.type === "folder" ? `${(w.items || []).length} item${(w.items || []).length === 1 ? "" : "s"}` : w.type === "embed" ? "Recording / embed" : "Link"}</div>
+              </div>
+              {isCreator && <button onClick={e => { e.stopPropagation(); setEdit(w); }} title="Edit" style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 13, flexShrink: 0 }}>✎</button>}
+            </div>
+            {w.type === "folder" && w.openMode === "inline" && inlineOpen[w.id] && <div style={{ marginTop: 8 }}><FolderContents w={w} T={T} /></div>}
+          </div>
+        ))}
+        {isCreator && (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", ...(layout === "grid" ? { border: `1px dashed ${B.borderMid}`, borderRadius: 14, padding: 12, justifyContent: "center" } : {}) }}>
+            {[["folder", "📁 Folder"], ["embed", "▶️ Embed"], ["link", "🔗 Button"]].map(([tp, l]) => <button key={tp} onClick={() => setEdit({ _new: tp })} style={{ background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 9, color: T.hi, padding: "7px 12px", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>＋ {l}</button>)}
+          </div>
+        )}
+      </div>
+      {open && <WidgetOpenModal w={open} T={T} onClose={() => setOpen(null)} />}
+      {edit && <WidgetEditor draft={edit._new ? { id: uid(), type: edit._new, title: "", items: [], openMode: "popup", sort: "custom" } : edit} isNew={!!edit._new} T={T} media={media} onSave={w => { upsert(w); setEdit(null); }} onDelete={() => { save(widgets.filter(x => x.id !== edit.id)); setEdit(null); }} onClose={() => setEdit(null)} />}
+    </div>
+  );
+}
+function FolderContents({ w, T }) {
+  const [sort, setSort] = useState(w.sort || "custom");
+  const items = sortItems(w.items, sort);
+  const photos = items.filter(it => it.kind === "image");
+  const files = items.filter(it => it.kind !== "image");
+  return (
+    <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 12, padding: 13 }}>
+      <div style={{ display: "flex", gap: 6, marginBottom: 11, alignItems: "center" }}>
+        <span style={{ fontSize: 11, color: B.muted }}>Sort</span>
+        {[["custom", "Custom"], ["name", "Name"], ["date", "Newest"]].map(([k, l]) => <button key={k} onClick={() => setSort(k)} style={{ background: sort === k ? T.ps : "none", border: `1px solid ${sort === k ? T.ba : B.borderMid}`, borderRadius: 7, color: sort === k ? T.hi : B.mutedMid, padding: "3px 9px", cursor: "pointer", fontSize: 11, fontFamily: "inherit", fontWeight: 700 }}>{l}</button>)}
+      </div>
+      {items.length === 0 && <div style={{ fontSize: 12, color: B.muted }}>Empty folder.</div>}
+      {photos.length > 0 && <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(90px,1fr))", gap: 7, marginBottom: files.length ? 10 : 0 }}>
+        {photos.map((it, i) => <a key={i} href={it.url} target="_blank" rel="noreferrer" title={it.name} style={{ display: "block", borderRadius: 8, overflow: "hidden", border: `1px solid ${B.border}`, aspectRatio: "1" }}><img src={it.url} alt={it.name || ""} style={{ width: "100%", height: "100%", objectFit: "cover" }} /></a>)}
+      </div>}
+      {files.map((it, i) => (
+        <div key={i} style={{ display: "flex", alignItems: "center", gap: 9, padding: "8px 0", borderTop: i ? `1px solid ${B.border}` : "none" }}>
+          <span style={{ fontSize: 15 }}>{FILE_ICON(it.name, it.url)}</span>
+          <a href={it.url} target="_blank" rel="noreferrer" onClick={() => sxDownloaded()} style={{ flex: 1, fontSize: 12.5, color: B.white, textDecoration: "none", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{it.name || it.url}</a>
+          <a href={it.url} target="_blank" rel="noreferrer" style={{ fontSize: 11.5, color: T.hi, textDecoration: "none", fontWeight: 700 }}>Open ↗</a>
+        </div>
+      ))}
+    </div>
+  );
+}
+function WidgetOpenModal({ w, T, onClose }) {
+  const isEmbed = w.type === "embed";
+  const src = isEmbed ? communityEmbedUrl(w.url) : "";
+  return createPortal(
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 2600, background: "rgba(2,2,8,0.8)", backdropFilter: "blur(8px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "max(24px,5vh) 16px 40px", overflowY: "auto", fontFamily: "'Inter',sans-serif" }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: isEmbed ? 880 : 620, background: "var(--surface)", border: `1px solid ${T.ba}`, borderRadius: 18, overflow: "hidden", boxShadow: "0 30px 90px rgba(0,0,0,0.6)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "13px 16px", borderBottom: `1px solid ${B.border}`, background: "var(--surface2)" }}>
+          <div style={{ fontSize: 14, fontWeight: 800, color: B.white }}>{w.icon || (isEmbed ? "▶️" : "📁")} {w.title || (isEmbed ? "Recording" : "Folder")}</div>
+          <button onClick={onClose} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "5px 10px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>✕</button>
+        </div>
+        <div style={{ padding: isEmbed ? 0 : 16 }}>
+          {isEmbed
+            ? (/^https?:\/\//i.test(src) ? <div style={{ position: "relative", width: "100%", aspectRatio: "16/9", background: "#000" }}><iframe src={src} title={w.title || "embed"} allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowFullScreen style={{ position: "absolute", inset: 0, width: "100%", height: "100%", border: "none" }} /></div> : <div style={{ padding: 24, color: B.muted, fontSize: 13 }}>No valid embed URL set.</div>)
+            : <FolderContents w={w} T={T} />}
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+function WidgetEditor({ draft, isNew, T, media, onSave, onDelete, onClose }) {
+  const [w, setW] = useState(draft);
+  const [pick, setPick] = useState(false);
+  const set = (patch) => setW(x => ({ ...x, ...patch }));
+  const items = w.items || [];
+  const addItem = (it) => set({ items: [...items, { ...it, addedAt: Date.now() }] });
+  const inp = { width: "100%", boxSizing: "border-box", background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, fontFamily: "inherit", fontSize: 13, padding: "9px 11px" };
+  const lbl = { fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: B.muted, marginBottom: 5 };
+  return createPortal(
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 2650, background: "rgba(2,2,8,0.74)", backdropFilter: "blur(8px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "max(24px,5vh) 16px 40px", overflowY: "auto", fontFamily: "'Inter',sans-serif" }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 480, background: "var(--surface)", border: `1px solid ${T.ba}`, borderRadius: 18, padding: 18, boxShadow: "0 30px 90px rgba(0,0,0,0.6)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+          <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 16, fontWeight: 800, color: B.white }}>{isNew ? "Add" : "Edit"} {w.type}</div>
+          <button onClick={onClose} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "5px 10px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>✕</button>
+        </div>
+        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+          <input value={w.icon || ""} onChange={e => set({ icon: e.target.value.slice(0, 3) })} placeholder="📁" style={{ ...inp, width: 52, textAlign: "center", fontSize: 18 }} />
+          <input value={w.title || ""} onChange={e => set({ title: e.target.value })} placeholder="Title" style={{ ...inp, flex: 1 }} />
+        </div>
+        {(w.type === "link" || w.type === "embed") && <div style={{ marginBottom: 12 }}>
+          <div style={lbl}>{w.type === "embed" ? "Recording / video URL (Zoom, YouTube, Loom, Drive…)" : "Link URL"}</div>
+          <input value={w.url || ""} onChange={e => set({ url: e.target.value.trim() })} placeholder="https://…" style={inp} />
+          {w.type === "embed" && <div style={{ fontSize: 11, color: B.muted, marginTop: 5 }}>Plays in a player right inside the community. For Zoom cloud recordings, paste the share link.</div>}
+        </div>}
+        {w.type === "folder" && <>
+          <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 130 }}><div style={lbl}>Opens as</div><select value={w.openMode || "popup"} onChange={e => set({ openMode: e.target.value })} style={{ ...inp, cursor: "pointer" }}><option value="popup">Popup</option><option value="inline">Inline (toggle)</option></select></div>
+            <div style={{ flex: 1, minWidth: 130 }}><div style={lbl}>Default sort</div><select value={w.sort || "custom"} onChange={e => set({ sort: e.target.value })} style={{ ...inp, cursor: "pointer" }}><option value="custom">Custom</option><option value="name">Name</option><option value="date">Newest</option></select></div>
+          </div>
+          <div style={lbl}>Items ({items.length})</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10, maxHeight: 200, overflowY: "auto" }}>
+            {items.map((it, i) => (
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 9, padding: "7px 10px" }}>
+                <span style={{ fontSize: 14 }}>{it.kind === "image" ? "🖼️" : FILE_ICON(it.name, it.url)}</span>
+                <input value={it.name || ""} onChange={e => set({ items: items.map((x, j) => j === i ? { ...x, name: e.target.value } : x) })} placeholder="Name" style={{ flex: 1, background: "none", border: "none", color: B.white, fontFamily: "inherit", fontSize: 12.5, outline: "none" }} />
+                <button onClick={() => set({ items: items.filter((_, j) => j !== i) })} style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 12 }}>✕</button>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
+            {media && <button onClick={() => setPick(true)} style={{ background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 9, color: T.hi, padding: "8px 12px", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>🖼 From media</button>}
+            <button onClick={() => { const u = window.prompt("File / photo URL (https):"); if (u && /^https?:\/\//i.test(u.trim())) { const url = u.trim(); addItem({ name: url.split("/").pop() || "Item", url, kind: /\.(png|jpe?g|gif|webp|svg)($|\?)/i.test(url) ? "image" : "file" }); } }} style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, padding: "8px 12px", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>🔗 From URL</button>
+          </div>
+        </>}
+        <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+          <button onClick={() => onSave(w)} style={{ flex: 1, background: T.grad, border: "none", borderRadius: 10, color: "#fff", padding: "11px", cursor: "pointer", fontSize: 13.5, fontWeight: 800, fontFamily: "inherit" }}>{isNew ? "Add" : "Save"}</button>
+          {!isNew && <button onClick={onDelete} style={{ background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.3)", borderRadius: 10, color: "#F87171", padding: "11px 15px", cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit" }}>Delete</button>}
+        </div>
+      </div>
+      {pick && media && <MediaPicker token={media.token} userId={media.userId} onPick={m => { addItem({ name: m.name || "Item", url: m.url, kind: isImageFile(m) ? "image" : "file" }); setPick(false); }} onClose={() => setPick(false)} />}
+    </div>,
+    document.body
+  );
+}
+
+function CommunityBoard({ school, schoolId, T, viewer, onSignIn, isCreator, onUpdate }) {
   const [posts, setPosts] = useState(null);
   const [profiles, setProfiles] = useState({});
   const [draft, setDraft] = useState("");
@@ -8546,6 +8724,7 @@ function CommunityBoard({ school, schoolId, T, viewer, onSignIn, isCreator }) {
   );
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <CommunityWidgets school={school} T={T} isCreator={isCreator} onUpdate={onUpdate} />
       {viewer ? (
         <div style={{ display: "flex", gap: 10, background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 14, padding: "13px 15px" }}>
           <Avatar name={viewerName(viewer)} size={32} T={T} />
