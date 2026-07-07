@@ -462,6 +462,7 @@ const ICO_PATHS = {
   button: "M3 9h18v6H3zM7 12h10",
   folder2: "M3 6a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2z",
   file: "M6 2h8l4 4v16H6zM14 2v4h4M9 13h6M9 17h6",
+  card: "M3 6h18v12H3zM3 10h18M7 15h4",
 };
 function Ico({ name, size = 15, fill = false, style }) {
   const d = ICO_PATHS[name]; if (!d) return null;
@@ -7173,6 +7174,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const [trainOpen, setTrainOpen] = useState(false); // Training Ground (mentor AI training)
   const [analyticsOpen, setAnalyticsOpen] = useState(false); // per-school analytics dashboard
   const [calPopup, setCalPopup] = useState(false); // calendar section opens as a popup
+  const [pricingOpen, setPricingOpen] = useState(false); // pricing / PayPal modal
   const [badgeEdit, setBadgeEdit] = useState(null); // { i } badge index being edited (-1 = new)
   const [certOpen, setCertOpen] = useState(false); // certificate designer / earned-certificate modal
   const [iconEdit, setIconEdit] = useState(false); // school-icon edit popover
@@ -7681,6 +7683,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
               <button onClick={() => setShowroomOpen(true)} title="Build a Showroom slider, then drop it in with a Showroom brick" style={ghost(false)} {...hover}><Ico name="cards" /> Showroom{(school.showroom?.slides?.length) ? ` · ${school.showroom.slides.length}` : ""}</button>
               <button onClick={() => setTrainOpen(true)} title="Train your school's mentor AI — feed it books/notes, set directives" style={ghost(false)} {...hover}><Ico name="brain" /> Train{(school.training?.sources?.length) ? ` · ${school.training.sources.length}` : ""}</button>
               <button onClick={() => setAnalyticsOpen(true)} title="Student analytics — progress, mastery, RSVPs, emails" style={ghost(false)} {...hover}><Ico name="chart" /> Analytics</button>
+              <button onClick={() => setPricingOpen(true)} title="Pricing & PayPal — charge for your school, free trials" style={ghost(false)} {...hover}><Ico name="card" /> Pricing{school.pricing?.enabled && Number(school.pricing?.price) > 0 ? ` · ${CURR_SYM[school.pricing.currency || "USD"] || ""}${school.pricing.price}` : ""}</button>
               <div style={{ flex: 1, minWidth: 6 }} />
               <button data-guide="publish" onClick={() => onPublish(rec)} disabled={publishing} style={{ display: "inline-flex", alignItems: "center", gap: 6, height: 30, background: rec.published ? "rgba(74,222,128,0.12)" : "linear-gradient(135deg,#059669,#047857)", border: rec.published ? "1px solid rgba(74,222,128,0.35)" : "none", borderRadius: 9, color: rec.published ? "#4ADE80" : "#fff", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, padding: "0 14px", cursor: "pointer", whiteSpace: "nowrap" }}>
                 {publishing ? <><Ico name="check" /> Published</> : rec.published ? <><Ico name="check" /> Published</> : <><Ico name="publish" /> Publish</>}
@@ -7756,6 +7759,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
         {!readOnly && trainOpen && <TrainingGround school={school} T={T} media={media} onUpdate={onUpdate} onClose={() => setTrainOpen(false)} />}
         {!readOnly && analyticsOpen && <AnalyticsDashboard school={school} schoolId={rec.id} viewer={viewer} token={token} T={T} onClose={() => setAnalyticsOpen(false)} />}
         {calPopup && <CalendarPopup school={school} T={T} onClose={() => setCalPopup(false)} />}
+        {!readOnly && pricingOpen && <PricingModal school={school} T={T} onUpdate={onUpdate} onClose={() => setPricingOpen(false)} />}
         {!readOnly && badgeEdit && <BadgeRuleEditor index={badgeEdit.i} school={school} T={T} onClose={() => setBadgeEdit(null)} onUpdate={onUpdate} />}
         {certOpen && <CertificateModal school={school} T={T} media={media} viewerName={readOnly ? (viewer ? viewerName(viewer) : "Student Name") : "Student Name"} earned={readOnly} onUpdate={readOnly ? undefined : onUpdate} onClose={() => setCertOpen(false)} />}
 
@@ -9621,11 +9625,88 @@ function EnrollCard({ schoolId, mentorName, T, onSignIn }) {
   );
 }
 
+const CURR_SYM = { USD: "$", EUR: "€", GBP: "£", CAD: "$", AUD: "$" };
+function paypalPayUrl(pricing, schoolName) {
+  const link = (pricing.paypal || "").trim(); const cur = pricing.currency || "USD"; const price = pricing.price;
+  if (!link) return "";
+  if (/paypal\.me\//i.test(link) || /^https?:\/\//i.test(link)) return `${link.replace(/\/+$/, "")}/${price}${cur}`;
+  if (/@/.test(link)) return `https://www.paypal.com/cgi-bin/webscr?cmd=_xclick&business=${encodeURIComponent(link)}&amount=${price}&currency_code=${cur}&item_name=${encodeURIComponent(schoolName || "Course")}`;
+  return "";
+}
+// Paywall shown to signed-in students of a PAID school with no active entitlement.
+function Paywall({ rec, stud, T, onEntitled }) {
+  const p = rec.data.pricing || {}; const cur = p.currency || "USD"; const sym = CURR_SYM[cur] || "";
+  const [busy, setBusy] = useState(""); const [initiated, setInitiated] = useState(false); const [err, setErr] = useState("");
+  async function grant(status, days, ref) {
+    setBusy(status); setErr("");
+    try {
+      const trial_ends = days ? new Date(Date.now() + days * 86400000).toISOString() : null;
+      await supaFetch(`/rest/v1/entitlements?on_conflict=school_id,user_id`, { method: "POST", token: stud.token, headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: [{ school_id: rec.id, user_id: stud.user.id, status, trial_ends, provider: "paypal", ref: ref || null, updated_at: new Date().toISOString() }] });
+      onEntitled({ status, trial_ends });
+    } catch (e) { setErr("Couldn't unlock: " + e.message); }
+    setBusy("");
+  }
+  const payUrl = paypalPayUrl(p, rec.data.name);
+  return (
+    <div style={{ maxWidth: 460, margin: "26px auto 0", padding: "0 20px" }}>
+      <div style={{ background: T.heroGrad || T.gr, border: `1px solid ${T.ba}`, borderRadius: 20, padding: "28px 24px", textAlign: "center" }}>
+        <div style={{ fontSize: 40, marginBottom: 8 }}>{rec.data.emoji || "🔒"}</div>
+        <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 22, fontWeight: 800, color: "#fff", marginBottom: 6 }}>{rec.data.name}</div>
+        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.85)", marginBottom: 18, lineHeight: 1.6 }}>This school is <b>{sym}{p.price} {cur}</b>. Unlock full access below.</div>
+        {payUrl && <a href={payUrl} target="_blank" rel="noreferrer" onClick={() => setInitiated(true)} style={{ display: "block", background: "#0070BA", color: "#fff", borderRadius: 12, padding: "13px", fontSize: 15, fontWeight: 800, textDecoration: "none", marginBottom: 10 }}>Pay {sym}{p.price} with PayPal →</a>}
+        {!payUrl && <div style={{ fontSize: 12.5, color: "#FBBF24", marginBottom: 10 }}>The creator hasn't connected PayPal yet.</div>}
+        {initiated && <button onClick={() => grant("paid", 0, "self-confirmed")} disabled={busy} style={{ width: "100%", background: "rgba(74,222,128,0.15)", border: "1px solid rgba(74,222,128,0.45)", borderRadius: 12, color: "#4ADE80", padding: "11px", cursor: "pointer", fontSize: 13.5, fontWeight: 800, fontFamily: "inherit", marginBottom: 10 }}>{busy === "paid" ? "Unlocking…" : "✓ I've completed payment — unlock"}</button>}
+        {Number(p.trialDays) > 0 && <button onClick={() => grant("trial", Number(p.trialDays))} disabled={busy} style={{ width: "100%", background: "rgba(255,255,255,0.12)", border: "1px solid rgba(255,255,255,0.28)", borderRadius: 12, color: "#fff", padding: "11px", cursor: "pointer", fontSize: 13.5, fontWeight: 800, fontFamily: "inherit" }}>{busy === "trial" ? "Starting…" : `Start your ${p.trialDays}-day free trial`}</button>}
+        {err && <div style={{ fontSize: 12, color: "#FCA5A5", marginTop: 10 }}>{err}</div>}
+        <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.5)", marginTop: 14, lineHeight: 1.5 }}>Payments are handled on PayPal. After paying, tap “I've completed payment”. (Automatic payment verification is coming.)</div>
+      </div>
+    </div>
+  );
+}
+// Creator pricing / PayPal connection.
+function PricingModal({ school, T, onUpdate, onClose }) {
+  const p = school.pricing || {};
+  const set = (patch) => onUpdate({ data: { ...school, pricing: { ...(school.pricing || {}), ...patch } } });
+  const inp = { width: "100%", boxSizing: "border-box", background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, fontFamily: "inherit", fontSize: 13, padding: "9px 11px" };
+  const lbl = { fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: B.muted, marginBottom: 5 };
+  const linkOk = !p.paypal || /paypal\.me\//i.test(p.paypal) || /^https?:\/\//i.test(p.paypal) || /@/.test(p.paypal);
+  return createPortal(
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 2600, background: "rgba(2,2,8,0.74)", backdropFilter: "blur(8px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "max(24px,6vh) 16px 40px", overflowY: "auto", fontFamily: "'Inter',sans-serif" }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 460, background: "var(--surface)", border: `1px solid ${T.ba}`, borderRadius: 18, padding: 20, boxShadow: "0 30px 90px rgba(0,0,0,0.6)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+          <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 16, fontWeight: 800, color: B.white }}>💳 Pricing & payments</div>
+          <button onClick={onClose} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "5px 10px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>✕</button>
+        </div>
+        <label style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 16, fontSize: 13.5, color: B.white, cursor: "pointer" }}>
+          <input type="checkbox" checked={!!p.enabled} onChange={e => set({ enabled: e.target.checked })} /> Charge for this school (students must pay to enter)
+        </label>
+        <div style={{ opacity: p.enabled ? 1 : 0.5, pointerEvents: p.enabled ? "auto" : "none", display: "flex", flexDirection: "column", gap: 13 }}>
+          <div style={{ display: "flex", gap: 10 }}>
+            <div style={{ flex: 1 }}><div style={lbl}>Price</div><input type="number" min="0" value={p.price ?? ""} onChange={e => set({ price: Math.max(0, +e.target.value || 0) })} placeholder="49" style={inp} /></div>
+            <div style={{ width: 110 }}><div style={lbl}>Currency</div><select value={p.currency || "USD"} onChange={e => set({ currency: e.target.value })} style={{ ...inp, cursor: "pointer" }}>{Object.keys(CURR_SYM).map(c => <option key={c} value={c}>{c}</option>)}</select></div>
+          </div>
+          <div>
+            <div style={lbl}>Connect PayPal</div>
+            <input value={p.paypal || ""} onChange={e => set({ paypal: e.target.value.trim() })} placeholder="paypal.me/yourname  ·  or your PayPal email" style={{ ...inp, borderColor: linkOk ? B.borderMid : "rgba(248,113,113,0.5)" }} />
+            <div style={{ fontSize: 11, color: B.muted, marginTop: 5, lineHeight: 1.5 }}>Paste your <b>paypal.me</b> link (easiest) or your PayPal email. Students pay you directly; the school unlocks after payment.</div>
+            {!linkOk && <div style={{ fontSize: 11, color: "#F87171", marginTop: 4 }}>Enter a paypal.me link or a valid email.</div>}
+          </div>
+          <div>
+            <div style={lbl}>Free trial</div>
+            <div style={{ display: "flex", gap: 7 }}>{[[0, "None"], [7, "7 days"], [14, "14 days"]].map(([d, l]) => <button key={d} onClick={() => set({ trialDays: d })} style={{ flex: 1, background: (p.trialDays || 0) === d ? T.ps : B.surface2, border: `1px solid ${(p.trialDays || 0) === d ? T.ba : B.borderMid}`, borderRadius: 9, color: (p.trialDays || 0) === d ? T.hi : B.mutedMid, padding: "9px", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>{l}</button>)}</div>
+            <div style={{ fontSize: 11, color: B.muted, marginTop: 5 }}>Students can start the trial instantly (no card needed). Trials that require payment info up-front need PayPal subscriptions — coming next.</div>
+          </div>
+        </div>
+      </div>
+    </div>, document.body);
+}
+
 function PublicSchool({ slug }) {
   const [rec, setRec] = useState(null);
   const [status, setStatus] = useState("loading");
   const [stud, setStud] = useState(null); // signed-in student { token, user }
   const [profOpen, setProfOpen] = useState(false); // student profile modal
+  const [ent, setEnt] = useState(undefined); // entitlement row (undefined = not loaded, null = none)
   const [mode, setMode] = useThemeMode();
   const lsKey = `senseito_progress_${slug}`;
   const saveT = useRef(null);
@@ -9675,6 +9756,15 @@ function PublicSchool({ slug }) {
           await supaFetch(`/rest/v1/enrollments?on_conflict=school_id,student_id`, { method: "POST", token: stud.token, headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: [{ school_id: rec.id, student_id: stud.user.id, email: stud.user.email, name: stud.user?.user_metadata?.full_name || null, progress: localState.progress || {}, xp: localState.xp || 0, tool_states: localState.toolStates || {}, updated_at: new Date().toISOString() }] });
         }
       } catch (e) { console.warn("enrollment load:", e.message); }
+    })();
+  }, [stud, rec]); // eslint-disable-line
+
+  // Load the student's entitlement (paid / trial) for paid schools.
+  useEffect(() => {
+    if (!stud || !rec) { setEnt(undefined); return; }
+    if (!(rec.data.pricing?.enabled && Number(rec.data.pricing?.price) > 0)) { setEnt(null); return; }
+    (async () => {
+      try { const rows = await supaFetch(`/rest/v1/entitlements?select=status,trial_ends&school_id=eq.${rec.id}&user_id=eq.${stud.user.id}&limit=1`, { token: stud.token }); setEnt((rows && rows[0]) || null); } catch { setEnt(null); }
     })();
   }, [stud, rec]); // eslint-disable-line
 
@@ -9745,10 +9835,19 @@ function PublicSchool({ slug }) {
           </div>
         </div>
       ); })()}
-      {stud
-        ? <div style={{ maxWidth: 860, margin: "16px auto 0", padding: "0 20px" }}><div style={{ background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.3)", borderRadius: 14, padding: "12px 18px", fontSize: 13, color: "#6EE7B7", fontWeight: 600 }}>✓ Enrolled as {stud.user.email} — your progress saves automatically across devices.</div></div>
-        : <div id="sx-enroll"><EnrollCard schoolId={rec.id} mentorName={rec.data?.mentor?.name} T={T} onSignIn={signIn} /></div>}
-      {stud && <Boundary><SchoolPage rec={merged} readOnly onUpdate={(patch) => setLocalState(s => ({ ...s, ...patch }))} viewer={stud} onSignIn={signIn} /></Boundary>}
+      {(() => {
+        const pricing = rec.data.pricing || {};
+        const paid = pricing.enabled && Number(pricing.price) > 0;
+        const hasAccess = !paid || (ent && (ent.status === "paid" || (ent.status === "trial" && (!ent.trial_ends || new Date(ent.trial_ends) > new Date()))));
+        if (!stud) return <div id="sx-enroll"><EnrollCard schoolId={rec.id} mentorName={rec.data?.mentor?.name} T={T} onSignIn={signIn} /></div>;
+        if (paid && ent === undefined) return <div style={{ textAlign: "center", color: B.muted, fontSize: 13, padding: 40 }}>Checking your access…</div>;
+        if (paid && !hasAccess) return <Paywall rec={rec} stud={stud} T={T} onEntitled={setEnt} />;
+        const trialLeft = ent?.status === "trial" && ent.trial_ends ? Math.ceil((new Date(ent.trial_ends) - Date.now()) / 86400000) : null;
+        return (<>
+          <div style={{ maxWidth: 860, margin: "16px auto 0", padding: "0 20px" }}><div style={{ background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.3)", borderRadius: 14, padding: "12px 18px", fontSize: 13, color: "#6EE7B7", fontWeight: 600 }}>✓ Enrolled as {stud.user.email}{trialLeft != null ? ` · free trial: ${trialLeft} day${trialLeft === 1 ? "" : "s"} left` : ""} — your progress saves automatically.</div></div>
+          <Boundary><SchoolPage rec={merged} readOnly onUpdate={(patch) => setLocalState(s => ({ ...s, ...patch }))} viewer={stud} onSignIn={signIn} /></Boundary>
+        </>);
+      })()}
       {stud && <MessengerDock viewer={stud} />}
       {stud && profOpen && (() => { const total = (rec.data.semesters || []).reduce((a, x) => a + (x.lessons?.length || 0), 0); const passed = Object.values(localState.progress || {}).filter(v => v === "passed").length; return (
         <StudentProfileModal viewer={stud} T={T} xp={localState.xp || 0} passed={passed} total={total} schoolName={rec.data.name} onClose={() => setProfOpen(false)} />
