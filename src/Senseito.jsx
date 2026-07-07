@@ -1379,6 +1379,8 @@ const SECTION_META = {
   dashboard: { title: "Dashboard", icon: "🧭" },
   gamelab: { title: "Game Lab", icon: "🎮" },
   community: { title: "Community", icon: "💬" },
+  students: { title: "Students", icon: "👥" },
+  calendar: { title: "Calendar", icon: "📅" },
 };
 // Starting layouts the creator can pick (or "auto" = let the AI decide).
 const LAYOUTS = {
@@ -6930,6 +6932,100 @@ function SchoolWizard({ school, T, media, published, rec, onUpdate, saveLesson, 
   );
 }
 
+// Gather every event across the school's event bricks for the calendar.
+function collectSchoolEvents(school) {
+  const out = [];
+  const scan = (blocks) => (blocks || []).forEach(b => { if (b?.type === "events") (b.data?.events || []).forEach(e => out.push(e)); });
+  (school.semesters || []).forEach(s => { (s.lessons || []).forEach(l => scan(l.blocks)); scan(s.interlude); });
+  (school.sections || []).forEach(s => scan(s.blocks));
+  return out.filter(e => e && (e.title || e.when));
+}
+// Calendar shown as a POPUP (not an inline section) with the school's upcoming sessions.
+function CalendarPopup({ school, T, onClose }) {
+  const now = Date.now();
+  const events = collectSchoolEvents(school)
+    .map(e => ({ ...e, ts: new Date(e.when).getTime() }))
+    .sort((a, b) => (isNaN(a.ts) ? Infinity : a.ts) - (isNaN(b.ts) ? Infinity : b.ts));
+  const upcoming = events.filter(e => isNaN(e.ts) || e.ts > now - 90 * 60000);
+  return createPortal(
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 400, background: "rgba(2,2,8,0.76)", backdropFilter: "blur(8px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "max(24px,6vh) 16px 40px", overflowY: "auto", fontFamily: "'Inter',sans-serif" }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 560, background: "var(--surface)", border: `1px solid ${T.ba}`, borderRadius: 18, overflow: "hidden", boxShadow: "0 30px 90px rgba(0,0,0,0.6)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 18px", borderBottom: `1px solid ${B.border}`, background: "var(--surface2)" }}>
+          <div style={{ fontSize: 15, fontWeight: 800, color: B.white, fontFamily: "'Space Grotesk',sans-serif" }}>📅 {school.name} calendar</div>
+          <button onClick={onClose} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "5px 10px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>✕</button>
+        </div>
+        <div style={{ padding: 16, display: "flex", flexDirection: "column", gap: 9, maxHeight: "70vh", overflowY: "auto" }}>
+          {upcoming.length === 0 && <div style={{ fontSize: 13, color: B.muted, textAlign: "center", padding: 24 }}>No upcoming sessions scheduled yet.</div>}
+          {upcoming.map((e, i) => {
+            const plat = EVENT_PLATFORMS[e.platform] || EVENT_PLATFORMS.other; const d = new Date(e.when); const valid = !isNaN(d.getTime());
+            return (
+              <div key={i} style={{ display: "flex", gap: 12, alignItems: "flex-start", background: "var(--surface2)", border: `1px solid ${B.border}`, borderRadius: 12, padding: "11px 13px" }}>
+                {valid && <div style={{ flexShrink: 0, width: 48, textAlign: "center", background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 9, padding: "5px 0" }}><div style={{ fontSize: 9.5, fontWeight: 800, color: T.hi, textTransform: "uppercase" }}>{d.toLocaleDateString(undefined, { month: "short" })}</div><div style={{ fontSize: 18, fontWeight: 800, color: B.white, lineHeight: 1 }}>{d.getDate()}</div></div>}
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}><span style={{ fontSize: 13.5, fontWeight: 700, color: B.white }}>{e.title}</span>{e.when && <EventCountdown when={e.when} />}</div>
+                  <div style={{ fontSize: 12, color: T.a, marginTop: 3 }}>{plat.icon} {valid ? fmtEventWhen(e.when) : (e.when || "Time TBA")}</div>
+                  {e.desc && <div style={{ fontSize: 12, color: B.mutedMid, marginTop: 4, lineHeight: 1.5 }}>{e.desc}</div>}
+                  <div style={{ display: "flex", gap: 7, marginTop: 8, flexWrap: "wrap" }}>
+                    {/^https?:\/\//i.test(e.url || "") && <a href={e.url} target="_blank" rel="noreferrer" style={{ background: T.grad, color: "#fff", borderRadius: 8, padding: "5px 12px", fontSize: 12, fontWeight: 700, textDecoration: "none" }}>{plat.icon} Join ↗</a>}
+                    {icsHref(e) && <a href={icsHref(e)} download={`${(e.title || "event").replace(/[^a-z0-9]+/gi, "-")}.ics`} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "5px 11px", fontSize: 11.5, fontWeight: 700, textDecoration: "none" }}>📆 Add</a>}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>, document.body);
+}
+// Students section — see everyone enrolled in THIS school; message, befriend, view profiles.
+function StudentsSection({ school, schoolId, viewer, T }) {
+  const [roster, setRoster] = useState(null);
+  const [profs, setProfs] = useState({});
+  const [friends, setFriends] = useState({});
+  const me = viewer?.user?.id;
+  useEffect(() => {
+    if (!viewer) { setRoster([]); return; }
+    (async () => {
+      try {
+        const rows = await supaFetch(`/rest/v1/rpc/school_roster`, { method: "POST", token: viewer.token, body: { p_school: schoolId } });
+        const list = (rows || []).filter(r => r.student_id);
+        setRoster(list);
+        setProfs(await fetchProfiles(list.map(r => r.student_id), viewer.token));
+        const fr = await supaFetch(`/rest/v1/friends?or=(requester.eq.${me},addressee.eq.${me})`, { token: viewer.token }).catch(() => []);
+        const map = {}; (fr || []).forEach(f => { const p = f.requester === me ? f.addressee : f.requester; map[p] = f.status; }); setFriends(map);
+      } catch { setRoster([]); }
+    })();
+  }, [schoolId, me]); // eslint-disable-line
+  const befriend = async (id) => { try { await supaFetch(`/rest/v1/friends`, { method: "POST", token: viewer.token, headers: { Prefer: "return=minimal,resolution=ignore-duplicates" }, body: [{ requester: me, addressee: id }] }); setFriends(f => ({ ...f, [id]: "pending" })); } catch { } };
+  if (!viewer) return <div style={{ fontSize: 13, color: B.muted, padding: 16 }}>Sign in to see who's in this school.</div>;
+  const nameOf = (r) => profs[r.student_id]?.display_name || r.name || "Student";
+  return (
+    <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 16, padding: 16 }}>
+      <div style={{ fontSize: 14, fontWeight: 800, color: B.white, fontFamily: "'Space Grotesk',sans-serif", marginBottom: 4 }}>👥 Students {roster ? `· ${roster.length}` : ""}</div>
+      <div style={{ fontSize: 12, color: B.muted, marginBottom: 14 }}>Everyone learning in this school. Message them, add friends, or view their profile. Once you're friends, you'll see each other's friends on their profile.</div>
+      {roster === null && <div style={{ fontSize: 12.5, color: B.muted }}>Loading…</div>}
+      {roster && roster.length === 0 && <div style={{ fontSize: 12.5, color: B.muted }}>No students yet.</div>}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(200px,1fr))", gap: 10 }}>
+        {(roster || []).map((r) => {
+          const mine = r.student_id === me; const st = friends[r.student_id];
+          return (
+            <div key={r.student_id} style={{ background: "var(--surface2)", border: `1px solid ${B.border}`, borderRadius: 12, padding: "11px 13px", display: "flex", alignItems: "center", gap: 10 }}>
+              <div onClick={() => openProfile(r.student_id, nameOf(r))} style={{ cursor: "pointer" }}><Avatar name={nameOf(r)} url={profs[r.student_id]?.avatar_url} size={38} T={T} /></div>
+              <div style={{ minWidth: 0, flex: 1 }}>
+                <div onClick={() => openProfile(r.student_id, nameOf(r))} style={{ fontSize: 13, fontWeight: 700, color: B.white, cursor: "pointer", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{nameOf(r)}{mine && <span style={{ fontSize: 10, color: B.muted, fontWeight: 400 }}> · you</span>}</div>
+                {!mine && <div style={{ display: "flex", gap: 6, marginTop: 5 }}>
+                  <button onClick={() => openDM(r.student_id, nameOf(r))} title="Message" style={{ background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 7, color: T.hi, padding: "3px 9px", cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>💬</button>
+                  <button onClick={() => befriend(r.student_id)} disabled={!!st} title={st === "accepted" ? "Friends" : st === "pending" ? "Request sent" : "Add friend"} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 7, color: st ? "#4ADE80" : B.mutedMid, padding: "3px 9px", cursor: st ? "default" : "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>{st === "accepted" ? "✓" : st === "pending" ? "…" : "＋👤"}</button>
+                </div>}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // Creator-only analytics for ONE school: per-student progress, mastery (strong/weak on the
 // knowledge map), activity, event RSVPs, email export, open-profile & bulk message.
 function AnalyticsDashboard({ school, schoolId, viewer, token, T, onClose }) {
@@ -7069,6 +7165,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const [showroomOpen, setShowroomOpen] = useState(false); // school-level Showroom studio (like Game Lab)
   const [trainOpen, setTrainOpen] = useState(false); // Training Ground (mentor AI training)
   const [analyticsOpen, setAnalyticsOpen] = useState(false); // per-school analytics dashboard
+  const [calPopup, setCalPopup] = useState(false); // calendar section opens as a popup
   const [badgeEdit, setBadgeEdit] = useState(null); // { i } badge index being edited (-1 = new)
   const [certOpen, setCertOpen] = useState(false); // certificate designer / earned-certificate modal
   const [iconEdit, setIconEdit] = useState(false); // school-icon edit popover
@@ -7651,6 +7748,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
 
         {!readOnly && trainOpen && <TrainingGround school={school} T={T} media={media} onUpdate={onUpdate} onClose={() => setTrainOpen(false)} />}
         {!readOnly && analyticsOpen && <AnalyticsDashboard school={school} schoolId={rec.id} viewer={viewer} token={token} T={T} onClose={() => setAnalyticsOpen(false)} />}
+        {calPopup && <CalendarPopup school={school} T={T} onClose={() => setCalPopup(false)} />}
         {!readOnly && badgeEdit && <BadgeRuleEditor index={badgeEdit.i} school={school} T={T} onClose={() => setBadgeEdit(null)} onUpdate={onUpdate} />}
         {certOpen && <CertificateModal school={school} T={T} media={media} viewerName={readOnly ? (viewer ? viewerName(viewer) : "Student Name") : "Student Name"} earned={readOnly} onUpdate={readOnly ? undefined : onUpdate} onClose={() => setCertOpen(false)} />}
 
@@ -7841,7 +7939,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
                   onDragStart={() => { dragIdx.current = ti; }}
                   onDragOver={e => { if (!readOnly) e.preventDefault(); }}
                   onDrop={e => { if (readOnly) return; e.preventDefault(); reorderSections(dragIdx.current, ti); dragIdx.current = null; }}
-                  onClick={() => setTab(k)}
+                  onClick={() => { const sec = SECTIONS.find(s => s.id === k); if (sec?.kind === "calendar") { setCalPopup(true); return; } setTab(k); }}
                   onDoubleClick={() => { if (readOnly) return; const cur = SECTIONS.find(s => s.id === k); const t = window.prompt("Rename this tab:", cur?.title || ""); if (t && t.trim()) renameSection(k, t.trim()); }}
                   title={readOnly ? "" : "Drag to reorder · double-click to rename"}
                   style={{ ...nv.tab(activeTab === k), cursor: readOnly ? "pointer" : "grab" }}>{l}</button>
@@ -7887,6 +7985,8 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
                     {!hasKind("mentor") && <button onClick={() => addSection("mentor")} style={mi}>🎓 Mentor chat</button>}
                     {!hasKind("tools") && <button onClick={() => addSection("tools")} style={mi}>🛠️ Tools</button>}
                     {!hasKind("community") && <button onClick={() => addSection("community")} style={mi}>💬 Community — discussion board</button>}
+                    {!hasKind("students") && <button onClick={() => addSection("students")} style={mi}>👥 Students — everyone enrolled</button>}
+                    {!hasKind("calendar") && <button onClick={() => addSection("calendar")} style={mi}>📅 Calendar — events popup</button>}
                     <button onClick={() => addFeatureSection("library", "library", "Library", "📚")} style={mi}>📚 Library — files & links</button>
                     <button onClick={() => addFeatureSection("events", "events", "Events", "📅")} style={mi}>📅 Events — lives & RSVP</button>
                     <button onClick={() => addFeatureSection("showroom", "showroom", "Showroom", "🎬")} style={mi}>🎬 Showroom — slide deck</button>
@@ -8102,6 +8202,9 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
             : null)}
           {SECTIONS.filter(s => s.kind === "dashboard").map(sec => activeTab === sec.id
             ? <DashboardSection key={sec.id} section={sec} rec={rec} T={T} onUpdate={onUpdate} readOnly={readOnly} school={school} onIngest={ingestOutput} />
+            : null)}
+          {SECTIONS.filter(s => s.kind === "students").map(sec => activeTab === sec.id
+            ? <StudentsSection key={sec.id} school={school} schoolId={rec.id} viewer={viewer} T={T} />
             : null)}
           </div>
           </div>
