@@ -7759,7 +7759,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
         {!readOnly && trainOpen && <TrainingGround school={school} T={T} media={media} onUpdate={onUpdate} onClose={() => setTrainOpen(false)} />}
         {!readOnly && analyticsOpen && <AnalyticsDashboard school={school} schoolId={rec.id} viewer={viewer} token={token} T={T} onClose={() => setAnalyticsOpen(false)} />}
         {calPopup && <CalendarPopup school={school} T={T} onClose={() => setCalPopup(false)} />}
-        {!readOnly && pricingOpen && <PricingModal school={school} T={T} onUpdate={onUpdate} onClose={() => setPricingOpen(false)} />}
+        {!readOnly && pricingOpen && <PricingModal school={school} schoolId={rec.id} token={token} T={T} onUpdate={onUpdate} onClose={() => setPricingOpen(false)} />}
         {!readOnly && badgeEdit && <BadgeRuleEditor index={badgeEdit.i} school={school} T={T} onClose={() => setBadgeEdit(null)} onUpdate={onUpdate} />}
         {certOpen && <CertificateModal school={school} T={T} media={media} viewerName={readOnly ? (viewer ? viewerName(viewer) : "Student Name") : "Student Name"} earned={readOnly} onUpdate={readOnly ? undefined : onUpdate} onClose={() => setCertOpen(false)} />}
 
@@ -9772,7 +9772,20 @@ function Paywall({ rec, stud, T, onEntitled }) {
     setBusy("");
   }
   const payUrl = paypalPayUrl(p, rec.data.name);
-  const stripeUrl = /^https?:\/\//i.test(p.stripe || "") ? p.stripe.trim() : "";
+  const stripeBase = /^https?:\/\//i.test(p.stripe || "") ? p.stripe.trim() : "";
+  const ref = `${rec.id}__${stud.user.id}`;
+  const stripeUrl = stripeBase ? `${stripeBase}${stripeBase.includes("?") ? "&" : "?"}client_reference_id=${encodeURIComponent(ref)}&prefilled_email=${encodeURIComponent(stud.user.email || "")}` : "";
+  // Auto-unlock: poll for the entitlement the Stripe webhook writes (and re-check when the tab regains focus).
+  useEffect(() => {
+    let tries = 0, stop = false;
+    const check = async () => {
+      try { const r = await supaFetch(`/rest/v1/entitlements?select=status,trial_ends&school_id=eq.${rec.id}&user_id=eq.${stud.user.id}&limit=1`, { token: stud.token }); const e = r?.[0]; if (e && (e.status === "paid" || (e.status === "trial" && (!e.trial_ends || new Date(e.trial_ends) > new Date())))) { stop = true; onEntitled(e); } } catch { }
+    };
+    const id = setInterval(() => { if (stop || tries++ > 45) { clearInterval(id); return; } if (document.visibilityState === "visible") check(); }, 4000);
+    const onVis = () => { if (document.visibilityState === "visible") check(); };
+    document.addEventListener("visibilitychange", onVis);
+    return () => { clearInterval(id); document.removeEventListener("visibilitychange", onVis); };
+  }, []); // eslint-disable-line
   return (
     <div style={{ maxWidth: 460, margin: "26px auto 0", padding: "0 20px" }}>
       <div style={{ background: T.heroGrad || T.gr, border: `1px solid ${T.ba}`, borderRadius: 20, padding: "28px 24px", textAlign: "center" }}>
@@ -9785,18 +9798,26 @@ function Paywall({ rec, stud, T, onEntitled }) {
         {initiated && <button onClick={() => grant("paid", 0, initiated, "self-confirmed")} disabled={busy} style={{ width: "100%", background: "rgba(74,222,128,0.15)", border: "1px solid rgba(74,222,128,0.45)", borderRadius: 12, color: "#4ADE80", padding: "11px", cursor: "pointer", fontSize: 13.5, fontWeight: 800, fontFamily: "inherit", marginBottom: 10 }}>{busy === "paid" ? "Unlocking…" : "✓ I've completed payment — unlock"}</button>}
         {Number(p.trialDays) > 0 && <button onClick={() => grant("trial", Number(p.trialDays), "trial")} disabled={busy} style={{ width: "100%", background: "rgba(255,255,255,0.12)", border: "1px solid rgba(255,255,255,0.28)", borderRadius: 12, color: "#fff", padding: "11px", cursor: "pointer", fontSize: 13.5, fontWeight: 800, fontFamily: "inherit" }}>{busy === "trial" ? "Starting…" : `Start your ${p.trialDays}-day free trial`}</button>}
         {err && <div style={{ fontSize: 12, color: "#FCA5A5", marginTop: 10 }}>{err}</div>}
-        <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.5)", marginTop: 14, lineHeight: 1.5 }}>Payment is handled securely on {stripeUrl && payUrl ? "Stripe / PayPal" : stripeUrl ? "Stripe" : "PayPal"}. After paying, tap “I've completed payment”. (Automatic verification is coming.)</div>
+        <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.5)", marginTop: 14, lineHeight: 1.5 }}>Payment is handled securely on {stripeUrl && payUrl ? "Stripe / PayPal" : stripeUrl ? "Stripe" : "PayPal"}. Stripe purchases unlock automatically once payment clears — just come back to this tab. If it doesn't, tap “I've completed payment”.</div>
       </div>
     </div>
   );
 }
-// Creator pricing / PayPal connection.
-function PricingModal({ school, T, onUpdate, onClose }) {
+// Creator pricing / PayPal + Stripe connection.
+function PricingModal({ school, schoolId, token, T, onUpdate, onClose }) {
   const p = school.pricing || {};
   const set = (patch) => onUpdate({ data: { ...school, pricing: { ...(school.pricing || {}), ...patch } } });
   const inp = { width: "100%", boxSizing: "border-box", background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, fontFamily: "inherit", fontSize: 13, padding: "9px 11px" };
   const lbl = { fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: B.muted, marginBottom: 5 };
   const linkOk = !p.paypal || /paypal\.me\//i.test(p.paypal) || /^https?:\/\//i.test(p.paypal) || /@/.test(p.paypal);
+  const webhookUrl = `${SUPA_URL}/functions/v1/stripe-webhook`;
+  const [whSecret, setWhSecret] = useState("");
+  const [whSaved, setWhSaved] = useState(false);
+  useEffect(() => { if (!token || !schoolId) return; supaFetch(`/rest/v1/payment_config?school_id=eq.${encodeURIComponent(schoolId)}&select=stripe_webhook_secret`, { token }).then(r => { if (r && r[0]?.stripe_webhook_secret) { setWhSecret(r[0].stripe_webhook_secret); setWhSaved(true); } }).catch(() => { }); }, [schoolId, token]);
+  const saveSecret = async () => {
+    if (!token || !schoolId) return;
+    try { await supaFetch(`/rest/v1/payment_config?on_conflict=school_id`, { method: "POST", token, headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: [{ school_id: schoolId, stripe_webhook_secret: whSecret.trim() || null, updated_at: new Date().toISOString() }] }); setWhSaved(true); } catch { }
+  };
   return createPortal(
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 2600, background: "rgba(2,2,8,0.74)", backdropFilter: "blur(8px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "max(24px,6vh) 16px 40px", overflowY: "auto", fontFamily: "'Inter',sans-serif" }}>
       <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 460, background: "var(--surface)", border: `1px solid ${T.ba}`, borderRadius: 18, padding: 20, boxShadow: "0 30px 90px rgba(0,0,0,0.6)" }}>
@@ -9822,8 +9843,20 @@ function PricingModal({ school, T, onUpdate, onClose }) {
             <div style={lbl}>Connect Stripe</div>
             <input value={p.stripe || ""} onChange={e => set({ stripe: e.target.value.trim() })} placeholder="https://buy.stripe.com/…  (Stripe Payment Link)" style={{ ...inp, borderColor: (!p.stripe || /^https?:\/\//i.test(p.stripe)) ? B.borderMid : "rgba(248,113,113,0.5)" }} />
             <div style={{ fontSize: 11, color: B.muted, marginTop: 5, lineHeight: 1.5 }}>In your <b>Stripe Dashboard → Payment Links</b>, create a link for this price and paste it here. Money goes straight to your Stripe account.</div>
+            {/^https?:\/\//i.test(p.stripe || "") && <div style={{ marginTop: 10, background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 10, padding: 11 }}>
+              <div style={{ fontSize: 11.5, fontWeight: 700, color: T.hi, marginBottom: 6 }}>⚡ Automatic unlock (recommended)</div>
+              <div style={{ fontSize: 11, color: B.muted, lineHeight: 1.55, marginBottom: 8 }}>Add a webhook in <b>Stripe → Developers → Webhooks</b> for the event <b>checkout.session.completed</b>, pointing to this URL, then paste its <b>Signing secret</b> below. Students then unlock instantly after paying — no manual step.</div>
+              <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 8 }}>
+                <input readOnly value={webhookUrl} onFocus={e => e.target.select()} style={{ ...inp, fontSize: 11.5, color: B.mutedMid }} />
+                <button onClick={() => navigator.clipboard?.writeText(webhookUrl)} style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "8px 11px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit", flexShrink: 0 }}>Copy</button>
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <input value={whSecret} onChange={e => { setWhSecret(e.target.value); setWhSaved(false); }} placeholder="whsec_…  (Signing secret)" style={{ ...inp, fontSize: 12 }} />
+                <button onClick={saveSecret} disabled={!token} style={{ background: whSaved ? "rgba(74,222,128,0.12)" : T.grad, border: whSaved ? "1px solid rgba(74,222,128,0.4)" : "none", borderRadius: 8, color: whSaved ? "#4ADE80" : "#fff", padding: "8px 13px", cursor: "pointer", fontSize: 12, fontWeight: 800, fontFamily: "inherit", flexShrink: 0 }}>{whSaved ? "✓ Saved" : "Save"}</button>
+              </div>
+            </div>}
           </div>
-          <div style={{ fontSize: 11, color: B.muted, background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 9, padding: "9px 11px", lineHeight: 1.5 }}>Connect either or both — students pick a method. Payment is confirmed on the provider; automatic verification (webhooks) is coming next.</div>
+          <div style={{ fontSize: 11, color: B.muted, background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 9, padding: "9px 11px", lineHeight: 1.5 }}>Connect either or both — students pick a method. With the Stripe webhook set up, paid schools unlock automatically; otherwise students confirm payment manually. (PayPal auto-verification is coming next.)</div>
           <div>
             <div style={lbl}>Free trial</div>
             <div style={{ display: "flex", gap: 7 }}>{[[0, "None"], [7, "7 days"], [14, "14 days"]].map(([d, l]) => <button key={d} onClick={() => set({ trialDays: d })} style={{ flex: 1, background: (p.trialDays || 0) === d ? T.ps : B.surface2, border: `1px solid ${(p.trialDays || 0) === d ? T.ba : B.borderMid}`, borderRadius: 9, color: (p.trialDays || 0) === d ? T.hi : B.mutedMid, padding: "9px", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>{l}</button>)}</div>
