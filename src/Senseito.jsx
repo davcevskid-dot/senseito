@@ -9765,9 +9765,31 @@ function paypalPayUrl(pricing, schoolName) {
   return "";
 }
 // Paywall shown to signed-in students of a PAID school with no active entitlement.
+const PLAN_LABEL = { once: "", month: "/month", year: "/year" };
 function Paywall({ rec, stud, T, onEntitled }) {
   const p = rec.data.pricing || {}; const cur = p.currency || "USD"; const sym = CURR_SYM[cur] || "";
+  const per = PLAN_LABEL[p.interval] || "";
   const [busy, setBusy] = useState(""); const [initiated, setInitiated] = useState(""); const [err, setErr] = useState("");
+  const [coupon, setCoupon] = useState(""); const [couponMsg, setCouponMsg] = useState("");
+  async function applyCoupon() {
+    const code = coupon.trim(); if (!code || busy) return; setBusy("coupon"); setCouponMsg("");
+    try {
+      const r = await supaFetch(`/rest/v1/rpc/redeem_coupon`, { method: "POST", token: stud.token, body: { p_school: rec.id, p_code: code } });
+      const res = typeof r === "string" ? r : (Array.isArray(r) ? r[0] : r);
+      if (res === "ok") { onEntitled({ status: "paid" }); return; }
+      setCouponMsg({ invalid: "That code isn't valid.", expired: "That code has expired.", used_up: "That code has been fully used.", percent: "That's a discount code — apply it during checkout.", auth: "Please sign in first." }[res] || "Couldn't apply that code.");
+    } catch { setCouponMsg("Couldn't apply that code."); }
+    setBusy("");
+  }
+  async function grant(status, days, provider, ref) {
+    setBusy(status); setErr("");
+    try {
+      const trial_ends = days ? new Date(Date.now() + days * 86400000).toISOString() : null;
+      await supaFetch(`/rest/v1/entitlements?on_conflict=school_id,user_id`, { method: "POST", token: stud.token, headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: [{ school_id: rec.id, user_id: stud.user.id, status, trial_ends, provider: provider || "manual", ref: ref || null, updated_at: new Date().toISOString() }] });
+      onEntitled({ status, trial_ends });
+    } catch (e) { setErr("Couldn't unlock: " + e.message); }
+    setBusy("");
+  }
   async function grant(status, days, provider, ref) {
     setBusy(status); setErr("");
     try {
@@ -9788,7 +9810,7 @@ function Paywall({ rec, stud, T, onEntitled }) {
     setErr("");
     if (p.stripeConnected) {
       setBusy("stripe");
-      try { const d = await fn("stripe-checkout", { schoolId: rec.id, priceCents: Math.round(Number(p.price) * 100), currency: cur, name: rec.data.name, email: stud.user.email, successUrl: window.location.href, cancelUrl: window.location.href }); if (d.url) { setInitiated("stripe"); window.location.href = d.url; return; } setErr(d.error || "Stripe error"); }
+      try { const d = await fn("stripe-checkout", { schoolId: rec.id, priceCents: Math.round(Number(p.price) * 100), currency: cur, name: rec.data.name, email: stud.user.email, interval: p.interval || "once", successUrl: window.location.href, cancelUrl: window.location.href }); if (d.url) { setInitiated("stripe"); window.location.href = d.url; return; } setErr(d.error || "Stripe error"); }
       catch (e) { setErr(String(e)); }
       setBusy("");
     } else if (stripeUrl) { setInitiated("stripe"); window.open(stripeUrl, "_blank", "noopener"); }
@@ -9821,12 +9843,18 @@ function Paywall({ rec, stud, T, onEntitled }) {
       <div style={{ background: T.heroGrad || T.gr, border: `1px solid ${T.ba}`, borderRadius: 20, padding: "28px 24px", textAlign: "center" }}>
         <div style={{ fontSize: 40, marginBottom: 8 }}>{rec.data.emoji || "🔒"}</div>
         <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 22, fontWeight: 800, color: "#fff", marginBottom: 6 }}>{rec.data.name}</div>
-        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.85)", marginBottom: 18, lineHeight: 1.6 }}>This school is <b>{sym}{p.price} {cur}</b>. Unlock full access below.</div>
-        {hasStripe && <button onClick={payStripe} disabled={!!busy} style={{ display: "block", width: "100%", background: "#635BFF", color: "#fff", border: "none", borderRadius: 12, padding: "13px", fontSize: 15, fontWeight: 800, fontFamily: "inherit", cursor: "pointer", marginBottom: 10, opacity: busy ? 0.6 : 1 }}>{busy === "stripe" ? "Opening checkout…" : `Pay ${sym}${p.price} with card (Stripe) →`}</button>}
-        {hasPaypal && <button onClick={payPaypal} disabled={!!busy} style={{ display: "block", width: "100%", background: "#0070BA", color: "#fff", border: "none", borderRadius: 12, padding: "13px", fontSize: 15, fontWeight: 800, fontFamily: "inherit", cursor: "pointer", marginBottom: 10, opacity: busy ? 0.6 : 1 }}>{busy === "paypal" ? "Opening PayPal…" : `Pay ${sym}${p.price} with PayPal →`}</button>}
+        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.85)", marginBottom: 18, lineHeight: 1.6 }}>This school is <b>{sym}{p.price}{per} {cur}</b>. Unlock full access below.</div>
+        {hasStripe && <button onClick={payStripe} disabled={!!busy} style={{ display: "block", width: "100%", background: "#635BFF", color: "#fff", border: "none", borderRadius: 12, padding: "13px", fontSize: 15, fontWeight: 800, fontFamily: "inherit", cursor: "pointer", marginBottom: 10, opacity: busy ? 0.6 : 1 }}>{busy === "stripe" ? "Opening checkout…" : `Pay ${sym}${p.price}${per} with card (Stripe) →`}</button>}
+        {hasPaypal && <button onClick={payPaypal} disabled={!!busy} style={{ display: "block", width: "100%", background: "#0070BA", color: "#fff", border: "none", borderRadius: 12, padding: "13px", fontSize: 15, fontWeight: 800, fontFamily: "inherit", cursor: "pointer", marginBottom: 10, opacity: busy ? 0.6 : 1 }}>{busy === "paypal" ? "Opening PayPal…" : `Pay ${sym}${p.price}${per} with PayPal →`}</button>}
         {!hasStripe && !hasPaypal && <div style={{ fontSize: 12.5, color: "#FBBF24", marginBottom: 10 }}>The creator hasn't connected a payment method yet.</div>}
         {initiated && !p.stripeConnected && !(PAYPAL_PLATFORM_ENABLED && /@/.test(p.paypal || "")) && <button onClick={() => grant("paid", 0, initiated, "self-confirmed")} disabled={busy} style={{ width: "100%", background: "rgba(74,222,128,0.15)", border: "1px solid rgba(74,222,128,0.45)", borderRadius: 12, color: "#4ADE80", padding: "11px", cursor: "pointer", fontSize: 13.5, fontWeight: 800, fontFamily: "inherit", marginBottom: 10 }}>{busy === "paid" ? "Unlocking…" : "✓ I've completed payment — unlock"}</button>}
-        {Number(p.trialDays) > 0 && <button onClick={() => grant("trial", Number(p.trialDays), "trial")} disabled={busy} style={{ width: "100%", background: "rgba(255,255,255,0.12)", border: "1px solid rgba(255,255,255,0.28)", borderRadius: 12, color: "#fff", padding: "11px", cursor: "pointer", fontSize: 13.5, fontWeight: 800, fontFamily: "inherit" }}>{busy === "trial" ? "Starting…" : `Start your ${p.trialDays}-day free trial`}</button>}
+        {Number(p.trialDays) > 0 && <button onClick={() => grant("trial", Number(p.trialDays), "trial")} disabled={busy} style={{ width: "100%", background: "rgba(255,255,255,0.12)", border: "1px solid rgba(255,255,255,0.28)", borderRadius: 12, color: "#fff", padding: "11px", cursor: "pointer", fontSize: 13.5, fontWeight: 800, fontFamily: "inherit", marginBottom: 10 }}>{busy === "trial" ? "Starting…" : `Start your ${p.trialDays}-day free trial`}</button>}
+        {/* Coupon redemption */}
+        <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+          <input value={coupon} onChange={e => { setCoupon(e.target.value); setCouponMsg(""); }} onKeyDown={e => { if (e.key === "Enter") applyCoupon(); }} placeholder="Have a coupon code?" style={{ flex: 1, background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.25)", borderRadius: 10, color: "#fff", fontFamily: "inherit", fontSize: 13, padding: "10px 12px" }} />
+          <button onClick={applyCoupon} disabled={busy || !coupon.trim()} style={{ background: "rgba(255,255,255,0.16)", border: "1px solid rgba(255,255,255,0.3)", borderRadius: 10, color: "#fff", padding: "0 16px", cursor: "pointer", fontSize: 13, fontWeight: 800, fontFamily: "inherit", opacity: (busy || !coupon.trim()) ? 0.5 : 1 }}>{busy === "coupon" ? "…" : "Apply"}</button>
+        </div>
+        {couponMsg && <div style={{ fontSize: 12, color: "#FCD34D", marginTop: 8 }}>{couponMsg}</div>}
         {err && <div style={{ fontSize: 12, color: "#FCA5A5", marginTop: 10 }}>{err}</div>}
         <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.5)", marginTop: 14, lineHeight: 1.5 }}>Payment is handled securely on {hasStripe && hasPaypal ? "Stripe / PayPal" : hasStripe ? "Stripe" : "PayPal"}. Your access unlocks automatically once payment clears — just come back to this tab.</div>
       </div>
@@ -9848,6 +9876,20 @@ function PricingModal({ school, schoolId, token, T, onUpdate, onClose }) {
     if (!token || !schoolId) return;
     try { await supaFetch(`/rest/v1/payment_config?on_conflict=school_id`, { method: "POST", token, headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: [{ school_id: schoolId, stripe_webhook_secret: whSecret.trim() || null, updated_at: new Date().toISOString() }] }); setWhSaved(true); } catch { }
   };
+  // ── Coupons ──
+  const [coupons, setCoupons] = useState([]);
+  const [cCode, setCCode] = useState("");
+  const [cMax, setCMax] = useState("");
+  const loadCoupons = () => { if (!token || !schoolId) return; supaFetch(`/rest/v1/coupons?school_id=eq.${encodeURIComponent(schoolId)}&select=id,code,kind,max_redemptions,redeemed,expires_at&order=created_at.desc`, { token }).then(r => setCoupons(r || [])).catch(() => { }); };
+  useEffect(() => { loadCoupons(); }, [schoolId, token]); // eslint-disable-line
+  const genCoupon = async () => {
+    if (!token || !schoolId) return;
+    const code = (cCode.trim() || Array.from({ length: 7 }, () => "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"[Math.floor(Math.random() * 32)]).join("")).toUpperCase();
+    const max = cMax.trim() ? Math.max(1, parseInt(cMax, 10) || 0) : null;
+    try { await supaFetch(`/rest/v1/coupons`, { method: "POST", token, headers: { Prefer: "return=minimal" }, body: [{ school_id: schoolId, code, kind: "free", percent: 100, max_redemptions: max }] }); setCCode(""); setCMax(""); loadCoupons(); }
+    catch (e) { if (/duplicate|unique|409/i.test(e.message || "")) alert("That code already exists."); }
+  };
+  const delCoupon = async (id) => { try { await supaFetch(`/rest/v1/coupons?id=eq.${id}`, { method: "DELETE", token }); loadCoupons(); } catch { } };
   return createPortal(
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 2600, background: "rgba(2,2,8,0.74)", backdropFilter: "blur(8px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "max(24px,6vh) 16px 40px", overflowY: "auto", fontFamily: "'Inter',sans-serif" }}>
       <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 460, background: "var(--surface)", border: `1px solid ${T.ba}`, borderRadius: 18, padding: 20, boxShadow: "0 30px 90px rgba(0,0,0,0.6)" }}>
@@ -9862,6 +9904,11 @@ function PricingModal({ school, schoolId, token, T, onUpdate, onClose }) {
           <div style={{ display: "flex", gap: 10 }}>
             <div style={{ flex: 1 }}><div style={lbl}>Price</div><input type="number" min="0" value={p.price ?? ""} onChange={e => set({ price: Math.max(0, +e.target.value || 0) })} placeholder="49" style={inp} /></div>
             <div style={{ width: 110 }}><div style={lbl}>Currency</div><select value={p.currency || "USD"} onChange={e => set({ currency: e.target.value })} style={{ ...inp, cursor: "pointer" }}>{Object.keys(CURR_SYM).map(c => <option key={c} value={c}>{c}</option>)}</select></div>
+          </div>
+          <div>
+            <div style={lbl}>Billing</div>
+            <div style={{ display: "flex", gap: 7 }}>{[["once", "One-time"], ["month", "Monthly"], ["year", "Yearly"]].map(([k, l]) => <button key={k} onClick={() => set({ interval: k })} style={{ flex: 1, background: (p.interval || "once") === k ? T.ps : B.surface2, border: `1px solid ${(p.interval || "once") === k ? T.ba : B.borderMid}`, borderRadius: 9, color: (p.interval || "once") === k ? T.hi : B.mutedMid, padding: "9px", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>{l}</button>)}</div>
+            {(p.interval === "month" || p.interval === "year") && <div style={{ fontSize: 11, color: B.muted, marginTop: 5 }}>Recurring subscriptions require the <b>Stripe</b> connection (auto-renews & auto-revokes on cancel).</div>}
           </div>
           <div>
             <div style={lbl}>Connect PayPal</div>
@@ -9902,7 +9949,27 @@ function PricingModal({ school, schoolId, token, T, onUpdate, onClose }) {
           <div>
             <div style={lbl}>Free trial</div>
             <div style={{ display: "flex", gap: 7 }}>{[[0, "None"], [7, "7 days"], [14, "14 days"]].map(([d, l]) => <button key={d} onClick={() => set({ trialDays: d })} style={{ flex: 1, background: (p.trialDays || 0) === d ? T.ps : B.surface2, border: `1px solid ${(p.trialDays || 0) === d ? T.ba : B.borderMid}`, borderRadius: 9, color: (p.trialDays || 0) === d ? T.hi : B.mutedMid, padding: "9px", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>{l}</button>)}</div>
-            <div style={{ fontSize: 11, color: B.muted, marginTop: 5 }}>Students can start the trial instantly (no card needed). Trials that require payment info up-front need PayPal subscriptions — coming next.</div>
+            <div style={{ fontSize: 11, color: B.muted, marginTop: 5 }}>Students can start the trial instantly (no card needed).</div>
+          </div>
+          <div style={{ borderTop: `1px solid ${B.border}`, paddingTop: 13 }}>
+            <div style={lbl}>🎟️ Coupon codes <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: 400 }}>— free access, no payment</span></div>
+            <div style={{ display: "flex", gap: 6, marginBottom: 9 }}>
+              <input value={cCode} onChange={e => setCCode(e.target.value.toUpperCase())} placeholder="CODE (or leave blank = random)" style={{ ...inp, flex: 2 }} />
+              <input value={cMax} onChange={e => setCMax(e.target.value.replace(/[^0-9]/g, ""))} placeholder="Max uses" style={{ ...inp, flex: 1 }} />
+              <button onClick={genCoupon} disabled={!token} style={{ background: T.grad, border: "none", borderRadius: 9, color: "#fff", padding: "0 14px", cursor: "pointer", fontSize: 12.5, fontWeight: 800, fontFamily: "inherit", flexShrink: 0 }}>Create</button>
+            </div>
+            {coupons.length === 0 && <div style={{ fontSize: 11.5, color: B.muted }}>No codes yet. Create one and share it — students enter it on the paywall to get in free.</div>}
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {coupons.map(c => (
+                <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 8, background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 9, padding: "7px 11px" }}>
+                  <span style={{ fontFamily: "'Space Grotesk',monospace", fontSize: 13, fontWeight: 800, color: T.hi, letterSpacing: 1 }}>{c.code}</span>
+                  <span style={{ fontSize: 11, color: B.muted }}>used {c.redeemed}{c.max_redemptions ? `/${c.max_redemptions}` : ""}</span>
+                  <span style={{ flex: 1 }} />
+                  <button onClick={() => navigator.clipboard?.writeText(c.code)} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 7, color: B.mutedMid, padding: "3px 9px", cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>Copy</button>
+                  <button onClick={() => delCoupon(c.id)} style={{ background: "none", border: "none", color: "#F87171", cursor: "pointer", fontSize: 12 }}>✕</button>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </div>
