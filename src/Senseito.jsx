@@ -14,6 +14,12 @@ const MediaAuthCtx = createContext(null);
 const SUPA_URL = "https://raaffebeteodotpwyfgi.supabase.co";
 const SUPA_KEY = "sb_publishable_PaP7U71NhtqY980fd4RnWg_gvpf1gtA";
 const PROXY = `${SUPA_URL}/functions/v1/claude-proxy`;
+// Platform Stripe Connect client id (ca_…). Paste yours to enable one-click "Connect Stripe".
+// (Public value — safe in the client; the secret key lives only in the edge functions.)
+const STRIPE_CONNECT_CLIENT_ID = "";
+const stripeConnectUrl = (schoolId) => `https://connect.stripe.com/oauth/authorize?response_type=code&client_id=${STRIPE_CONNECT_CLIENT_ID}&scope=read_write&state=${encodeURIComponent(schoolId)}&redirect_uri=${encodeURIComponent(`${SUPA_URL}/functions/v1/stripe-connect`)}`;
+// Whether the platform PayPal app is wired (enables auto-verified PayPal via the platform).
+const PAYPAL_PLATFORM_ENABLED = false;
 
 // ── Supabase REST helper ──
 async function supaFetch(path, { method = "GET", body, token, headers = {} } = {}) {
@@ -9775,6 +9781,30 @@ function Paywall({ rec, stud, T, onEntitled }) {
   const stripeBase = /^https?:\/\//i.test(p.stripe || "") ? p.stripe.trim() : "";
   const ref = `${rec.id}__${stud.user.id}`;
   const stripeUrl = stripeBase ? `${stripeBase}${stripeBase.includes("?") ? "&" : "?"}client_reference_id=${encodeURIComponent(ref)}&prefilled_email=${encodeURIComponent(stud.user.email || "")}` : "";
+  const fn = async (name, body) => fetch(`${SUPA_URL}/functions/v1/${name}`, { method: "POST", headers: { apikey: SUPA_KEY, Authorization: `Bearer ${stud.token}`, "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(r => r.json());
+  // Stripe: prefer platform-hosted Checkout on the creator's connected account; else the manual link.
+  const hasStripe = p.stripeConnected || stripeBase;
+  async function payStripe() {
+    setErr("");
+    if (p.stripeConnected) {
+      setBusy("stripe");
+      try { const d = await fn("stripe-checkout", { schoolId: rec.id, priceCents: Math.round(Number(p.price) * 100), currency: cur, name: rec.data.name, email: stud.user.email, successUrl: window.location.href, cancelUrl: window.location.href }); if (d.url) { setInitiated("stripe"); window.location.href = d.url; return; } setErr(d.error || "Stripe error"); }
+      catch (e) { setErr(String(e)); }
+      setBusy("");
+    } else if (stripeUrl) { setInitiated("stripe"); window.open(stripeUrl, "_blank", "noopener"); }
+  }
+  // PayPal: prefer platform-routed order (auto-verified); else the paypal.me/email link.
+  const hasPaypal = (PAYPAL_PLATFORM_ENABLED && /@/.test(p.paypal || "")) || payUrl;
+  async function payPaypal() {
+    setErr("");
+    if (PAYPAL_PLATFORM_ENABLED && /@/.test(p.paypal || "")) {
+      setBusy("paypal");
+      try { const d = await fn("paypal-create-order", { schoolId: rec.id, amount: Number(p.price), currency: cur, payeeEmail: p.paypal.trim(), name: rec.data.name, returnUrl: window.location.href, cancelUrl: window.location.href }); if (d.approveUrl) { setInitiated("paypal"); window.location.href = d.approveUrl; return; } }
+      catch { /* fall through to the link */ }
+      setBusy("");
+    }
+    if (payUrl) { setInitiated("paypal"); window.open(payUrl, "_blank", "noopener"); }
+  }
   // Auto-unlock: poll for the entitlement the Stripe webhook writes (and re-check when the tab regains focus).
   useEffect(() => {
     let tries = 0, stop = false;
@@ -9792,13 +9822,13 @@ function Paywall({ rec, stud, T, onEntitled }) {
         <div style={{ fontSize: 40, marginBottom: 8 }}>{rec.data.emoji || "🔒"}</div>
         <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 22, fontWeight: 800, color: "#fff", marginBottom: 6 }}>{rec.data.name}</div>
         <div style={{ fontSize: 13, color: "rgba(255,255,255,0.85)", marginBottom: 18, lineHeight: 1.6 }}>This school is <b>{sym}{p.price} {cur}</b>. Unlock full access below.</div>
-        {stripeUrl && <a href={stripeUrl} target="_blank" rel="noreferrer" onClick={() => setInitiated("stripe")} style={{ display: "block", background: "#635BFF", color: "#fff", borderRadius: 12, padding: "13px", fontSize: 15, fontWeight: 800, textDecoration: "none", marginBottom: 10 }}>Pay {sym}{p.price} with card (Stripe) →</a>}
-        {payUrl && <a href={payUrl} target="_blank" rel="noreferrer" onClick={() => setInitiated("paypal")} style={{ display: "block", background: "#0070BA", color: "#fff", borderRadius: 12, padding: "13px", fontSize: 15, fontWeight: 800, textDecoration: "none", marginBottom: 10 }}>Pay {sym}{p.price} with PayPal →</a>}
-        {!payUrl && !stripeUrl && <div style={{ fontSize: 12.5, color: "#FBBF24", marginBottom: 10 }}>The creator hasn't connected a payment method yet.</div>}
-        {initiated && <button onClick={() => grant("paid", 0, initiated, "self-confirmed")} disabled={busy} style={{ width: "100%", background: "rgba(74,222,128,0.15)", border: "1px solid rgba(74,222,128,0.45)", borderRadius: 12, color: "#4ADE80", padding: "11px", cursor: "pointer", fontSize: 13.5, fontWeight: 800, fontFamily: "inherit", marginBottom: 10 }}>{busy === "paid" ? "Unlocking…" : "✓ I've completed payment — unlock"}</button>}
+        {hasStripe && <button onClick={payStripe} disabled={!!busy} style={{ display: "block", width: "100%", background: "#635BFF", color: "#fff", border: "none", borderRadius: 12, padding: "13px", fontSize: 15, fontWeight: 800, fontFamily: "inherit", cursor: "pointer", marginBottom: 10, opacity: busy ? 0.6 : 1 }}>{busy === "stripe" ? "Opening checkout…" : `Pay ${sym}${p.price} with card (Stripe) →`}</button>}
+        {hasPaypal && <button onClick={payPaypal} disabled={!!busy} style={{ display: "block", width: "100%", background: "#0070BA", color: "#fff", border: "none", borderRadius: 12, padding: "13px", fontSize: 15, fontWeight: 800, fontFamily: "inherit", cursor: "pointer", marginBottom: 10, opacity: busy ? 0.6 : 1 }}>{busy === "paypal" ? "Opening PayPal…" : `Pay ${sym}${p.price} with PayPal →`}</button>}
+        {!hasStripe && !hasPaypal && <div style={{ fontSize: 12.5, color: "#FBBF24", marginBottom: 10 }}>The creator hasn't connected a payment method yet.</div>}
+        {initiated && !p.stripeConnected && !(PAYPAL_PLATFORM_ENABLED && /@/.test(p.paypal || "")) && <button onClick={() => grant("paid", 0, initiated, "self-confirmed")} disabled={busy} style={{ width: "100%", background: "rgba(74,222,128,0.15)", border: "1px solid rgba(74,222,128,0.45)", borderRadius: 12, color: "#4ADE80", padding: "11px", cursor: "pointer", fontSize: 13.5, fontWeight: 800, fontFamily: "inherit", marginBottom: 10 }}>{busy === "paid" ? "Unlocking…" : "✓ I've completed payment — unlock"}</button>}
         {Number(p.trialDays) > 0 && <button onClick={() => grant("trial", Number(p.trialDays), "trial")} disabled={busy} style={{ width: "100%", background: "rgba(255,255,255,0.12)", border: "1px solid rgba(255,255,255,0.28)", borderRadius: 12, color: "#fff", padding: "11px", cursor: "pointer", fontSize: 13.5, fontWeight: 800, fontFamily: "inherit" }}>{busy === "trial" ? "Starting…" : `Start your ${p.trialDays}-day free trial`}</button>}
         {err && <div style={{ fontSize: 12, color: "#FCA5A5", marginTop: 10 }}>{err}</div>}
-        <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.5)", marginTop: 14, lineHeight: 1.5 }}>Payment is handled securely on {stripeUrl && payUrl ? "Stripe / PayPal" : stripeUrl ? "Stripe" : "PayPal"}. Stripe purchases unlock automatically once payment clears — just come back to this tab. If it doesn't, tap “I've completed payment”.</div>
+        <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.5)", marginTop: 14, lineHeight: 1.5 }}>Payment is handled securely on {hasStripe && hasPaypal ? "Stripe / PayPal" : hasStripe ? "Stripe" : "PayPal"}. Your access unlocks automatically once payment clears — just come back to this tab.</div>
       </div>
     </div>
   );
@@ -9836,27 +9866,39 @@ function PricingModal({ school, schoolId, token, T, onUpdate, onClose }) {
           <div>
             <div style={lbl}>Connect PayPal</div>
             <input value={p.paypal || ""} onChange={e => set({ paypal: e.target.value.trim() })} placeholder="paypal.me/yourname  ·  or your PayPal email" style={{ ...inp, borderColor: linkOk ? B.borderMid : "rgba(248,113,113,0.5)" }} />
-            <div style={{ fontSize: 11, color: B.muted, marginTop: 5, lineHeight: 1.5 }}>Paste your <b>paypal.me</b> link (easiest) or your PayPal email.</div>
+            <div style={{ fontSize: 11, color: B.muted, marginTop: 5, lineHeight: 1.5 }}>Paste your <b>paypal.me</b> link (easiest) or your PayPal email.{PAYPAL_PLATFORM_ENABLED ? " Use your PayPal email for automatic unlock — payments route straight to you and verify themselves." : ""}</div>
             {!linkOk && <div style={{ fontSize: 11, color: "#F87171", marginTop: 4 }}>Enter a paypal.me link or a valid email.</div>}
           </div>
           <div>
             <div style={lbl}>Connect Stripe</div>
-            <input value={p.stripe || ""} onChange={e => set({ stripe: e.target.value.trim() })} placeholder="https://buy.stripe.com/…  (Stripe Payment Link)" style={{ ...inp, borderColor: (!p.stripe || /^https?:\/\//i.test(p.stripe)) ? B.borderMid : "rgba(248,113,113,0.5)" }} />
-            <div style={{ fontSize: 11, color: B.muted, marginTop: 5, lineHeight: 1.5 }}>In your <b>Stripe Dashboard → Payment Links</b>, create a link for this price and paste it here. Money goes straight to your Stripe account.</div>
-            {/^https?:\/\//i.test(p.stripe || "") && <div style={{ marginTop: 10, background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 10, padding: 11 }}>
-              <div style={{ fontSize: 11.5, fontWeight: 700, color: T.hi, marginBottom: 6 }}>⚡ Automatic unlock (recommended)</div>
-              <div style={{ fontSize: 11, color: B.muted, lineHeight: 1.55, marginBottom: 8 }}>Add a webhook in <b>Stripe → Developers → Webhooks</b> for the event <b>checkout.session.completed</b>, pointing to this URL, then paste its <b>Signing secret</b> below. Students then unlock instantly after paying — no manual step.</div>
-              <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 8 }}>
-                <input readOnly value={webhookUrl} onFocus={e => e.target.select()} style={{ ...inp, fontSize: 11.5, color: B.mutedMid }} />
-                <button onClick={() => navigator.clipboard?.writeText(webhookUrl)} style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "8px 11px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit", flexShrink: 0 }}>Copy</button>
-              </div>
-              <div style={{ display: "flex", gap: 6 }}>
-                <input value={whSecret} onChange={e => { setWhSecret(e.target.value); setWhSaved(false); }} placeholder="whsec_…  (Signing secret)" style={{ ...inp, fontSize: 12 }} />
-                <button onClick={saveSecret} disabled={!token} style={{ background: whSaved ? "rgba(74,222,128,0.12)" : T.grad, border: whSaved ? "1px solid rgba(74,222,128,0.4)" : "none", borderRadius: 8, color: whSaved ? "#4ADE80" : "#fff", padding: "8px 13px", cursor: "pointer", fontSize: 12, fontWeight: 800, fontFamily: "inherit", flexShrink: 0 }}>{whSaved ? "✓ Saved" : "Save"}</button>
-              </div>
-            </div>}
+            {STRIPE_CONNECT_CLIENT_ID ? (
+              p.stripeConnected ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.35)", borderRadius: 10, padding: "10px 12px" }}>
+                  <span style={{ fontSize: 13, color: "#4ADE80", fontWeight: 700, flex: 1 }}>✓ Stripe connected — auto-verified</span>
+                  <button onClick={() => set({ stripeConnected: false })} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "5px 10px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit" }}>Disconnect</button>
+                </div>
+              ) : (
+                <><a href={stripeConnectUrl(schoolId)} style={{ display: "block", textAlign: "center", background: "#635BFF", color: "#fff", borderRadius: 10, padding: "11px", fontSize: 13.5, fontWeight: 800, textDecoration: "none" }}>Connect with Stripe →</a>
+                  <div style={{ fontSize: 11, color: B.muted, marginTop: 5, lineHeight: 1.5 }}>One click — no webhooks, no keys. Money goes straight to your Stripe account and students unlock automatically after paying.</div></>
+              )
+            ) : (<>
+              <input value={p.stripe || ""} onChange={e => set({ stripe: e.target.value.trim() })} placeholder="https://buy.stripe.com/…  (Stripe Payment Link)" style={{ ...inp, borderColor: (!p.stripe || /^https?:\/\//i.test(p.stripe)) ? B.borderMid : "rgba(248,113,113,0.5)" }} />
+              <div style={{ fontSize: 11, color: B.muted, marginTop: 5, lineHeight: 1.5 }}>In your <b>Stripe Dashboard → Payment Links</b>, create a link and paste it here. Money goes straight to your Stripe account.</div>
+              {/^https?:\/\//i.test(p.stripe || "") && <div style={{ marginTop: 10, background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 10, padding: 11 }}>
+                <div style={{ fontSize: 11.5, fontWeight: 700, color: T.hi, marginBottom: 6 }}>⚡ Automatic unlock (optional)</div>
+                <div style={{ fontSize: 11, color: B.muted, lineHeight: 1.55, marginBottom: 8 }}>Add a webhook in <b>Stripe → Developers → Webhooks</b> for <b>checkout.session.completed</b> at this URL, then paste its <b>Signing secret</b>. Students then unlock instantly.</div>
+                <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 8 }}>
+                  <input readOnly value={webhookUrl} onFocus={e => e.target.select()} style={{ ...inp, fontSize: 11.5, color: B.mutedMid }} />
+                  <button onClick={() => navigator.clipboard?.writeText(webhookUrl)} style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "8px 11px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit", flexShrink: 0 }}>Copy</button>
+                </div>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <input value={whSecret} onChange={e => { setWhSecret(e.target.value); setWhSaved(false); }} placeholder="whsec_…  (Signing secret)" style={{ ...inp, fontSize: 12 }} />
+                  <button onClick={saveSecret} disabled={!token} style={{ background: whSaved ? "rgba(74,222,128,0.12)" : T.grad, border: whSaved ? "1px solid rgba(74,222,128,0.4)" : "none", borderRadius: 8, color: whSaved ? "#4ADE80" : "#fff", padding: "8px 13px", cursor: "pointer", fontSize: 12, fontWeight: 800, fontFamily: "inherit", flexShrink: 0 }}>{whSaved ? "✓ Saved" : "Save"}</button>
+                </div>
+              </div>}
+            </>)}
           </div>
-          <div style={{ fontSize: 11, color: B.muted, background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 9, padding: "9px 11px", lineHeight: 1.5 }}>Connect either or both — students pick a method. With the Stripe webhook set up, paid schools unlock automatically; otherwise students confirm payment manually. (PayPal auto-verification is coming next.)</div>
+          <div style={{ fontSize: 11, color: B.muted, background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 9, padding: "9px 11px", lineHeight: 1.5 }}>Connect either or both — students pick a method. {STRIPE_CONNECT_CLIENT_ID || PAYPAL_PLATFORM_ENABLED ? "Connected payments unlock the school automatically." : "With the webhook set up, unlocks are automatic; otherwise students confirm manually."}</div>
           <div>
             <div style={lbl}>Free trial</div>
             <div style={{ display: "flex", gap: 7 }}>{[[0, "None"], [7, "7 days"], [14, "14 days"]].map(([d, l]) => <button key={d} onClick={() => set({ trialDays: d })} style={{ flex: 1, background: (p.trialDays || 0) === d ? T.ps : B.surface2, border: `1px solid ${(p.trialDays || 0) === d ? T.ba : B.borderMid}`, borderRadius: 9, color: (p.trialDays || 0) === d ? T.hi : B.mutedMid, padding: "9px", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>{l}</button>)}</div>
@@ -10130,6 +10172,11 @@ export default function Senseito() {
   const [sideOpen, setSideOpen] = useState(false);
   const [session, setSession] = useState(null);
   const [syncState, setSyncState] = useState("idle");
+  // Returned from a Stripe Connect onboarding redirect → clean the URL param.
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    if (sp.get("stripe")) { try { window.history.replaceState(null, "", window.location.pathname); } catch { } }
+  }, []);
   const [accountOpen, setAccountOpen] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [justBuiltId, setJustBuiltId] = useState(null); // triggers the one-time "wow" reveal
