@@ -452,6 +452,7 @@ const ICO_PATHS = {
   cards: "M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z",
   steps: "M4 19h4v-5h4v-5h4v-5h4",
   arcade: "M7 11h4M9 9v4M15 10h.01M18 12h.01M7 7h10a4 4 0 014 4v2a4 4 0 01-7 3l-1-1h-2l-1 1a4 4 0 01-7-3v-2a4 4 0 014-4z",
+  brain: "M9 3a3 3 0 00-3 3 3 3 0 00-2 5 3 3 0 001 5 3 3 0 005 2V4.5A2.5 2.5 0 009 3zM15 3a3 3 0 013 3 3 3 0 012 5 3 3 0 01-1 5 3 3 0 01-5 2V4.5A2.5 2.5 0 0115 3z",
 };
 function Ico({ name, size = 15, fill = false, style }) {
   const d = ICO_PATHS[name]; if (!d) return null;
@@ -930,6 +931,29 @@ Format exactly:
 ## Teaching Stance
 Output only the markdown. No preamble.`;
 
+// Training Ground: ingest a source (book/notes/URL/PDF) → a knowledge summary + a chapter map.
+const TRAINING_SYS = `You are the Senseito Knowledge Trainer. A creator has given you SOURCE MATERIAL (a book, notes, transcript or PDF) to train their school's mentor AI on. Study it and return JSON ONLY:
+{ "title": "<a short name for this source>",
+  "summary": "<compact KNOWLEDGE DNA in markdown — core thesis, key principles (bullets), frameworks, signature vocabulary, teaching stance. Max ~450 words. This is what the mentor teaches from>",
+  "chapters": [ { "title": "<chapter/section name>", "about": "<1-2 sentences: what it covers and the most important details>" } ] }
+If the material has clear chapters/sections, extract them faithfully in order (up to ~24). If it doesn't, break it into logical topic sections. Be specific and accurate to the source — never invent chapters that aren't there.`;
+// Reads a source via the proxy. PDFs are sent as a document block (Anthropic reads them); text is sent inline.
+async function ingestTrainingSource({ name, url, text, isPdf }) {
+  let content;
+  if (text && text.trim()) content = `SOURCE NAME: ${name || "Untitled"}\n\nSOURCE TEXT:\n${text.slice(0, 60000)}`;
+  else if (isPdf && /^https?:\/\//i.test(url || "")) content = [{ type: "text", text: `SOURCE NAME: ${name || "Untitled"}. Read the attached PDF document fully and extract its chapters.` }, { type: "document", source: { type: "url", url } }];
+  else content = `SOURCE NAME: ${name || "Untitled"}${url ? ` (${url})` : ""}. No text was provided — infer a reasonable chapter outline for a source with this title, and note that the full text wasn't available.`;
+  return apiJSON(TRAINING_SYS, [{ role: "user", content }], 3200, "sonnet");
+}
+// Always-honor training directives + remembered facts, injected into the mentor & build AI prompts.
+function trainingPreamble(school) {
+  const t = school?.training; if (!t) return "";
+  const dir = (t.directives || "").trim();
+  const mem = (t.memory || []).filter(Boolean);
+  if (!dir && !mem.length) return "";
+  return `\nTRAINING DIRECTIVES for this school (ALWAYS honor these — the creator set them):\n${dir ? dir + "\n" : ""}${mem.length ? mem.map(m => `- ${m}`).join("\n") + "\n" : ""}`;
+}
+
 const ITERATE_SYS = `You are the Senseito School Editor AI. You receive an existing school PLAN as JSON (lessons describe activities as "blockTypes": [type strings] only — NOT full block data) and an edit instruction.
 Return the FULL updated plan as JSON with the EXACT same structure and field names. Apply ONLY the requested change; preserve everything else exactly, including each lesson's "blockTypes" array, the "sections" array, the "concepts" array, "layout", and learningPath/voicePreset/gamiPreset/theme (change those only if asked). If the change introduces a genuinely new concept, you may add it to "concepts". Also refresh "suggestions" to 3-4 NEW specific ideas that fit after this change.
 NUMBERING & MOVING LESSONS: lesson "number" values are assigned AUTOMATICALLY by position — the app renumbers every lesson sequentially across the parts after your edit, so you do NOT need to keep them consistent. What matters is WHICH PART a lesson sits in and its ORDER within that part.
@@ -1014,7 +1038,7 @@ function schoolSummary(school) {
 }
 // The build assistant: knows the full project; converses OR emits a precise edit directive.
 const CHAT_SYS = (school) => `You are the Senseito build assistant for the project "${school.name}". You know it fully:
-${schoolSummary(school)}
+${schoolSummary(school)}${trainingPreamble(school)}
 Available block types: ${ALL_BLOCKS.join(", ")}.
 The creator chats with you to shape this project. Reply in JSON ONLY:
 { "reply": "<conversational reply, under 90 words>", "action": <null OR one precise one-line CONTENT/STRUCTURE edit instruction>, "design": <null OR an object that patches VISUAL/LAYOUT fields directly>, "options": <null OR 2-3 idea cards — see IDEAS mode> }
@@ -1108,7 +1132,7 @@ function mentorSys(school, lesson, bus, opts = {}) {
     : "";
   return `You are ${school.mentor.name}, an AI mentor inside the "${school.name}" school on Senseito.
 ${school.mentor.systemVoice}
-${dna}${busContext(bus, school)}
+${trainingPreamble(school)}${dna}${busContext(bus, school)}
 THIS LESSON: "${lesson.title}" (${lesson.type})
 CONCEPT: ${lesson.concept}
 MISSION: ${lesson.mission}
@@ -2096,6 +2120,153 @@ Rules: 4-7 sections that genuinely TEACH the lesson's content (key ideas, clear 
 function lessonContextText(school, lesson) {
   const blocks = (lesson.blocks || []).map(b => `${b.type}: ${flattenText(b.data?.title || b.data?.prompt || b.data?.question || "")}`.trim()).filter(Boolean).join("; ");
   return `SCHOOL: ${school.name} — ${flattenText(school.description) || ""}\nMENTOR: ${school.mentor?.name || ""} (${school.voicePreset || "sage"})\nLESSON #${lesson.number}: ${lesson.title}\nWHAT IT TEACHES: ${flattenText(lesson.concept) || ""}\nTHEORY: ${(flattenText(lesson.theory) || "").slice(0, 2500)}\nACTIVITIES: ${blocks || "none"}`;
+}
+
+// ── TRAINING GROUND — a friendly, powerful place to "train" a school's mentor AI:
+// feed it material (books/PDFs/notes), see what it knows & remembers, and set
+// always-honor directives for how it should tweak this school. ──
+function TrainingGround({ school, T, media, onUpdate, onClose }) {
+  const t = school.training || {};
+  const sources = t.sources || [];
+  const [file, setFile] = useState(null);
+  const [srcName, setSrcName] = useState("");
+  const [srcUrl, setSrcUrl] = useState("");
+  const [srcText, setSrcText] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [openSrc, setOpenSrc] = useState(null);
+  const [newMem, setNewMem] = useState("");
+  const [showDNA, setShowDNA] = useState(false);
+  const fileRef = useRef(null);
+  const setTraining = (patch) => onUpdate({ data: { ...school, training: { ...(school.training || {}), ...patch } } });
+  const memory = t.memory || [];
+  const trained = !!(school.knowledgeDNA || sources.length);
+  async function train() {
+    if (busy) return;
+    if (!file && !srcText.trim() && !srcUrl.trim()) { setErr("Add a file, paste some text, or a link first."); return; }
+    setBusy(true); setErr("");
+    try {
+      let url = "", isPdf = false, name = srcName.trim();
+      if (file) {
+        if (!media) throw new Error("Sign in to upload files.");
+        const m = await uploadMedia(file, media.token, media.userId); url = m.url;
+        isPdf = /pdf/i.test(file.type) || /\.pdf$/i.test(file.name); name = name || file.name;
+      } else if (srcUrl.trim()) { url = srcUrl.trim(); isPdf = /\.pdf($|\?)/i.test(url); }
+      const res = await ingestTrainingSource({ name, url, text: srcText, isPdf });
+      const source = { id: uid(), name: res?.title || name || (isPdf ? "PDF source" : "Source"), url, kind: isPdf ? "pdf" : (srcText.trim() ? "text" : "link"), summary: res?.summary || "", chapters: Array.isArray(res?.chapters) ? res.chapters : [], addedAt: Date.now() };
+      const newDNA = [school.knowledgeDNA, res?.summary].filter(Boolean).join("\n\n---\n\n").slice(0, 12000);
+      onUpdate({ data: { ...school, knowledgeDNA: newDNA, training: { ...(school.training || {}), sources: [...sources, source] } } });
+      setFile(null); setSrcName(""); setSrcUrl(""); setSrcText(""); setOpenSrc(source.id);
+    } catch (e) { setErr(e.message || "Training failed — try pasting the text instead."); }
+    setBusy(false);
+  }
+  const removeSource = (id) => setTraining({ sources: sources.filter(s => s.id !== id) });
+  const card = { background: B.surface, border: `1px solid ${B.border}`, borderRadius: 16, padding: 18, marginBottom: 16 };
+  const h = { fontFamily: "'Space Grotesk',sans-serif", fontSize: 14.5, fontWeight: 800, color: B.white, marginBottom: 4 };
+  const sub = { fontSize: 12, color: B.muted, marginBottom: 14, lineHeight: 1.55 };
+  const inp = { width: "100%", boxSizing: "border-box", background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, fontFamily: "inherit", fontSize: 13, padding: "9px 11px" };
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 300, background: "var(--bg)", overflowY: "auto", fontFamily: "'Inter',sans-serif" }}>
+      <div style={{ position: "sticky", top: 0, zIndex: 10, background: "var(--surface)", borderBottom: `1px solid ${B.borderMid}`, padding: "11px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, boxShadow: "0 2px 14px rgba(0,0,0,0.25)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}><button onClick={onClose} style={{ background: "none", border: "none", color: B.mutedMid, cursor: "pointer", fontSize: 17, padding: 0 }}>←</button><div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 16, fontWeight: 800, color: B.white }}>🧠 Training Ground</div><span style={{ fontSize: 12, color: B.muted }}>· {school.name}</span></div>
+        <button onClick={onClose} style={{ background: T.grad, border: "none", borderRadius: 8, color: "#fff", padding: "7px 15px", cursor: "pointer", fontSize: 12.5, fontWeight: 800, fontFamily: "inherit" }}>✓ Done</button>
+      </div>
+      <div style={{ maxWidth: 760, width: "100%", margin: "0 auto", padding: "22px 18px 70px", boxSizing: "border-box" }}>
+        {/* What the mentor knows */}
+        <div style={card}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+            <div style={{ width: 46, height: 46, borderRadius: 12, background: T.grad, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, flexShrink: 0 }}>🎓</div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 15, fontWeight: 800, color: B.white }}>{school.mentor?.name || "Your mentor"}</div>
+              <div style={{ fontSize: 12, color: B.mutedMid }}>{(school.voicePreset || "sage")} voice{school.mentor?.teachingStyle ? ` · ${school.mentor.teachingStyle}` : ""}</div>
+            </div>
+            <div style={{ marginLeft: "auto", flexShrink: 0, fontSize: 11.5, fontWeight: 700, color: trained ? "#4ADE80" : B.muted, background: trained ? "rgba(74,222,128,0.1)" : B.surface2, border: `1px solid ${trained ? "rgba(74,222,128,0.35)" : B.border}`, borderRadius: 100, padding: "4px 11px" }}>{trained ? "✓ Trained" : "Not trained yet"}</div>
+          </div>
+          {school.mentor?.personality && <div style={{ fontSize: 12.5, color: B.mutedMid, lineHeight: 1.6, background: B.surface2, borderRadius: 10, padding: "10px 12px" }}><b style={{ color: B.white }}>Personality:</b> {school.mentor.personality}</div>}
+          <div style={{ marginTop: 12 }}>
+            <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: B.muted, marginBottom: 8 }}>Trained on ({sources.length} source{sources.length === 1 ? "" : "s"})</div>
+            {sources.length === 0 && <div style={{ fontSize: 12.5, color: B.muted }}>Nothing added yet. Feed it a book, PDF or your notes below — it'll learn the material and map the chapters.</div>}
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {sources.map(s => (
+                <div key={s.id} style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 11, overflow: "hidden" }}>
+                  <div onClick={() => setOpenSrc(o => o === s.id ? null : s.id)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 13px", cursor: "pointer" }}>
+                    <span style={{ fontSize: 17 }}>{s.kind === "pdf" ? "📕" : s.kind === "link" ? "🔗" : "📝"}</span>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: B.white, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.name}</div>
+                      <div style={{ fontSize: 11, color: B.muted }}>{(s.chapters || []).length} chapter{(s.chapters || []).length === 1 ? "" : "s"} · added {new Date(s.addedAt).toLocaleDateString()}</div>
+                    </div>
+                    {s.url && <a href={s.url} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} style={{ fontSize: 11, color: T.hi, textDecoration: "none", fontWeight: 700 }}>Open ↗</a>}
+                    <button onClick={e => { e.stopPropagation(); removeSource(s.id); }} title="Remove" style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 13 }}>✕</button>
+                    <span style={{ color: T.p, fontSize: 12, transform: openSrc === s.id ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>▾</span>
+                  </div>
+                  {openSrc === s.id && <div style={{ padding: "0 13px 13px", borderTop: `1px solid ${B.border}` }}>
+                    {(s.chapters || []).length > 0 && <div style={{ marginTop: 11 }}>
+                      <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: B.muted, marginBottom: 7 }}>Chapters</div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        {s.chapters.map((c, i) => <div key={i} style={{ fontSize: 12.5, color: B.white, lineHeight: 1.5 }}><b style={{ color: T.hi }}>{i + 1}. {c.title}</b>{c.about ? <span style={{ color: B.mutedMid }}> — {c.about}</span> : null}</div>)}
+                      </div>
+                    </div>}
+                    {s.summary && <div style={{ marginTop: 11, fontSize: 12, color: B.mutedMid, lineHeight: 1.6, maxHeight: 180, overflowY: "auto", background: B.surface, borderRadius: 8, padding: "9px 11px" }}><Markdown text={s.summary} /></div>}
+                  </div>}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Add training material */}
+        <div style={card}>
+          <div style={h}>➕ Teach it something new</div>
+          <div style={sub}>Attach a book/PDF, paste text, or drop a link. Senseito reads it, learns the material, and maps out the chapters. Files are saved to your media library.</div>
+          <input ref={fileRef} type="file" accept=".pdf,.txt,.md,.doc,.docx,image/*" onChange={e => { const f = e.target.files?.[0]; setFile(f || null); if (f && !srcName) setSrcName(f.name); e.target.value = ""; }} style={{ display: "none" }} />
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+            <button onClick={() => fileRef.current?.click()} style={{ ...inp, width: "auto", cursor: "pointer", fontWeight: 700, color: file ? T.hi : B.mutedMid, borderColor: file ? T.ba : B.borderMid }}>{file ? `📎 ${file.name}` : "📎 Attach a file (PDF, notes…)"}</button>
+            {file && <button onClick={() => setFile(null)} style={{ ...inp, width: "auto", cursor: "pointer", color: "#F87171" }}>✕</button>}
+          </div>
+          <input value={srcName} onChange={e => setSrcName(e.target.value)} placeholder="Name this source (e.g. 'My book: Deep Work')" style={{ ...inp, marginBottom: 10 }} />
+          <input value={srcUrl} onChange={e => setSrcUrl(e.target.value)} placeholder="…or a link (article / PDF URL)" style={{ ...inp, marginBottom: 10 }} />
+          <textarea value={srcText} onChange={e => setSrcText(e.target.value)} rows={4} placeholder="…or paste the text / table of contents here (best for reliable chapter extraction)" style={{ ...inp, resize: "vertical", marginBottom: 10 }} />
+          {err && <div style={{ fontSize: 12, color: "#F87171", marginBottom: 8 }}>{err}</div>}
+          <button onClick={train} disabled={busy} style={{ width: "100%", background: T.grad, border: "none", borderRadius: 10, color: "#fff", padding: "11px", cursor: "pointer", fontSize: 13.5, fontWeight: 800, fontFamily: "inherit", opacity: busy ? 0.6 : 1 }}>{busy ? <><Spinner color="#fff" />Training your mentor…</> : "🧠 Train the mentor on this"}</button>
+        </div>
+
+        {/* Directives */}
+        <div style={card}>
+          <div style={h}>🎯 Training directives</div>
+          <div style={sub}>Always-honor instructions for how the AI should build & tweak THIS school and mentor. Be as specific as you like — this is surgical control. e.g. “Never use jargon.” “Always tie lessons back to the 80/20 rule.” “Keep the mentor tough but warm.”</div>
+          <textarea defaultValue={t.directives || ""} onBlur={e => setTraining({ directives: e.target.value })} rows={4} placeholder="Write the rules your AI should always follow for this school…" style={{ ...inp, resize: "vertical" }} />
+          <div style={{ fontSize: 11, color: B.muted, marginTop: 6 }}>Saved when you click away · applied to the mentor, lessons and the Senseito build chat.</div>
+        </div>
+
+        {/* Memory */}
+        <div style={card}>
+          <div style={h}>💾 What it remembers</div>
+          <div style={sub}>Key facts to keep front-of-mind — your positioning, audience, promise, do's & don'ts.</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 7, marginBottom: 10 }}>
+            {memory.map((m, i) => (
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 9, padding: "8px 11px" }}>
+                <span style={{ fontSize: 13 }}>•</span><div style={{ flex: 1, fontSize: 12.5, color: B.white, lineHeight: 1.45 }}>{m}</div>
+                <button onClick={() => setTraining({ memory: memory.filter((_, j) => j !== i) })} style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 12 }}>✕</button>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input value={newMem} onChange={e => setNewMem(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && newMem.trim()) { setTraining({ memory: [...memory, newMem.trim()] }); setNewMem(""); } }} placeholder="Add a fact to remember… (Enter)" style={{ ...inp, flex: 1 }} />
+            <button onClick={() => { if (newMem.trim()) { setTraining({ memory: [...memory, newMem.trim()] }); setNewMem(""); } }} style={{ background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 9, color: T.hi, padding: "0 15px", cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit" }}>Add</button>
+          </div>
+        </div>
+
+        {/* Raw knowledge (advanced) */}
+        <div style={card}>
+          <div onClick={() => setShowDNA(s => !s)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
+            <div><div style={{ ...h, marginBottom: 2 }}>📖 Knowledge DNA <span style={{ fontSize: 11, fontWeight: 400, color: B.muted }}>advanced</span></div><div style={{ fontSize: 12, color: B.muted }}>The distilled material the mentor teaches from. Edit it directly for surgical control.</div></div>
+            <span style={{ color: T.p, fontSize: 13, transform: showDNA ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>▾</span>
+          </div>
+          {showDNA && <textarea defaultValue={school.knowledgeDNA || ""} onBlur={e => onUpdate({ data: { ...school, knowledgeDNA: e.target.value } })} rows={10} placeholder="No knowledge yet — train the mentor on a source above." style={{ ...inp, resize: "vertical", marginTop: 12, fontFamily: "'Space Grotesk',monospace", fontSize: 12, lineHeight: 1.6 }} />}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function LessonView({ school, lesson, T: Tprop, onClose, onPass, onChooseFork, canEdit, onUpdateBlock, chat, onChat, bus, onIngest, outputs: outputsProp, onOutputs, blockOverrides, onOverrideBlock, inline = false }) {
@@ -6778,6 +6949,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const [bgOpen, setBgOpen] = useState(false); // background popover (color / photo / tint)
   const [vibeOpen, setVibeOpen] = useState(false); // (legacy) vibe popover — vibe now lives inside Styles
   const [showroomOpen, setShowroomOpen] = useState(false); // school-level Showroom studio (like Game Lab)
+  const [trainOpen, setTrainOpen] = useState(false); // Training Ground (mentor AI training)
   const [badgeEdit, setBadgeEdit] = useState(null); // { i } badge index being edited (-1 = new)
   const [certOpen, setCertOpen] = useState(false); // certificate designer / earned-certificate modal
   const [iconEdit, setIconEdit] = useState(false); // school-icon edit popover
@@ -7280,6 +7452,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
               <button onClick={() => onOpenMedia?.()} title="Your media library" style={ghost(false)} {...hover}><Ico name="folder" /> Media</button>
               <button onClick={() => setGamelabOpen(true)} title="Build games, then drop them in with a Game brick" style={ghost(false)} {...hover}><Ico name="game" /> Game Lab{(school.games || []).length ? ` · ${school.games.length}` : ""}</button>
               <button onClick={() => setShowroomOpen(true)} title="Build a Showroom slider, then drop it in with a Showroom brick" style={ghost(false)} {...hover}><Ico name="cards" /> Showroom{(school.showroom?.slides?.length) ? ` · ${school.showroom.slides.length}` : ""}</button>
+              <button onClick={() => setTrainOpen(true)} title="Train your school's mentor AI — feed it books/notes, set directives" style={ghost(false)} {...hover}><Ico name="brain" /> Train{(school.training?.sources?.length) ? ` · ${school.training.sources.length}` : ""}</button>
               <div style={{ flex: 1, minWidth: 6 }} />
               <button data-guide="publish" onClick={() => onPublish(rec)} disabled={publishing} style={{ display: "inline-flex", alignItems: "center", gap: 6, height: 30, background: rec.published ? "rgba(74,222,128,0.12)" : "linear-gradient(135deg,#059669,#047857)", border: rec.published ? "1px solid rgba(74,222,128,0.35)" : "none", borderRadius: 9, color: rec.published ? "#4ADE80" : "#fff", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, padding: "0 14px", cursor: "pointer", whiteSpace: "nowrap" }}>
                 {publishing ? <><Ico name="check" /> Published</> : rec.published ? <><Ico name="check" /> Published</> : <><Ico name="publish" /> Publish</>}
@@ -7352,6 +7525,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
           </div>
         )}
 
+        {!readOnly && trainOpen && <TrainingGround school={school} T={T} media={media} onUpdate={onUpdate} onClose={() => setTrainOpen(false)} />}
         {!readOnly && badgeEdit && <BadgeRuleEditor index={badgeEdit.i} school={school} T={T} onClose={() => setBadgeEdit(null)} onUpdate={onUpdate} />}
         {certOpen && <CertificateModal school={school} T={T} media={media} viewerName={readOnly ? (viewer ? viewerName(viewer) : "Student Name") : "Student Name"} earned={readOnly} onUpdate={readOnly ? undefined : onUpdate} onClose={() => setCertOpen(false)} />}
 
