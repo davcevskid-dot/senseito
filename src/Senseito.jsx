@@ -47,11 +47,12 @@ async function uploadToLibrary(file) {
 const MEDIA_MAX_BYTES = 50 * 1024 * 1024; // 50 MB/file (per-plan quotas come later)
 const mediaPublicUrl = (path) => `${SUPA_URL}/storage/v1/object/public/media/${path.split("/").map(encodeURIComponent).join("/")}`;
 const isImageFile = (m) => /^image\//.test(m.type || "") || /\.(png|jpe?g|gif|webp|svg|avif|bmp)$/i.test(m.name || m.path || "");
-async function uploadMedia(file, token, userId) {
+async function uploadMedia(file, token, userId, opts = {}) {
   if (file.size > MEDIA_MAX_BYTES) throw new Error("File too large (max 50 MB).");
   const ext = (file.name.match(/\.[a-z0-9]+$/i) || [""])[0].toLowerCase();
   const stem = file.name.replace(/\.[a-z0-9]+$/i, "").replace(/[^a-z0-9._-]+/gi, "-").slice(0, 48) || "file";
-  const path = `${userId}/${Date.now()}-${Math.random().toString(36).slice(2, 7)}-${stem}${ext}`;
+  // opts.path → overwrite that exact object (WP-style "save & replace", keeps the same URL).
+  const path = opts.path || `${userId}/${Date.now()}-${Math.random().toString(36).slice(2, 7)}-${stem}${ext}`;
   const res = await fetch(`${SUPA_URL}/storage/v1/object/media/${path.split("/").map(encodeURIComponent).join("/")}`, {
     method: "POST",
     headers: { apikey: SUPA_KEY, Authorization: `Bearer ${token}`, "Content-Type": file.type || "application/octet-stream", "x-upsert": "true" },
@@ -1004,8 +1005,8 @@ function schoolVisionUserContent(school, text) {
   add(school.bgImage, "the page BACKGROUND photo");
   add(school.iconImage, "the school icon/logo");
   if (!imgs.length) return text;
-  const list = imgs.map((x, i) => `#${i + 1} = ${x.label}`).join("; ");
-  return [{ type: "text", text: `${text}\n\n[ATTACHED IMAGES — you can SEE them: ${list}. Describe/critique what is ACTUALLY visible in each and give concrete, specific visual advice. Do NOT say you can't see images.]` }, ...imgs.map(x => ({ type: "image", source: { type: "url", url: x.url } }))];
+  const list = imgs.map((x, i) => { const m = getMediaMeta(x.url); const tags = [m.title && `title: "${m.title}"`, m.alt && `alt: "${m.alt}"`].filter(Boolean).join(", "); return `#${i + 1} = ${x.label}${tags ? ` (${tags})` : ""}`; }).join("; ");
+  return [{ type: "text", text: `${text}\n\n[ATTACHED IMAGES — you can SEE them: ${list}. Use the given title/alt AND what is ACTUALLY visible. Describe/critique each and give concrete, specific visual advice. Do NOT say you can't see images.]` }, ...imgs.map(x => ({ type: "image", source: { type: "url", url: x.url } }))];
 }
 
 const ADVISOR_SYS = (school) => `You are the Senseito Learning Experience Advisor for "${school.name}" — ${school.description}
@@ -8325,7 +8326,7 @@ function MediaPicker({ token, userId, imagesOnly = false, onPick, onClose }) {
             : shown.length === 0 ? <div style={{ fontSize: 13, color: B.muted, textAlign: "center", padding: 30, lineHeight: 1.6 }}>No {imagesOnly ? "images" : "files"} yet.<br />Hit <b style={{ color: T.hi }}>⬆ Upload</b> to add some.</div>
             : <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(120px,1fr))", gap: 10 }}>
               {shown.map(m => (
-                <button key={m.path} onClick={() => { onPick({ ...m, alt: getMediaAlt(m.url) }); onClose(); }} title={m.name} style={{ background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 12, padding: 0, cursor: "pointer", overflow: "hidden", textAlign: "left", fontFamily: "inherit" }}>
+                <button key={m.path} onClick={() => { const mt = getMediaMeta(m.url); onPick({ ...m, alt: mt.alt, title: mt.title }); onClose(); }} title={m.name} style={{ background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 12, padding: 0, cursor: "pointer", overflow: "hidden", textAlign: "left", fontFamily: "inherit" }}>
                   <div style={{ height: 86, background: B.surface3, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>
                     {isImageFile(m) ? <img src={m.url} alt={getMediaAlt(m.url)} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <span style={{ fontSize: 30 }}>{FILE_ICON(m.name, m.url)}</span>}
                   </div>
@@ -9026,70 +9027,98 @@ function StudentProfileModal({ viewer, T, xp, passed, total, schoolName, onClose
 // media file (original untouched). Used from the media library on any image.
 // Alt-text lives client-side (no DB via MCP right now) keyed by media URL, and is
 // attached to picked images so blocks can render meaningful alt attributes.
-function getMediaAlt(url) { try { return (JSON.parse(localStorage.getItem("senseito_media_alt") || "{}"))[url] || ""; } catch { return ""; } }
-function setMediaAlt(url, alt) { try { const m = JSON.parse(localStorage.getItem("senseito_media_alt") || "{}"); if (alt) m[url] = alt; else delete m[url]; localStorage.setItem("senseito_media_alt", JSON.stringify(m)); } catch { } }
+// Per-image metadata (title + alt) kept client-side, keyed by media URL. Back-compat: an
+// old string value is read as the alt text.
+function getMediaMeta(url) { try { const v = (JSON.parse(localStorage.getItem("senseito_media_alt") || "{}"))[url]; if (typeof v === "string") return { alt: v, title: "" }; return { alt: v?.alt || "", title: v?.title || "" }; } catch { return { alt: "", title: "" }; } }
+function setMediaMeta(url, patch) { try { const all = JSON.parse(localStorage.getItem("senseito_media_alt") || "{}"); const cur = getMediaMeta(url); const next = { ...cur, ...patch }; if (!next.alt && !next.title) delete all[url]; else all[url] = next; localStorage.setItem("senseito_media_alt", JSON.stringify(all)); } catch { } }
+const getMediaAlt = (url) => getMediaMeta(url).alt;
+const getMediaTitle = (url) => getMediaMeta(url).title;
+const setMediaAlt = (url, alt) => setMediaMeta(url, { alt });
 function CropModal({ item, token, userId, onSaved, onClose }) {
   const T = { grad: "linear-gradient(135deg,#7C3AED,#06B6D4)", ba: "rgba(124,58,237,0.4)", ps: "rgba(124,58,237,0.12)", hi: "#C4B5FD" };
-  const [ratio, setRatio] = useState("16:9");
+  const [ratio, setRatio] = useState("16:9"); // one of IMG_RATIOS keys, or "free"
   const [zoom, setZoom] = useState(1);
   const [off, setOff] = useState({ x: 0, y: 0 });
   const [img, setImg] = useState(null);
   const [busy, setBusy] = useState(false);
   const [rotBusy, setRotBusy] = useState(false);
   const [err, setErr] = useState("");
-  const [alt, setAlt] = useState(() => getMediaAlt(item.url));
+  const meta0 = getMediaMeta(item.url);
+  const [alt, setAlt] = useState(meta0.alt);
+  const [title, setTitle] = useState(meta0.title);
+  const [box, setBox] = useState(null); // free-crop rectangle in container px {x,y,w,h}
   useEffect(() => {
     const i = new Image(); i.crossOrigin = "anonymous";
     i.onload = () => setImg(i); i.onerror = () => setErr("Couldn't load this image for cropping.");
     i.src = item.url;
   }, [item.url]);
-  // Rotate the working image 90° (swaps dimensions) — export & preview then use the rotated copy.
   function rotate(dir) {
     if (!img || rotBusy) return; setRotBusy(true); setErr("");
     try {
       const w = img.naturalWidth, h = img.naturalHeight;
       const c = document.createElement("canvas"); c.width = h; c.height = w;
       const ctx = c.getContext("2d"); ctx.translate(c.width / 2, c.height / 2); ctx.rotate((dir > 0 ? 90 : -90) * Math.PI / 180); ctx.drawImage(img, -w / 2, -h / 2);
-      const ni = new Image(); ni.onload = () => { setImg(ni); setOff({ x: 0, y: 0 }); setZoom(1); setRotBusy(false); }; ni.onerror = () => setRotBusy(false); ni.src = c.toDataURL("image/png");
+      const ni = new Image(); ni.onload = () => { setImg(ni); setOff({ x: 0, y: 0 }); setZoom(1); setBox(null); setRotBusy(false); }; ni.onerror = () => setRotBusy(false); ni.src = c.toDataURL("image/png");
     } catch { setErr("Rotate needs a CORS-clean image."); setRotBusy(false); }
   }
-  const [rw, rh] = IMG_RATIOS[ratio];
-  const VW = Math.min(380, (typeof window !== "undefined" ? window.innerWidth : 400) - 72), VH = Math.round(VW * rh / rw);
-  const base = img ? Math.max(VW / img.naturalWidth, VH / img.naturalHeight) : 1; // cover-fit at zoom 1
+  const free = ratio === "free";
+  const CW = Math.min(420, (typeof window !== "undefined" ? window.innerWidth : 440) - 72);
+  // Fixed-ratio (pan/zoom) geometry:
+  const [rw, rh] = IMG_RATIOS[free ? "1:1" : ratio];
+  const VW = free ? CW : Math.min(380, CW), VH = free && img ? Math.round(CW * img.naturalHeight / img.naturalWidth) : Math.round((free ? CW : Math.min(380, CW)) * rh / rw);
+  const base = img && !free ? Math.max(VW / img.naturalWidth, VH / img.naturalHeight) : 1;
   const scale = base * zoom;
+  const fitFree = img ? CW / img.naturalWidth : 1; // contain scale in free mode
   const clampOff = (o, s = scale) => {
     if (!img) return o;
     const maxX = Math.max(0, (img.naturalWidth * s - VW) / 2), maxY = Math.max(0, (img.naturalHeight * s - VH) / 2);
     return { x: Math.min(maxX, Math.max(-maxX, o.x)), y: Math.min(maxY, Math.max(-maxY, o.y)) };
   };
-  useEffect(() => { setOff(o => clampOff(o)); }, [ratio, zoom, img]); // eslint-disable-line
+  useEffect(() => { if (!free) setOff(o => clampOff(o)); }, [ratio, zoom, img]); // eslint-disable-line
+  // Init the free-crop box (centered 78%) whenever we enter free mode.
+  useEffect(() => { if (free && img) { const h = CW * img.naturalHeight / img.naturalWidth; setBox({ x: CW * 0.11, y: h * 0.11, w: CW * 0.78, h: h * 0.78 }); } }, [free, img]); // eslint-disable-line
   const onDrag = (ev) => {
     ev.preventDefault(); const node = ev.currentTarget; try { node.setPointerCapture(ev.pointerId); } catch { }
     const sx = ev.clientX, sy = ev.clientY, o0 = off;
     const move = (m) => setOff(clampOff({ x: o0.x + (m.clientX - sx), y: o0.y + (m.clientY - sy) }));
-    const up = () => { node.removeEventListener("pointermove", move); node.removeEventListener("pointerup", up); node.removeEventListener("pointercancel", up); };
-    node.addEventListener("pointermove", move); node.addEventListener("pointerup", up); node.addEventListener("pointercancel", up);
+    const up = () => { node.removeEventListener("pointermove", move); node.removeEventListener("pointerup", up); };
+    node.addEventListener("pointermove", move); node.addEventListener("pointerup", up);
   };
-  async function save() {
+  const freeDrag = (ev, mode) => {
+    ev.preventDefault(); ev.stopPropagation(); const CH = CW * img.naturalHeight / img.naturalWidth;
+    const sx = ev.clientX, sy = ev.clientY, b0 = { ...box };
+    const move = (m) => {
+      const dx = m.clientX - sx, dy = m.clientY - sy;
+      if (mode === "move") setBox({ ...b0, x: Math.max(0, Math.min(CW - b0.w, b0.x + dx)), y: Math.max(0, Math.min(CH - b0.h, b0.y + dy)) });
+      else setBox({ ...b0, w: Math.max(30, Math.min(CW - b0.x, b0.w + dx)), h: Math.max(30, Math.min(CH - b0.y, b0.h + dy)) });
+    };
+    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+  };
+  async function doExport(replace) {
     if (!img || busy) return; setBusy(true); setErr("");
     try {
-      const w = img.naturalWidth * scale, h = img.naturalHeight * scale;
-      const left = (VW - w) / 2 + off.x, top = (VH - h) / 2 + off.y;
-      const sx = -left / scale, sy = -top / scale, sw = VW / scale, sh = VH / scale;
+      let sx, sy, sw, sh;
+      if (free && box) { sx = box.x / fitFree; sy = box.y / fitFree; sw = box.w / fitFree; sh = box.h / fitFree; }
+      else { const w = img.naturalWidth * scale, h = img.naturalHeight * scale; const left = (VW - w) / 2 + off.x, top = (VH - h) / 2 + off.y; sx = -left / scale; sy = -top / scale; sw = VW / scale; sh = VH / scale; }
       const c = document.createElement("canvas"); c.width = Math.max(1, Math.round(sw)); c.height = Math.max(1, Math.round(sh));
       c.getContext("2d").drawImage(img, sx, sy, sw, sh, 0, 0, c.width, c.height);
       const blob = await new Promise(r => c.toBlob(r, "image/jpeg", 0.92));
-      if (!blob) throw new Error("Couldn't export the crop (the image may block cross-origin use).");
-      const f = new File([blob], `${(item.name || "image").replace(/\.[a-z0-9]+$/i, "")}-${ratio.replace(":", "x")}.jpg`, { type: "image/jpeg" });
-      const m = await uploadMedia(f, token, userId);
-      if (m?.url && alt.trim()) setMediaAlt(m.url, alt.trim());
+      if (!blob) throw new Error("Export failed (the image may block cross-origin use).");
+      const base = (item.name || "image").replace(/\.[a-z0-9]+$/i, "");
+      const f = new File([blob], replace ? (item.name || "image.jpg") : `${base}-${free ? "crop" : ratio.replace(":", "x")}.jpg`, { type: "image/jpeg" });
+      const m = await uploadMedia(f, token, userId, replace ? { path: item.path } : {});
+      const url = m?.url || item.url;
+      setMediaMeta(url, { alt: alt.trim(), title: title.trim() });
       onSaved?.(); onClose();
-    } catch (e) { setErr(e.message || "Crop failed"); }
+    } catch (e) { setErr(e.message || "Export failed"); }
     setBusy(false);
   }
   const imgW = img ? img.naturalWidth * scale : 0, imgH = img ? img.naturalHeight * scale : 0;
+  const inp = { width: "100%", boxSizing: "border-box", background: "var(--surface3)", border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, fontFamily: "inherit", fontSize: 13, padding: "9px 11px" };
+  const rbtn = (on) => ({ background: on ? T.ps : "var(--surface2)", border: `1px solid ${on ? T.ba : B.borderMid}`, borderRadius: 8, color: on ? T.hi : B.mutedMid, padding: "5px 12px", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" });
   return (
-    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 340, background: "rgba(2,2,8,0.78)", backdropFilter: "blur(7px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, fontFamily: "'Inter',sans-serif" }}>
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 340, background: "rgba(2,2,8,0.78)", backdropFilter: "blur(7px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "max(20px,4vh) 16px 40px", overflowY: "auto", fontFamily: "'Inter',sans-serif" }}>
       <div onClick={e => e.stopPropagation()} style={{ background: "var(--surface)", border: `1px solid ${T.ba}`, borderRadius: 18, padding: 18, width: "auto", maxWidth: "94vw" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 12 }}>
           <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 15, fontWeight: 800, color: B.white }}>🖼️ Edit image</div>
@@ -9097,30 +9126,45 @@ function CropModal({ item, token, userId, onSaved, onClose }) {
         </div>
         <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
           <span style={{ fontSize: 11, color: B.muted, fontWeight: 700 }}>Crop</span>
-          {Object.keys(IMG_RATIOS).map(r => <button key={r} onClick={() => { setRatio(r); setZoom(1); }} style={{ background: ratio === r ? T.ps : "var(--surface2)", border: `1px solid ${ratio === r ? T.ba : B.borderMid}`, borderRadius: 8, color: ratio === r ? T.hi : B.mutedMid, padding: "5px 12px", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>{r}</button>)}
+          <button onClick={() => setRatio("free")} style={rbtn(free)}>✂ Free</button>
+          {Object.keys(IMG_RATIOS).map(r => <button key={r} onClick={() => { setRatio(r); setZoom(1); }} style={rbtn(ratio === r)}>{r}</button>)}
           <span style={{ width: 1, height: 18, background: B.borderMid, margin: "0 2px" }} />
-          <button onClick={() => rotate(-1)} disabled={!img || rotBusy} title="Rotate left" style={{ background: "var(--surface2)", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "5px 10px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>⟲</button>
-          <button onClick={() => rotate(1)} disabled={!img || rotBusy} title="Rotate right" style={{ background: "var(--surface2)", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "5px 10px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>⟳</button>
+          <button onClick={() => rotate(-1)} disabled={!img || rotBusy} title="Rotate left" style={{ ...rbtn(false), padding: "5px 10px", fontSize: 13 }}>⟲</button>
+          <button onClick={() => rotate(1)} disabled={!img || rotBusy} title="Rotate right" style={{ ...rbtn(false), padding: "5px 10px", fontSize: 13 }}>⟳</button>
         </div>
-        <div onPointerDown={img ? onDrag : undefined} style={{ position: "relative", width: VW, height: VH, maxWidth: "88vw", overflow: "hidden", borderRadius: 12, border: `1px solid ${B.borderMid}`, background: "#000", cursor: img ? "grab" : "default", touchAction: "none" }}>
-          {img
-            ? <img src={img.src} alt="" draggable={false} style={{ position: "absolute", width: imgW, height: imgH, left: (VW - imgW) / 2 + off.x, top: (VH - imgH) / 2 + off.y, maxWidth: "none", userSelect: "none", pointerEvents: "none" }} />
-            : <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: B.muted, fontSize: 13 }}>{err || "Loading…"}</div>}
-          <div style={{ position: "absolute", inset: 0, border: "1px dashed rgba(255,255,255,0.35)", borderRadius: 12, pointerEvents: "none" }} />
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 12 }}>
+        {free ? (
+          <div style={{ position: "relative", width: CW, height: img ? CW * img.naturalHeight / img.naturalWidth : CW * 0.6, maxWidth: "88vw", overflow: "hidden", borderRadius: 12, border: `1px solid ${B.borderMid}`, background: "#000", touchAction: "none" }}>
+            {img ? <img src={img.src} alt="" draggable={false} style={{ width: "100%", height: "100%", display: "block", userSelect: "none", pointerEvents: "none" }} /> : <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: B.muted, fontSize: 13 }}>{err || "Loading…"}</div>}
+            {img && box && <>
+              <div style={{ position: "absolute", inset: 0, boxShadow: `0 0 0 9999px rgba(0,0,0,0.5)`, clipPath: `polygon(0 0,100% 0,100% 100%,0 100%,0 ${box.y}px,${box.x}px ${box.y}px,${box.x}px ${box.y + box.h}px,${box.x + box.w}px ${box.y + box.h}px,${box.x + box.w}px ${box.y}px,0 ${box.y}px)`, pointerEvents: "none" }} />
+              <div onPointerDown={e => freeDrag(e, "move")} style={{ position: "absolute", left: box.x, top: box.y, width: box.w, height: box.h, border: "2px solid #fff", borderRadius: 4, cursor: "move", boxSizing: "border-box" }}>
+                <div onPointerDown={e => freeDrag(e, "resize")} style={{ position: "absolute", right: -8, bottom: -8, width: 18, height: 18, borderRadius: "50%", background: T.hi, border: "2px solid #fff", cursor: "nwse-resize" }} />
+              </div>
+            </>}
+          </div>
+        ) : (
+          <div onPointerDown={img ? onDrag : undefined} style={{ position: "relative", width: VW, height: VH, maxWidth: "88vw", overflow: "hidden", borderRadius: 12, border: `1px solid ${B.borderMid}`, background: "#000", cursor: img ? "grab" : "default", touchAction: "none" }}>
+            {img
+              ? <img src={img.src} alt="" draggable={false} style={{ position: "absolute", width: imgW, height: imgH, left: (VW - imgW) / 2 + off.x, top: (VH - imgH) / 2 + off.y, maxWidth: "none", userSelect: "none", pointerEvents: "none" }} />
+              : <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: B.muted, fontSize: 13 }}>{err || "Loading…"}</div>}
+            <div style={{ position: "absolute", inset: 0, border: "1px dashed rgba(255,255,255,0.35)", borderRadius: 12, pointerEvents: "none" }} />
+          </div>
+        )}
+        {!free && <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 12 }}>
           <span style={{ fontSize: 11.5, color: B.muted }}>Zoom</span>
           <input type="range" min="1" max="3" step="0.01" value={zoom} onChange={e => setZoom(+e.target.value)} style={{ flex: 1 }} />
+        </div>}
+        <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+          <div><div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: B.muted, marginBottom: 5 }}>Title</div>
+            <input value={title} onChange={e => setTitle(e.target.value)} onBlur={() => setMediaMeta(item.url, { title: title.trim() })} placeholder="e.g. Group coaching session" style={inp} /></div>
+          <div><div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: B.muted, marginBottom: 5 }}>Alt text <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: 400 }}>— accessibility & SEO</span></div>
+            <input value={alt} onChange={e => setAlt(e.target.value)} onBlur={() => setMediaMeta(item.url, { alt: alt.trim() })} placeholder="e.g. Coach smiling during a group session" style={inp} /></div>
         </div>
-        <div style={{ marginTop: 12 }}>
-          <div style={{ fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: B.muted, marginBottom: 5 }}>Alt text <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: 400 }}>— describes the image for accessibility & SEO</span></div>
-          <input value={alt} onChange={e => setAlt(e.target.value)} onBlur={() => setMediaAlt(item.url, alt.trim())} placeholder="e.g. Coach smiling during a group session" style={{ width: "100%", boxSizing: "border-box", background: "var(--surface3)", border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, fontFamily: "inherit", fontSize: 13, padding: "9px 11px" }} />
-        </div>
-        <div style={{ fontSize: 11, color: B.muted, margin: "10px 0 12px" }}>Alt text saves to this image · crop/rotate save a NEW file, the original stays.</div>
-        {err && img && <div style={{ fontSize: 12, color: "#F87171", marginBottom: 8 }}>{err}</div>}
-        <div style={{ display: "flex", gap: 8 }}>
-          <button onClick={() => { setMediaAlt(item.url, alt.trim()); onSaved?.(); onClose(); }} style={{ flex: 1, background: "var(--surface2)", border: `1px solid ${B.borderMid}`, borderRadius: 10, color: B.white, padding: "11px", cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit" }}>Save alt text</button>
-          <button onClick={save} disabled={!img || busy} style={{ flex: 1, background: T.grad, border: "none", borderRadius: 10, color: "#fff", padding: "11px", cursor: "pointer", fontSize: 13.5, fontWeight: 800, fontFamily: "inherit", opacity: !img || busy ? 0.6 : 1 }}>{busy ? <><Spinner color="#fff" />Saving…</> : `💾 Save ${ratio} copy`}</button>
+        {err && img && <div style={{ fontSize: 12, color: "#F87171", margin: "10px 0 0" }}>{err}</div>}
+        <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
+          <button onClick={() => { setMediaMeta(item.url, { alt: alt.trim(), title: title.trim() }); onSaved?.(); onClose(); }} style={{ flex: "1 1 100%", background: "var(--surface2)", border: `1px solid ${B.borderMid}`, borderRadius: 10, color: B.white, padding: "10px", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>Save title & alt only</button>
+          <button onClick={() => doExport(false)} disabled={!img || busy} style={{ flex: 1, background: "var(--surface2)", border: `1px solid ${T.ba}`, borderRadius: 10, color: T.hi, padding: "11px", cursor: "pointer", fontSize: 13, fontWeight: 800, fontFamily: "inherit", opacity: !img || busy ? 0.6 : 1 }}>{busy ? "…" : "💾 Save as new"}</button>
+          <button onClick={() => doExport(true)} disabled={!img || busy} title="Overwrite the original — keeps the same URL" style={{ flex: 1, background: T.grad, border: "none", borderRadius: 10, color: "#fff", padding: "11px", cursor: "pointer", fontSize: 13, fontWeight: 800, fontFamily: "inherit", opacity: !img || busy ? 0.6 : 1 }}>{busy ? <><Spinner color="#fff" />Saving…</> : "↻ Save & replace"}</button>
         </div>
       </div>
     </div>
