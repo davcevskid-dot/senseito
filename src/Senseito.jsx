@@ -454,6 +454,7 @@ const ICO_PATHS = {
   steps: "M4 19h4v-5h4v-5h4v-5h4",
   arcade: "M7 11h4M9 9v4M15 10h.01M18 12h.01M7 7h10a4 4 0 014 4v2a4 4 0 01-7 3l-1-1h-2l-1 1a4 4 0 01-7-3v-2a4 4 0 014-4z",
   brain: "M9 3a3 3 0 00-3 3 3 3 0 00-2 5 3 3 0 001 5 3 3 0 005 2V4.5A2.5 2.5 0 009 3zM15 3a3 3 0 013 3 3 3 0 012 5 3 3 0 01-1 5 3 3 0 01-5 2V4.5A2.5 2.5 0 0115 3z",
+  chart: "M4 20V4M4 20h16M8 20v-6M13 20V9M18 20v-9",
 };
 function Ico({ name, size = 15, fill = false, style }) {
   const d = ICO_PATHS[name]; if (!d) return null;
@@ -4667,8 +4668,13 @@ function EventsBlock({ data = {}, T, canEdit, onEditData, state, onState }) {
   const events = data.events || [];
   const rsvp = state?.rsvp || {};
   const [editing, setEditing] = useState(null); // index, "new", or null
-  const toggleRsvp = (i) => onState?.({ rsvp: { ...rsvp, [i]: !rsvp[i] } });
-  const save = (ev, idx) => { const next = idx === "new" || idx == null ? [...events, ev] : events.map((x, j) => j === idx ? ev : x); onEditData?.({ ...data, events: next }); setEditing(null); };
+  const toggleRsvp = (i) => {
+    const going = !rsvp[i]; const e = events[i] || {};
+    onState?.({ rsvp: { ...rsvp, [i]: going } });
+    // Broadcast so the school records it server-side (creator can see who's coming).
+    try { window.dispatchEvent(new CustomEvent("sx-rsvp", { detail: { eventKey: e.id || `t:${(e.title || i)}`, title: e.title || "Event", going } })); } catch { }
+  };
+  const save = (ev, idx) => { const withId = { id: ev.id || uid(), ...ev }; const next = idx === "new" || idx == null ? [...events, withId] : events.map((x, j) => j === idx ? withId : x); onEditData?.({ ...data, events: next }); setEditing(null); };
   const remove = (i) => onEditData?.({ ...data, events: events.filter((_, j) => j !== i) });
   const isLive = (e) => { const d = new Date(e.when); if (isNaN(d)) return false; const ms = d - Date.now(); return ms <= 0 && ms > -90 * 60000; };
   return (
@@ -6924,6 +6930,117 @@ function SchoolWizard({ school, T, media, published, rec, onUpdate, saveLesson, 
   );
 }
 
+// Creator-only analytics for ONE school: per-student progress, mastery (strong/weak on the
+// knowledge map), activity, event RSVPs, email export, open-profile & bulk message.
+function AnalyticsDashboard({ school, schoolId, viewer, token, T, onClose }) {
+  const [rows, setRows] = useState(null);
+  const [rsvps, setRsvps] = useState([]);
+  const [compose, setCompose] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [sent, setSent] = useState(0);
+  const [sending, setSending] = useState(false);
+  const concepts = school.concepts || [];
+  const cLabel = (id) => concepts.find(c => c.id === id)?.label || id;
+  const total = (school.semesters || []).reduce((n, s) => n + (s.lessons?.length || 0), 0);
+  const me = viewer?.user?.id;
+  useEffect(() => {
+    (async () => {
+      try { const r = await supaFetch(`/rest/v1/enrollments?select=student_id,email,name,progress,xp,tool_states,mentor_chat,updated_at&school_id=eq.${encodeURIComponent(schoolId)}&order=updated_at.desc`, { token }); setRows(r || []); } catch { setRows([]); }
+      try { const rv = await supaFetch(`/rest/v1/event_rsvps?select=event_key,event_title,name,going,user_id&school_id=eq.${encodeURIComponent(schoolId)}`, { token }); setRsvps(rv || []); } catch { }
+    })();
+  }, [schoolId]); // eslint-disable-line
+  const masteryOf = (row) => row.tool_states?.__bus?.mastery || {};
+  const strongWeak = (row) => {
+    const m = masteryOf(row); const strong = [], weak = [];
+    Object.entries(m).forEach(([id, v]) => { if (v >= 0.8) strong.push(cLabel(id)); else if (v > 0 && v < 0.5) weak.push(cLabel(id)); });
+    return { strong: strong.slice(0, 4), weak: weak.slice(0, 4) };
+  };
+  const events = [...new Map(rsvps.filter(r => r.going).map(r => [r.event_key, r.event_title])).entries()];
+  const goingFor = (key) => rsvps.filter(r => r.event_key === key && r.going);
+  const emails = [...new Set((rows || []).map(r => r.email).filter(Boolean))];
+  const exportCsv = () => {
+    const csv = "name,email,progress,xp\n" + (rows || []).map(r => { const p = Object.values(r.progress || {}).filter(v => v === "passed").length; return `"${(r.name || "").replace(/"/g, "'")}",${r.email || ""},${p}/${total},${r.xp || 0}`; }).join("\n");
+    const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" })); a.download = `${(school.name || "students").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}-students.csv`; a.click();
+  };
+  async function sendAll() {
+    if (!msg.trim() || sending || !me) return; setSending(true); let n = 0;
+    for (const r of (rows || [])) { if (!r.student_id || r.student_id === me) continue; try { await supaFetch(`/rest/v1/messages`, { method: "POST", token: viewer.token, headers: { Prefer: "return=minimal" }, body: [{ from_id: me, to_id: r.student_id, body: msg.slice(0, 2000) }] }); n++; } catch { } }
+    setSent(n); setSending(false); setMsg(""); setCompose(false);
+  }
+  const stat = (n, l) => <div style={{ background: "var(--surface2)", border: `1px solid ${B.border}`, borderRadius: 12, padding: "12px 16px", flex: 1, minWidth: 120 }}><div style={{ fontSize: 22, fontWeight: 800, color: B.white, fontFamily: "'Space Grotesk',sans-serif" }}>{n}</div><div style={{ fontSize: 11, color: B.muted, marginTop: 2 }}>{l}</div></div>;
+  const activeCount = (rows || []).filter(r => Object.values(r.progress || {}).some(v => v === "passed")).length;
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 300, background: "var(--bg)", overflowY: "auto", fontFamily: "'Inter',sans-serif" }}>
+      <div style={{ position: "sticky", top: 0, zIndex: 10, background: "var(--surface)", borderBottom: `1px solid ${B.borderMid}`, padding: "11px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, boxShadow: "0 2px 14px rgba(0,0,0,0.25)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}><button onClick={onClose} style={{ background: "none", border: "none", color: B.mutedMid, cursor: "pointer", fontSize: 17, padding: 0 }}>←</button><div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 16, fontWeight: 800, color: B.white }}>📊 Analytics</div><span style={{ fontSize: 12, color: B.muted }}>· {school.name}</span></div>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button onClick={() => { navigator.clipboard?.writeText(emails.join("\n")); }} title="Copy student emails" style={{ background: "var(--surface2)", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "7px 12px", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>Copy emails</button>
+          <button onClick={exportCsv} style={{ background: "var(--surface2)", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "7px 12px", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>⬇ CSV</button>
+          <button onClick={() => setCompose(true)} disabled={!(rows || []).length} style={{ background: T.grad, border: "none", borderRadius: 8, color: "#fff", padding: "7px 13px", cursor: "pointer", fontSize: 12, fontWeight: 800, fontFamily: "inherit", opacity: (rows || []).length ? 1 : 0.5 }}>✉️ Message all</button>
+        </div>
+      </div>
+      <div style={{ maxWidth: 900, width: "100%", margin: "0 auto", padding: "22px 18px 70px", boxSizing: "border-box" }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 18 }}>
+          {stat(rows === null ? "…" : rows.length, "Enrolled")}
+          {stat(activeCount, "Active (started)")}
+          {stat(total, "Lessons")}
+          {stat(events.length, "Events w/ RSVPs")}
+        </div>
+        {sent > 0 && <div style={{ fontSize: 12.5, color: "#4ADE80", marginBottom: 14 }}>✓ Message sent to {sent} student{sent === 1 ? "" : "s"}.</div>}
+        {events.length > 0 && <div style={{ background: "var(--surface)", border: `1px solid ${B.border}`, borderRadius: 14, padding: 16, marginBottom: 18 }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: B.white, marginBottom: 10, fontFamily: "'Space Grotesk',sans-serif" }}>📅 Who's coming</div>
+          {events.map(([key, title]) => { const g = goingFor(key); return (
+            <div key={key} style={{ padding: "8px 0", borderTop: `1px solid ${B.border}` }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}><span style={{ fontSize: 13, color: B.white, fontWeight: 700 }}>{title || "Event"}</span><span style={{ fontSize: 12, color: T.hi, fontWeight: 700 }}>{g.length} going</span></div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>{g.map((r, i) => <button key={i} onClick={() => openProfile(r.user_id, r.name)} style={{ background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 100, color: T.hi, padding: "3px 10px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit" }}>{r.name || "Student"}</button>)}</div>
+            </div>
+          ); })}
+        </div>}
+        <div style={{ background: "var(--surface)", border: `1px solid ${B.border}`, borderRadius: 14, padding: 16 }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: B.white, marginBottom: 12, fontFamily: "'Space Grotesk',sans-serif" }}>🎓 Students</div>
+          {rows === null && <div style={{ fontSize: 12.5, color: B.muted }}>Loading…</div>}
+          {rows && rows.length === 0 && <div style={{ fontSize: 12.5, color: B.muted }}>No enrollments yet.</div>}
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {(rows || []).map((r, i) => {
+              const passed = Object.values(r.progress || {}).filter(v => v === "passed").length;
+              const pct = total ? Math.round((passed / total) * 100) : 0;
+              const sw = strongWeak(r); const acts = (r.mentor_chat || []).length;
+              return (
+                <div key={i} style={{ background: "var(--surface2)", border: `1px solid ${B.border}`, borderRadius: 12, padding: "12px 14px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <button onClick={() => r.student_id && openProfile(r.student_id, r.name)} style={{ background: "none", border: "none", color: B.white, cursor: "pointer", fontSize: 13.5, fontWeight: 700, fontFamily: "inherit", padding: 0 }}>{r.name || r.email || "Student"}</button>
+                    <span style={{ marginLeft: "auto", fontSize: 12, color: B.muted }}>{passed}/{total} · {r.xp || 0} XP · {acts} msgs</span>
+                    {r.student_id && r.student_id !== me && <button onClick={() => openDM(r.student_id, r.name)} style={{ background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 8, color: T.hi, padding: "5px 11px", cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit" }}>💬 Message</button>}
+                  </div>
+                  <div style={{ height: 5, background: "var(--surface3)", borderRadius: 3, margin: "9px 0", overflow: "hidden" }}><div style={{ width: `${pct}%`, height: "100%", background: T.grad }} /></div>
+                  <div style={{ display: "flex", gap: 14, flexWrap: "wrap", fontSize: 11.5 }}>
+                    {sw.strong.length > 0 && <div style={{ color: "#4ADE80" }}>💪 Strong: <span style={{ color: B.mutedMid }}>{sw.strong.join(", ")}</span></div>}
+                    {sw.weak.length > 0 && <div style={{ color: "#FBBF24" }}>⚠ Needs work: <span style={{ color: B.mutedMid }}>{sw.weak.join(", ")}</span></div>}
+                    {!sw.strong.length && !sw.weak.length && <div style={{ color: B.muted }}>No knowledge-map data yet.</div>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ fontSize: 11, color: B.muted, marginTop: 12 }}>Strong/weak points come from this school's knowledge map only. Per-student token usage isn't tracked yet — usage is unlimited during testing.</div>
+        </div>
+      </div>
+      {compose && createPortal(
+        <div onClick={() => setCompose(false)} style={{ position: "fixed", inset: 0, zIndex: 2600, background: "rgba(2,2,8,0.74)", backdropFilter: "blur(8px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "max(28px,8vh) 16px 40px", fontFamily: "'Inter',sans-serif" }}>
+          <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 460, background: "var(--surface)", border: `1px solid ${T.ba}`, borderRadius: 18, padding: 18 }}>
+            <div style={{ fontSize: 15, fontWeight: 800, color: B.white, marginBottom: 4 }}>✉️ Message all students</div>
+            <div style={{ fontSize: 12, color: B.muted, marginBottom: 12 }}>Sends a direct message to each enrolled student ({(rows || []).filter(r => r.student_id && r.student_id !== me).length} recipients).</div>
+            <textarea value={msg} onChange={e => setMsg(e.target.value)} rows={4} placeholder="Your message to the whole cohort…" style={{ width: "100%", boxSizing: "border-box", background: "var(--surface3)", border: `1px solid ${B.borderMid}`, borderRadius: 10, color: B.white, fontFamily: "inherit", fontSize: 13, padding: "10px 12px", resize: "vertical" }} />
+            <div style={{ display: "flex", gap: 8, marginTop: 12, justifyContent: "flex-end" }}>
+              <button onClick={() => setCompose(false)} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.mutedMid, padding: "9px 15px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit" }}>Cancel</button>
+              <button onClick={sendAll} disabled={!msg.trim() || sending} style={{ background: T.grad, border: "none", borderRadius: 9, color: "#fff", padding: "9px 18px", cursor: "pointer", fontSize: 13, fontWeight: 800, fontFamily: "inherit", opacity: (!msg.trim() || sending) ? 0.6 : 1 }}>{sending ? "Sending…" : "Send to all"}</button>
+            </div>
+          </div>
+        </div>, document.body)}
+    </div>
+  );
+}
+
 function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, publicBase, token, onSetSlug, onIterate, iterating = false, iterProg = { pct: 0, label: "" }, justBuilt = false, onRevealSeen, onStats, guideOpen = false, onGuideOpen, onGuideClose, onOpenMedia, addClassNonce = 0, viewer = null, onSignIn }) {
   const school = rec.data;
   const T = themeFor(school);
@@ -6951,6 +7068,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const [vibeOpen, setVibeOpen] = useState(false); // (legacy) vibe popover — vibe now lives inside Styles
   const [showroomOpen, setShowroomOpen] = useState(false); // school-level Showroom studio (like Game Lab)
   const [trainOpen, setTrainOpen] = useState(false); // Training Ground (mentor AI training)
+  const [analyticsOpen, setAnalyticsOpen] = useState(false); // per-school analytics dashboard
   const [badgeEdit, setBadgeEdit] = useState(null); // { i } badge index being edited (-1 = new)
   const [certOpen, setCertOpen] = useState(false); // certificate designer / earned-certificate modal
   const [iconEdit, setIconEdit] = useState(false); // school-icon edit popover
@@ -7241,8 +7359,12 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   useEffect(() => {
     const gw = (e) => recordTrigger("game", e.detail?.gameId);
     const dl = () => recordTrigger("download");
-    window.addEventListener("sx-game-won", gw); window.addEventListener("sx-download", dl);
-    return () => { window.removeEventListener("sx-game-won", gw); window.removeEventListener("sx-download", dl); };
+    const rs = (e) => {
+      if (!viewer) return; const d = e.detail || {};
+      supaFetch(`/rest/v1/event_rsvps?on_conflict=school_id,event_key,user_id`, { method: "POST", token: viewer.token, headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: [{ school_id: rec.id, event_key: d.eventKey, event_title: d.title, user_id: viewer.user.id, name: viewerName(viewer), email: viewer.user.email, going: !!d.going, updated_at: new Date().toISOString() }] }).catch(() => { });
+    };
+    window.addEventListener("sx-game-won", gw); window.addEventListener("sx-download", dl); window.addEventListener("sx-rsvp", rs);
+    return () => { window.removeEventListener("sx-game-won", gw); window.removeEventListener("sx-download", dl); window.removeEventListener("sx-rsvp", rs); };
   }); // re-bind each render so it closes over the latest toolStates/progress/xp
   // On 100% completion (student), record a certificate so it shows on the learner's public profile.
   const certWrote = useRef(false);
@@ -7454,6 +7576,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
               <button onClick={() => setGamelabOpen(true)} title="Build games, then drop them in with a Game brick" style={ghost(false)} {...hover}><Ico name="game" /> Game Lab{(school.games || []).length ? ` · ${school.games.length}` : ""}</button>
               <button onClick={() => setShowroomOpen(true)} title="Build a Showroom slider, then drop it in with a Showroom brick" style={ghost(false)} {...hover}><Ico name="cards" /> Showroom{(school.showroom?.slides?.length) ? ` · ${school.showroom.slides.length}` : ""}</button>
               <button onClick={() => setTrainOpen(true)} title="Train your school's mentor AI — feed it books/notes, set directives" style={ghost(false)} {...hover}><Ico name="brain" /> Train{(school.training?.sources?.length) ? ` · ${school.training.sources.length}` : ""}</button>
+              <button onClick={() => setAnalyticsOpen(true)} title="Student analytics — progress, mastery, RSVPs, emails" style={ghost(false)} {...hover}><Ico name="chart" /> Analytics</button>
               <div style={{ flex: 1, minWidth: 6 }} />
               <button data-guide="publish" onClick={() => onPublish(rec)} disabled={publishing} style={{ display: "inline-flex", alignItems: "center", gap: 6, height: 30, background: rec.published ? "rgba(74,222,128,0.12)" : "linear-gradient(135deg,#059669,#047857)", border: rec.published ? "1px solid rgba(74,222,128,0.35)" : "none", borderRadius: 9, color: rec.published ? "#4ADE80" : "#fff", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, padding: "0 14px", cursor: "pointer", whiteSpace: "nowrap" }}>
                 {publishing ? <><Ico name="check" /> Published</> : rec.published ? <><Ico name="check" /> Published</> : <><Ico name="publish" /> Publish</>}
@@ -7527,6 +7650,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
         )}
 
         {!readOnly && trainOpen && <TrainingGround school={school} T={T} media={media} onUpdate={onUpdate} onClose={() => setTrainOpen(false)} />}
+        {!readOnly && analyticsOpen && <AnalyticsDashboard school={school} schoolId={rec.id} viewer={viewer} token={token} T={T} onClose={() => setAnalyticsOpen(false)} />}
         {!readOnly && badgeEdit && <BadgeRuleEditor index={badgeEdit.i} school={school} T={T} onClose={() => setBadgeEdit(null)} onUpdate={onUpdate} />}
         {certOpen && <CertificateModal school={school} T={T} media={media} viewerName={readOnly ? (viewer ? viewerName(viewer) : "Student Name") : "Student Name"} earned={readOnly} onUpdate={readOnly ? undefined : onUpdate} onClose={() => setCertOpen(false)} />}
 
