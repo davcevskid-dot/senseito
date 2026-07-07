@@ -8805,6 +8805,44 @@ function CommunityWidgets({ school, T, isCreator, onUpdate }) {
     </div>
   );
 }
+// Decoration blocks the creator can drop into the community page (Title/Text/Image/Video/Iframe/Button),
+// in a "top" zone (below the resources, above the discussion) or a "bottom" zone (under the discussion).
+const COMMUNITY_BLOCK_TYPES = [["divider", "Title", "heading"], ["callout", "Text", "text"], ["image", "Image", "image"], ["video_embed", "Video", "video"], ["embed", "Iframe", "iframe"], ["cta_button", "Button", "button"]];
+function CommunityBlocks({ school, T, isCreator, onUpdate, zone }) {
+  const cfg = school.community || {};
+  const all = cfg.blocks || [];
+  const blocks = all.filter(b => (b.zone || "top") === zone);
+  const [addOpen, setAddOpen] = useState(false);
+  const save = (list) => onUpdate?.({ data: { ...school, community: { ...cfg, blocks: list } } });
+  const add = (type) => { const blk = fallbackBlock(type, { title: school.name }); save([...all, { id: uid(), zone, ...blk }]); setAddOpen(false); };
+  const updateBlk = (id, data) => save(all.map(b => b.id === id ? { ...b, data } : b));
+  const removeBlk = (id) => save(all.filter(b => b.id !== id));
+  const moveBlk = (id, dir) => { const idx = all.findIndex(b => b.id === id); if (idx < 0) return; const j = idx + dir; if (j < 0 || j >= all.length) return; const a = [...all];[a[idx], a[j]] = [a[j], a[idx]]; save(a); };
+  if (!blocks.length && !isCreator) return null;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {blocks.map(b => (
+        <div key={b.id} style={{ position: "relative" }}>
+          {isCreator && <div style={{ position: "absolute", top: 6, right: 6, zIndex: 3, display: "flex", gap: 3 }}>
+            <button onClick={() => moveBlk(b.id, -1)} title="Move up" style={{ background: "rgba(0,0,0,0.5)", border: "none", borderRadius: 6, color: "#fff", width: 22, height: 20, cursor: "pointer", fontSize: 11 }}>↑</button>
+            <button onClick={() => moveBlk(b.id, 1)} title="Move down" style={{ background: "rgba(0,0,0,0.5)", border: "none", borderRadius: 6, color: "#fff", width: 22, height: 20, cursor: "pointer", fontSize: 11 }}>↓</button>
+            <button onClick={() => removeBlk(b.id)} title="Remove" style={{ background: "rgba(0,0,0,0.5)", border: "none", borderRadius: 6, color: "#F87171", width: 22, height: 20, cursor: "pointer", fontSize: 11 }}>✕</button>
+          </div>}
+          <BlockRenderer block={b} T={T} school={school} bus={{}} canEdit={isCreator} onEditData={(nd) => updateBlk(b.id, nd)} />
+        </div>
+      ))}
+      {isCreator && (addOpen ? (
+        <div style={{ background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 12, padding: 11, display: "flex", flexWrap: "wrap", gap: 7, alignItems: "center" }}>
+          <span style={{ fontSize: 11.5, color: B.mutedMid, fontWeight: 700, marginRight: 2 }}>Add a block:</span>
+          {COMMUNITY_BLOCK_TYPES.map(([t, l, ic]) => <button key={t} onClick={() => add(t)} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, padding: "7px 11px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit" }}><Ico name={ic} size={14} /> {l}</button>)}
+          <button onClick={() => setAddOpen(false)} style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 14, marginLeft: "auto" }}>✕</button>
+        </div>
+      ) : (
+        <button onClick={() => setAddOpen(true)} style={{ background: "none", border: `1px dashed ${B.borderMid}`, borderRadius: 12, color: B.mutedMid, padding: "9px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 700 }}>＋ Add a block {zone === "bottom" ? "below the discussion" : "here"} (title, text, image, video…)</button>
+      ))}
+    </div>
+  );
+}
 function FolderContents({ w, T }) {
   const [sort, setSort] = useState(w.sort || "custom");
   const items = sortItems(w.items, sort);
@@ -9014,6 +9052,7 @@ function CommunityBoard({ school, schoolId, T, viewer, onSignIn, isCreator, onUp
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <CommunityWidgets school={school} T={T} isCreator={isCreator} onUpdate={onUpdate} />
+      {onUpdate && <CommunityBlocks school={school} T={T} isCreator={isCreator} onUpdate={onUpdate} zone="top" />}
       {viewer ? (
         <div style={{ display: "flex", gap: 10, background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 14, padding: "13px 15px" }}>
           <Avatar name={viewerName(viewer)} size={32} T={T} />
@@ -9030,6 +9069,7 @@ function CommunityBoard({ school, schoolId, T, viewer, onSignIn, isCreator, onUp
       {posts === null ? <div style={{ textAlign: "center", color: B.muted, fontSize: 13, padding: 20 }}>Loading the board…</div>
         : tops.length === 0 ? <div style={{ textAlign: "center", color: B.muted, fontSize: 13, padding: 26, border: `1px dashed ${B.borderMid}`, borderRadius: 14 }}>No posts yet — {isCreator ? "start the first discussion topic." : "be the first to say hi 👋"}</div>
         : tops.map(p => <PostCard key={p.id} p={p} />)}
+      {onUpdate && <CommunityBlocks school={school} T={T} isCreator={isCreator} onUpdate={onUpdate} zone="bottom" />}
     </div>
   );
 }
