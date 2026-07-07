@@ -8756,12 +8756,15 @@ function CommunityWidgets({ school, T, isCreator, onUpdate }) {
   const reorder = (from, to) => { if (from == null || to == null || from === to) return; const a = [...widgets]; const [x] = a.splice(from, 1); a.splice(to, 0, x); save(a); };
   if (cfg.on === false && !isCreator) return null;
   if (!widgets.length && !isCreator) return null;
-  const wIcon = (w) => w.icon || (w.type === "folder" ? "📁" : w.type === "embed" ? "▶️" : "🔗");
+  const wIcon = (w) => w.icon || (w.type === "folder" ? "📁" : w.type === "embed" ? "▶️" : w.type === "file" ? "📄" : "🔗");
   const openW = (w) => {
     if (w.type === "link") { if (/^https?:\/\//i.test(w.url || "")) window.open(w.url, "_blank", "noopener"); return; }
+    if (w.type === "file") { if (/^https?:\/\//i.test(w.url || "")) { sxDownloaded(); window.open(w.url, "_blank", "noopener"); } return; }
     if (w.type === "folder" && w.openMode === "inline") { setInlineOpen(s => ({ ...s, [w.id]: !s[w.id] })); return; }
     setOpen(w);
   };
+  const thumbEl = (w) => w.thumb ? <div style={{ ...(w.thumbPos === "top" ? { width: "100%", aspectRatio: w.thumbRatio === "1:1" ? "1" : "16/9" } : { width: 56, height: 56 }), borderRadius: 10, overflow: "hidden", flexShrink: 0, background: B.surface3 }}><img src={w.thumb} alt={w.title || ""} style={{ width: "100%", height: "100%", objectFit: "cover" }} /></div>
+    : <div style={{ width: 40, height: 40, borderRadius: 11, background: T.ps, border: `1px solid ${T.ba}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 }}>{wIcon(w)}</div>;
   const cardStyle = { position: "relative", background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: layout === "list" ? "12px 14px" : 16, cursor: "pointer", transition: "transform 0.14s, border-color 0.2s", display: "flex", alignItems: "center", gap: 12, textAlign: "left" };
   return (
     <div style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 16, padding: 15 }}>
@@ -8777,27 +8780,28 @@ function CommunityWidgets({ school, T, isCreator, onUpdate }) {
         {widgets.map((w, i) => (
           <div key={w.id}>
             <div draggable={isCreator} onDragStart={() => (dragI.current = i)} onDragOver={e => e.preventDefault()} onDrop={() => { reorder(dragI.current, i); dragI.current = null; }}
-              onClick={() => openW(w)} style={cardStyle}
+              onClick={() => openW(w)} style={{ ...cardStyle, flexDirection: (w.thumb && w.thumbPos === "top") ? "column" : (w.thumb && w.thumbPos === "right") ? "row-reverse" : "row", alignItems: (w.thumb && w.thumbPos === "top") ? "stretch" : "center" }}
               onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-2px)"; e.currentTarget.style.borderColor = T.ba; }}
               onMouseLeave={e => { e.currentTarget.style.transform = "none"; e.currentTarget.style.borderColor = "var(--border)"; }}>
-              <div style={{ width: 40, height: 40, borderRadius: 11, background: T.ps, border: `1px solid ${T.ba}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, flexShrink: 0 }}>{wIcon(w)}</div>
+              {thumbEl(w)}
               <div style={{ minWidth: 0, flex: 1 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 700, color: B.white, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{w.title || "Untitled"}</div>
-                <div style={{ fontSize: 11, color: B.muted }}>{w.type === "folder" ? `${(w.items || []).length} item${(w.items || []).length === 1 ? "" : "s"}` : w.type === "embed" ? "Recording / embed" : "Link"}</div>
+                {w.description && <div style={{ fontSize: 11.5, color: B.mutedMid, lineHeight: 1.45, marginTop: 2, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{w.description}</div>}
+                <div style={{ fontSize: 11, color: B.muted, marginTop: 2 }}>{w.type === "folder" ? `${(w.items || []).length} item${(w.items || []).length === 1 ? "" : "s"}` : w.type === "embed" ? "Recording / embed" : w.type === "file" ? "Download" : "Link"}</div>
               </div>
-              {isCreator && <button onClick={e => { e.stopPropagation(); setEdit(w); }} title="Edit" style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 13, flexShrink: 0 }}>✎</button>}
+              {isCreator && <button onClick={e => { e.stopPropagation(); setEdit(w); }} title="Edit" style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 13, flexShrink: 0, alignSelf: (w.thumb && w.thumbPos === "top") ? "flex-end" : "center" }}>✎</button>}
             </div>
             {w.type === "folder" && w.openMode === "inline" && inlineOpen[w.id] && <div style={{ marginTop: 8 }}><FolderContents w={w} T={T} /></div>}
           </div>
         ))}
         {isCreator && (
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", ...(layout === "grid" ? { border: `1px dashed ${B.borderMid}`, borderRadius: 14, padding: 12, justifyContent: "center" } : {}) }}>
-            {[["folder", "📁 Folder"], ["embed", "▶️ Embed"], ["link", "🔗 Button"]].map(([tp, l]) => <button key={tp} onClick={() => setEdit({ _new: tp })} style={{ background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 9, color: T.hi, padding: "7px 12px", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>＋ {l}</button>)}
+            {[["folder", "📁 Folder"], ["file", "📄 File"], ["embed", "▶️ Embed"], ["link", "🔗 Button"]].map(([tp, l]) => <button key={tp} onClick={() => setEdit({ _new: tp })} style={{ background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 9, color: T.hi, padding: "7px 12px", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>＋ {l}</button>)}
           </div>
         )}
       </div>
       {open && <WidgetOpenModal w={open} T={T} onClose={() => setOpen(null)} />}
-      {edit && <WidgetEditor draft={edit._new ? { id: uid(), type: edit._new, title: "", items: [], openMode: "popup", sort: "custom" } : edit} isNew={!!edit._new} T={T} media={media} onSave={w => { upsert(w); setEdit(null); }} onDelete={() => { save(widgets.filter(x => x.id !== edit.id)); setEdit(null); }} onClose={() => setEdit(null)} />}
+      {edit && <WidgetEditor draft={edit._new ? { id: uid(), type: edit._new, title: "", items: [], openMode: "popup", sort: "custom" } : edit} isNew={!!edit._new} T={T} media={media} school={school} onSave={w => { upsert(w); setEdit(null); }} onDelete={() => { save(widgets.filter(x => x.id !== edit.id)); setEdit(null); }} onClose={() => setEdit(null)} />}
     </div>
   );
 }
@@ -8846,14 +8850,29 @@ function WidgetOpenModal({ w, T, onClose }) {
     document.body
   );
 }
-function WidgetEditor({ draft, isNew, T, media, onSave, onDelete, onClose }) {
+function WidgetEditor({ draft, isNew, T, media, school, onSave, onDelete, onClose }) {
   const [w, setW] = useState(draft);
-  const [pick, setPick] = useState(false);
+  const [pick, setPick] = useState(false);   // folder-item media picker
+  const [thumbPick, setThumbPick] = useState(false); // featured-image picker
+  const [wbBusy, setWbBusy] = useState(false); // workbook generation
+  const [wbInstr, setWbInstr] = useState("");
   const set = (patch) => setW(x => ({ ...x, ...patch }));
   const items = w.items || [];
   const addItem = (it) => set({ items: [...items, { ...it, addedAt: Date.now() }] });
   const inp = { width: "100%", boxSizing: "border-box", background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, fontFamily: "inherit", fontSize: 13, padding: "9px 11px" };
   const lbl = { fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: B.muted, marginBottom: 5 };
+  async function genWorkbook() {
+    if (wbBusy || !media || !school) return; setWbBusy(true);
+    try {
+      const ctx = `SCHOOL: ${school.name}\n${school.knowledgeDNA ? `KNOWLEDGE DNA:\n${String(school.knowledgeDNA).slice(0, 4000)}\n` : ""}INSTRUCTIONS: ${wbInstr.trim() || "A practical workbook with explanations, worked examples and fill-in exercises."}`;
+      const doc = await apiJSON(PDF_HANDOUT_SYS + "\nThis is a WORKBOOK: include exercises/prompts the learner fills in.", [{ role: "user", content: ctx }], 3000, "sonnet");
+      const blob = makeTextPdf(doc, themeFor(school).p);
+      const fname = `${String(doc.title || w.title || "workbook").replace(/[^a-z0-9]+/gi, "-").toLowerCase().slice(0, 48) || "workbook"}.pdf`;
+      const m = await uploadMedia(new File([blob], fname, { type: "application/pdf" }), media.token, media.userId);
+      set({ url: m.url, title: w.title || doc.title || "Workbook" });
+    } catch (e) { alert("Couldn't generate the workbook: " + e.message); }
+    setWbBusy(false);
+  }
   return createPortal(
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 2650, background: "rgba(2,2,8,0.74)", backdropFilter: "blur(8px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "max(24px,5vh) 16px 40px", overflowY: "auto", fontFamily: "'Inter',sans-serif" }}>
       <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 480, background: "var(--surface)", border: `1px solid ${T.ba}`, borderRadius: 18, padding: 18, boxShadow: "0 30px 90px rgba(0,0,0,0.6)" }}>
@@ -8865,11 +8884,41 @@ function WidgetEditor({ draft, isNew, T, media, onSave, onDelete, onClose }) {
           <input value={w.icon || ""} onChange={e => set({ icon: e.target.value.slice(0, 3) })} placeholder="📁" style={{ ...inp, width: 52, textAlign: "center", fontSize: 18 }} />
           <input value={w.title || ""} onChange={e => set({ title: e.target.value })} placeholder="Title" style={{ ...inp, flex: 1 }} />
         </div>
+        <div style={{ marginBottom: 12 }}>
+          <div style={lbl}>Description (optional)</div>
+          <textarea value={w.description || ""} onChange={e => set({ description: e.target.value })} rows={2} placeholder="A short description shown on the card…" style={{ ...inp, resize: "vertical" }} />
+        </div>
         {(w.type === "link" || w.type === "embed") && <div style={{ marginBottom: 12 }}>
           <div style={lbl}>{w.type === "embed" ? "Recording / video URL (Zoom, YouTube, Loom, Drive…)" : "Link URL"}</div>
           <input value={w.url || ""} onChange={e => set({ url: e.target.value.trim() })} placeholder="https://…" style={inp} />
           {w.type === "embed" && <div style={{ fontSize: 11, color: B.muted, marginTop: 5 }}>Plays in a player right inside the community. For Zoom cloud recordings, paste the share link.</div>}
         </div>}
+        {w.type === "file" && <div style={{ marginBottom: 12 }}>
+          <div style={lbl}>Downloadable file</div>
+          <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginBottom: w.url ? 8 : 0 }}>
+            {media && <button onClick={() => setPick(true)} style={{ background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 9, color: T.hi, padding: "8px 12px", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>📎 From media</button>}
+            <button onClick={() => { const u = window.prompt("File URL (https):", w.url || ""); if (u != null) set({ url: u.trim() }); }} style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, padding: "8px 12px", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}>🔗 URL</button>
+          </div>
+          {w.url && <div style={{ fontSize: 11.5, color: "#4ADE80", marginBottom: 8, wordBreak: "break-all" }}>✓ {w.url.split("/").pop()}</div>}
+          <div style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 10, padding: 11 }}>
+            <div style={{ fontSize: 11.5, fontWeight: 700, color: T.hi, marginBottom: 6 }}>✨ Or generate a workbook PDF</div>
+            <input value={wbInstr} onChange={e => setWbInstr(e.target.value)} placeholder='e.g. "a 5-day action workbook on closing sales"' style={{ ...inp, marginBottom: 7 }} />
+            <button onClick={genWorkbook} disabled={wbBusy || !media} style={{ width: "100%", background: T.grad, border: "none", borderRadius: 9, color: "#fff", padding: "9px", cursor: "pointer", fontSize: 12.5, fontWeight: 800, fontFamily: "inherit", opacity: wbBusy ? 0.6 : 1 }}>{wbBusy ? <><Spinner color="#fff" />Writing your workbook…</> : "🧾 Generate workbook from your Knowledge DNA"}</button>
+          </div>
+        </div>}
+        {/* Featured thumbnail */}
+        <div style={{ marginBottom: 12 }}>
+          <div style={lbl}>Featured image (optional)</div>
+          <div style={{ display: "flex", gap: 7, flexWrap: "wrap", alignItems: "center" }}>
+            {media && <button onClick={() => setThumbPick(true)} style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, padding: "7px 11px", cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>🖼 Choose</button>}
+            <button onClick={() => { const u = window.prompt("Image URL (https):", w.thumb || ""); if (u != null) set({ thumb: u.trim() || undefined }); }} style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, padding: "7px 11px", cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>🔗 URL</button>
+            {w.thumb && <button onClick={() => set({ thumb: undefined })} style={{ background: "none", border: "none", color: "#F87171", cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>remove</button>}
+          </div>
+          {w.thumb && <div style={{ display: "flex", gap: 10, marginTop: 9, flexWrap: "wrap" }}>
+            <div><div style={{ ...lbl, marginBottom: 4 }}>Shape</div>{[["16:9", "16:9"], ["1:1", "1:1"]].map(([k, l]) => <button key={k} onClick={() => set({ thumbRatio: k })} style={{ background: (w.thumbRatio || "16:9") === k ? T.ps : B.surface2, border: `1px solid ${(w.thumbRatio || "16:9") === k ? T.ba : B.borderMid}`, borderRadius: 7, color: (w.thumbRatio || "16:9") === k ? T.hi : B.mutedMid, padding: "4px 10px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit", fontWeight: 700, marginRight: 5 }}>{l}</button>)}</div>
+            <div><div style={{ ...lbl, marginBottom: 4 }}>Position</div>{[["top", "Top"], ["left", "Left"], ["right", "Right"]].map(([k, l]) => <button key={k} onClick={() => set({ thumbPos: k })} style={{ background: (w.thumbPos || "top") === k ? T.ps : B.surface2, border: `1px solid ${(w.thumbPos || "top") === k ? T.ba : B.borderMid}`, borderRadius: 7, color: (w.thumbPos || "top") === k ? T.hi : B.mutedMid, padding: "4px 10px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit", fontWeight: 700, marginRight: 5 }}>{l}</button>)}</div>
+          </div>}
+        </div>
         {w.type === "folder" && <>
           <div style={{ display: "flex", gap: 10, marginBottom: 12, flexWrap: "wrap" }}>
             <div style={{ flex: 1, minWidth: 130 }}><div style={lbl}>Opens as</div><select value={w.openMode || "popup"} onChange={e => set({ openMode: e.target.value })} style={{ ...inp, cursor: "pointer" }}><option value="popup">Popup</option><option value="inline">Inline (toggle)</option></select></div>
@@ -8895,7 +8944,8 @@ function WidgetEditor({ draft, isNew, T, media, onSave, onDelete, onClose }) {
           {!isNew && <button onClick={onDelete} style={{ background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.3)", borderRadius: 10, color: "#F87171", padding: "11px 15px", cursor: "pointer", fontSize: 13, fontWeight: 700, fontFamily: "inherit" }}>Delete</button>}
         </div>
       </div>
-      {pick && media && <MediaPicker token={media.token} userId={media.userId} onPick={m => { addItem({ name: m.name || "Item", url: m.url, kind: isImageFile(m) ? "image" : "file" }); setPick(false); }} onClose={() => setPick(false)} />}
+      {pick && media && <MediaPicker token={media.token} userId={media.userId} onPick={m => { if (w.type === "file") set({ url: m.url, title: w.title || m.name }); else addItem({ name: m.name || "Item", url: m.url, kind: isImageFile(m) ? "image" : "file" }); setPick(false); }} onClose={() => setPick(false)} />}
+      {thumbPick && media && <MediaPicker token={media.token} userId={media.userId} imagesOnly onPick={m => { set({ thumb: m.url }); setThumbPick(false); }} onClose={() => setThumbPick(false)} />}
     </div>,
     document.body
   );
