@@ -4085,19 +4085,21 @@ function ShowroomBlock({ data = {}, T, school, canEdit, onEditData, disabled }) 
   const pill = (active) => ({ background: active ? T.ps : B.surface3, border: `1px solid ${active ? T.ba : B.borderMid}`, borderRadius: 8, color: active ? T.hi : B.mutedMid, padding: "6px 11px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 700 });
   return (
     <div style={room
-      ? { position: "fixed", inset: 0, zIndex: 300, background: "rgba(4,4,12,0.9)", backdropFilter: "blur(10px)", overflowY: "auto", padding: "max(16px,3vh) 16px 40px", fontFamily: "'Inter',sans-serif" }
-      : { background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 14, padding: 14 }}
-      onClick={room ? (e) => { if (e.target === e.currentTarget) closeStudio(); } : undefined}>
-    <div style={room ? { maxWidth: 1000, margin: "0 auto", background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 20, padding: 20, boxShadow: `0 30px 90px rgba(0,0,0,0.6)` } : {}}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
-        <div style={{ fontSize: room ? 16 : 13, fontWeight: 800, color: B.white, fontFamily: room ? "'Space Grotesk',sans-serif" : "inherit" }}>🎬 {data.title || "Showroom"}{room && <span style={{ fontSize: 12, fontWeight: 400, color: B.muted }}> · Studio</span>}</div>
+      ? { position: "fixed", inset: 0, zIndex: 300, background: "var(--bg)", overflowY: "auto", fontFamily: "'Inter',sans-serif", display: "flex", flexDirection: "column" }
+      : { background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 14, padding: 14 }}>
+    <div style={room ? { flex: 1, display: "flex", flexDirection: "column", minHeight: 0 } : {}}>
+      <div style={room
+        ? { position: "sticky", top: 0, zIndex: 10, background: "var(--surface)", borderBottom: `1px solid ${B.borderMid}`, padding: "11px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap", boxShadow: "0 2px 14px rgba(0,0,0,0.25)" }
+        : { display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
+        <div style={{ fontSize: room ? 16 : 13, fontWeight: 800, color: B.white, fontFamily: room ? "'Space Grotesk',sans-serif" : "inherit", display: "flex", alignItems: "center", gap: 8 }}>{room && <button onClick={closeStudio} title="Back" style={{ background: "none", border: "none", color: B.mutedMid, cursor: "pointer", fontSize: 17, fontFamily: "inherit", padding: 0 }}>←</button>}🎬 {data.title || "Showroom"}{room && <span style={{ fontSize: 12, fontWeight: 400, color: B.muted }}> · Studio</span>}</div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           {canEdit && !room && !isLegacy && <button onClick={openStudio} title="Open the slide studio — build your slider with every tool" style={{ background: T.grad, border: "none", borderRadius: 9, color: "#fff", padding: "7px 14px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 800, boxShadow: `0 3px 12px ${T.pg}` }}>🎨 Edit in Studio</button>}
           {room && canEdit && !isLegacy && (cur?.scene || cur?.els?.length > 0) && <button onClick={beautify} disabled={!!busy} title="One tap — let the AI make this slide more beautiful (keeps your content)" style={{ background: T.grad, border: "none", borderRadius: 8, color: "#fff", padding: "6px 12px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 700, boxShadow: `0 3px 12px ${T.pg}`, opacity: busy ? 0.6 : 1 }}>{busy === "beautify" ? <><Spinner color="#fff" />Beautifying…</> : "✨ Make beautiful"}</button>}
           {room && canEdit && !isLegacy && <button onClick={() => setSnap(s => !s)} title={snap ? "Magnetic aligner ON — snaps to guides; click for free-form" : "Free-form — click to turn the magnetic aligner on"} style={pill(snap)}>{snap ? "🧲 Aligner on" : "🧲 Aligner off"}</button>}
-          {room && <button onClick={closeStudio} title="Close the studio (Esc)" style={pill(false)}>✓ Done</button>}
+          {room && <button onClick={closeStudio} title="Close the studio (Esc)" style={{ background: T.grad, border: "none", borderRadius: 8, color: "#fff", padding: "6px 14px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 800 }}>✓ Done</button>}
         </div>
       </div>
+      <div style={room ? { maxWidth: 1080, width: "100%", margin: "0 auto", padding: "22px 20px 70px", boxSizing: "border-box" } : {}}>
       {slides.length === 0 && <div style={{ fontSize: 13, color: B.muted, textAlign: "center", padding: "20px 0" }}>{canEdit ? (room ? "Add your first slide below." : "No slides yet — tap “🎨 Edit in Studio” to build your slider.") : "No slides yet."}</div>}
 
       {/* Legacy HTML slides render read-only (sanitized); offer a one-click rebuild into the editable format. */}
@@ -4201,6 +4203,7 @@ function ShowroomBlock({ data = {}, T, school, canEdit, onEditData, disabled }) 
           <div style={{ fontSize: 11, color: B.muted, marginTop: 7 }}>Regenerate redesigns the whole slide · Iterate changes only what you ask · students swipe through as a slider.</div>
         </div>
       )}
+      </div>
     </div>
     </div>
   );
