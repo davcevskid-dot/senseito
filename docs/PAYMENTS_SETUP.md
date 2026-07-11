@@ -46,7 +46,21 @@ supabase secrets set \
 > Note: PayPal payee-email routing works for standard business accounts. For a fully white-labelled marketplace (guaranteed routing + platform fees) upgrade to **PayPal Commerce Platform / Partner Referrals** onboarding later.
 
 ## 5. How it flows
-- Creator opens **Pricing** → **Connect with Stripe** (one click) / enters PayPal email.
-- Student hits the paywall → pays via hosted Stripe Checkout or PayPal order.
-- The provider webhook verifies the payment and writes the `entitlements` row.
-- The paywall is polling → the school **unlocks itself** (no "I've completed payment" tap needed).
+- Creator connects **Stripe once per account** (⚙ Account settings → Payments, or the Pricing panel). The OAuth `state` is `u:<userId>` → `profiles.stripe_account_id`. Legacy per-school connections (`payment_config.stripe_account_id`) still work; `stripe-checkout` resolves per-school config first, then the school owner's profile.
+- Student hits the paywall → picks a **plan** → pays via hosted Stripe Checkout.
+- The webhook verifies the payment and writes the `entitlements` row (with `plan_id`).
+- The paywall is polling → the school **unlocks itself** with that plan's gates.
+
+## 6. Plans, gates, free version (all in `school.data.pricing`, enforced client-side)
+- `pricing.plans[]` — multiple payment options per school: `{ id, label, price, interval: once|month|6month|year, trialDays: 0|1|7|14|30, note, gates }`. `6month` bills as a Stripe subscription with `interval_count=6`.
+- `gates` — `null` = everything; else `{ mentor:false?, sections:[allowed ids]?, lessonsLimit:N?, msgsPerDay:N? }`. Stored on the plan; the client reads `entitlements.plan_id` → applies the gates in `PublicSchool`/`SchoolPage`.
+- `pricing.free` — `{ enabled, gates }`: a free tier anyone can use, with an "Unlock everything" upsell that opens the plans modal.
+
+## 7. PayPal — deliberately MANUAL (platform PayPal stays off)
+- The student pays the creator's paypal.me/email **directly**, then taps "I've paid — notify the creator" → a row in `paypal_claims`.
+- The creator sees pending claims at the top of the Pricing panel → **Confirm & send key** mints a single-use coupon **issued_to** that student (`coupons.issued_to`, `duration_days` sized to the plan — 31 for monthly, 186 for 6-month, 366 for yearly).
+- The key shows in the student's profile (**School Keys**) automatically; they redeem it on the paywall. `redeem_coupon()` writes `entitlements.expires_at` from `duration_days`, so monthly access lapses and is renewed with a fresh key.
+- No email is sent yet (no email provider is wired) — claims are in-app only. To add email, wire a Resend/Postmark key into a small edge function.
+
+## 8. Coupons v2
+Creator-set: max uses, **code expiry** (days), and **access duration** (days the student's entitlement lasts). Keys issued from a claim are just coupons with `issued_to` set.

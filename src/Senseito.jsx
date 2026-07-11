@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useLayoutEffect, useMemo, useContext, createContext, Component } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useMemo, useContext, createContext, Component, Fragment } from "react";
 import { createPortal } from "react-dom";
 import { createClient } from "@supabase/supabase-js";
 
@@ -18,6 +18,8 @@ const PROXY = `${SUPA_URL}/functions/v1/claude-proxy`;
 // key lives only in the edge functions.
 const STRIPE_CONNECT_CLIENT_ID = "ca_REnCFfQr3lGdiZ2HwG6GfRUt3jfxx9pV";
 const stripeConnectUrl = (schoolId) => `https://connect.stripe.com/oauth/authorize?response_type=code&client_id=${STRIPE_CONNECT_CLIENT_ID}&scope=read_write&state=${encodeURIComponent(schoolId)}&redirect_uri=${encodeURIComponent(`${SUPA_URL}/functions/v1/stripe-connect`)}`;
+// Per-USER connect (the normal path): one click in settings, applies to every school the creator owns.
+const stripeConnectUserUrl = (userId) => stripeConnectUrl(`u:${userId}`);
 // Whether the platform PayPal app is wired (enables auto-verified PayPal via the platform).
 const PAYPAL_PLATFORM_ENABLED = false;
 
@@ -873,6 +875,13 @@ const ARCHITECT_SYS = `You are the Senseito School Architect AI — the best cur
 
 If the request is critically ambiguous OR references external content you cannot access (a URL with no pasted content), return ONLY: {"needMoreInfo": "one specific, friendly question asking for exactly what you need"}. Use this sparingly — only when you truly cannot build something great.
 
+STEP 0 — CLASSIFY THE LEARNING EXPERIENCE (how it is learned). Pick ONE "experience":
+- "lessons" (DEFAULT): a curriculum of lessons the student works through. All classic layouts (cards, steps, arcade, LMS…) live inside this experience.
+- "mentorship": the MENTOR drives everything. The student learns by talking with the mentor; each lesson unlocks ONLY when the mentor decides the student is ready (at the mentor's pace or the creator's trained pace). Still produce full semesters/lessons — they are the mentor's syllabus — plus a "mentorship" object (see fields). Choose when the request centers on 1:1 coaching, a personal mentor journey, "the mentor decides when I advance".
+- "community": NO lessons and NO semesters. A private community (like a Skool/Discord space) built around the creator and their material — discussion rooms generated from their book/PDF/teachings, a library, member spaces. IMPORTANT: this is a big commitment — if the request PROBABLY wants a community but doesn't say so explicitly (words like "community", "private group", "membership space"), return ONLY {"needMoreInfo":"a friendly question confirming they want a community-focused space (discussion rooms, no lessons) rather than a course with lessons or a mentor-led journey"}. If the creator's message contains an explicit confirmation (e.g. "CONFIRMED: community"), do NOT ask again.
+- "classroom": live teaching. A broadcast/stream frame front and center (Zoom/stream link the creator sets later), a calendar of scheduled sessions, and a discussion board underneath. No gated curriculum unless explicitly requested; produce a "classroom" object (see fields).
+Honor an explicit experience choice in the request. When in doubt between lessons and mentorship, prefer "lessons".
+
 STEP 1 — CLASSIFY THE LEARNING PATH (what is being learned).
 Pick ONE primary learningPath from this list (use "mixed" only if truly cross-domain):
 ${PATH_GUIDE}
@@ -898,6 +907,11 @@ chronological = foundations→deep; project-based = mini projects→capstone; pr
 
 Otherwise return an object with these fields:
 - name, tagline (one punchy line), description (2 sentences on the transformation), duration (honor the implied length), category, emoji (one emoji)
+- experience: "lessons" | "mentorship" | "community" | "classroom" (REQUIRED — from STEP 0)
+- mentorship: ONLY if experience is "mentorship" — { "layout": one of "focus" (mentor only, no lesson list) | "sidebar" (lesson titles in a side rail) | "topcards" (small lesson cards above the chat) | "minibar" (compact progress bar) | "bigbar" (stretched full-width progress bar) | "icons" (gamified icon trail), "pace": one of "mentor" (mentor's own judgement) | "strict" (demand strong evidence before advancing) | "relaxed" (advance generously), "paceNote": one sentence describing how this mentor decides a student is ready (in the creator's spirit) }
+- communityStyle: ONLY if experience is "community" — one of "classic" (feed with widgets) | "discord" (left rail of rooms) | "topbar" (Skool-style top menu, not sticky). Pick what fits the vibe.
+- community: ONLY if experience is "community" — { "rooms": [3-6 of { "title": short room name, "icon": one emoji, "about": one line on what's discussed there — ground rooms in the source material's chapters/themes when provided }] }
+- classroom: ONLY if experience is "classroom" — { "title": the live room's name, "about": one line shown under the broadcast frame, "events": [2-4 of { "title", "date": "YYYY-MM-DD", "time": "HH:MM", "desc": one line }] — plausible upcoming session ideas the creator will edit }
 - learningPath: one key from the list above (REQUIRED)
 - concepts: 8-20 of { id (short kebab slug), label (the concept name), prereq:[ids it depends on] } — the KNOWLEDGE MAP of this subject. Lessons & blocks will tag which concepts they cover so the system tracks mastery. Order roughly foundational → advanced.
 - template: the experience vibe — one of ${TEMPLATE_KEYS.join(" | ")} (${Object.entries(TEMPLATES).map(([k, t]) => `${k}=${t.desc}`).join("; ")}). Pick the one that fits the request (e.g. company HR/onboarding→corporate, kids/language→kids, "learn X fast"/single skill→quickskill, coaching/mindset→coaching, else academy). It sets the baseline look; you may still set theme/skin below to fine-tune.
@@ -911,13 +925,14 @@ Otherwise return an object with these fields:
 - soul: a UNIQUE signature centerpiece that makes THIS school feel one-of-a-kind, tailored to its subject — { essence: one short evocative line capturing the school's spirit; signature: a vivid one-sentence description of a bespoke VISUAL/FUNCTIONAL hero element that fits this exact topic (e.g. climbing → "an animated mountain trail where each milestone is a camp on the ascent"; cooking → "a flip-through stack of recipe cards"; astronomy → "a slow-rotating constellation map") — make it specific to the subject, never generic }
 - gamiPreset: one of xp (default), belts (discipline/martial), quest (adventure/story), none
 - layout: best-fit of course | guided | course_toolkit | coach | practice | toolkit | custom
-- sections: ordered array describing the experience — each { kind:"lessons"|"mentor"|"tools"|"dashboard", title (short, subject-flavored, e.g. "Daily Practice"), icon (one emoji), intro (one short line, optional), blockTypes:[2-5 types] (ONLY for dashboard sections — use ONLY the available block types listed in STEP 3, never invent new ones) }. Include a "lessons" section ONLY if you actually provide semesters below.
+- sections: ordered array describing the experience — each { kind:"lessons"|"mentor"|"tools"|"dashboard"|"community"|"classroom"|"calendar", title (short, subject-flavored, e.g. "Daily Practice"), icon (one emoji), intro (one short line, optional), blockTypes:[2-5 types] (ONLY for dashboard sections — use ONLY the available block types listed in STEP 3, never invent new ones) }. Include a "lessons" section ONLY if you actually provide semesters below.
+  EXPERIENCE RULES for sections: "mentorship" → mentor section FIRST (it is the home), lessons section second (the syllabus rail). "community" → a community section (or several, one per major theme) + optionally a dashboard "Library"; NEVER a lessons or mentor section. "classroom" → a classroom section FIRST, then community; NO lessons section unless explicitly requested.
 - semesters: ONLY if a "lessons" section is included — array of { number, title, theme, weeks, lessons: [ { number, title, type (Dialogue|RolePlay|Mission|Reflection|SkillTest|Quiz|Debate|Journal), concept (1-2 sentences), openingLine (exact first thing the mentor says, in voice), mission, passCriteria (specific, measurable), passLogic: { mode } where mode is one of "mentoronly" (pure conversation, NO activities — best for discussion/coaching/Socratic/reflective lessons; for these set blockTypes to []), "mentor" (mentor evaluates & decides after activities — best for skill lessons), "activities" (mentor briefs then assigns a mission; learner completes activities in order — best for hands-on/practice), or "hybrid" (≥70% of activities done AND mentor approves — a balanced default). Pick the mode that best fits each lesson. blockTypes: [ 1-3 block type strings allowed for the learningPath; use [] for mentoronly ] } ] }
 - suggestions: 3-4 short, SPECIFIC improvement ideas for THIS school
 - toolIdeas: 2-3 of { name, why (one line), type (any block type that fits this school) }
 
 QUALITY BAR — must feel like a $500 course on first generation:
-- 2-3 semesters, 3-4 lessons each (scale to implied duration). Lesson "number" globally sequential.
+- 2-3 semesters, 3-4 lessons each (scale to implied duration). Lesson "number" globally sequential. (For "community" and "classroom" experiences OMIT semesters entirely — quality lives in the rooms/events/sections instead.)
 - Each semester must ESCALATE: foundations → mastery under pressure.
 - Mix lesson types; at least one RolePlay and one Mission.
 - openingLines must hook instantly, in the mentor's exact voice — no two alike.
@@ -971,7 +986,7 @@ function trainingPreamble(school) {
 }
 
 const ITERATE_SYS = `You are the Senseito School Editor AI. You receive an existing school PLAN as JSON (lessons describe activities as "blockTypes": [type strings] only — NOT full block data) and an edit instruction.
-Return the FULL updated plan as JSON with the EXACT same structure and field names. Apply ONLY the requested change; preserve everything else exactly, including each lesson's "blockTypes" array, the "sections" array, the "concepts" array, "layout", and learningPath/voicePreset/gamiPreset/theme (change those only if asked). If the change introduces a genuinely new concept, you may add it to "concepts". Also refresh "suggestions" to 3-4 NEW specific ideas that fit after this change.
+Return the FULL updated plan as JSON with the EXACT same structure and field names. Apply ONLY the requested change; preserve everything else exactly, including each lesson's "blockTypes" array, the "sections" array, the "concepts" array, "layout", "experience" (lessons|mentorship|community|classroom) and its companion objects ("mentorship", "community", "communityStyle", "classroom"), and learningPath/voicePreset/gamiPreset/theme (change those only if asked). If the change introduces a genuinely new concept, you may add it to "concepts". Also refresh "suggestions" to 3-4 NEW specific ideas that fit after this change.
 NUMBERING & MOVING LESSONS: lesson "number" values are assigned AUTOMATICALLY by position — the app renumbers every lesson sequentially across the parts after your edit, so you do NOT need to keep them consistent. What matters is WHICH PART a lesson sits in and its ORDER within that part.
 - "Add a lesson to part 1" → insert it into part 1's "lessons" array at the right spot. Do NOT move it to another part. (It will get the next number in that part automatically; the rest shift down.)
 - "Change lesson X's number to N" → this means MOVE it so it becomes the Nth lesson overall — reorder it into that position, keeping it in the part that position falls in. Don't just relabel.
@@ -1086,6 +1101,10 @@ DECIDE which of three modes this message is:
 - "currency": { "word":"<what the points/XP are called, e.g. Energy, Coins, Sparks, Insight>", "icon":"<single emoji>" }. Use for "rename XP to …", "call points coins", "make XP energy". Set "currency": null to reset to "XP".
 - "gamification": patch object — include ONLY the keys being changed: { "xpPerLesson": <number>, "streakEvery": <number>, "streakXp": <number> (every streakEvery passed lessons grants +streakXp bonus — THIS IS WIRED, use for "add a streak bonus"), "completionReward": "<text>", "badges": [ badge objects ] (FULL replacement list — badges/achievements unlock AUTOMATICALLY when their rule is met) }. Each badge is { "icon":"<emoji>", "title":"...", "rule": <rule> } where rule is EXACTLY one of: {"type":"lessons","n":<count>} (pass N lessons) · {"type":"xp","n":<amount>} (reach N XP) · {"type":"lesson","lessonNumber":<the lesson's number>} (finish ONE specific lesson) · {"type":"game","gameId":"<id from the school's games>"} (win a specific game) · {"type":"download","n":<count, default 1>} (download N files, n:1 = first download). Use for anything about XP, streaks, badges, achievements or rewards — e.g. "add an achievement for finishing lesson 3", "one for winning the quiz game", "one for their first download". When the user names a lesson or game, resolve it to its number/id from the project you know.
 - "progressSkin": "<a short description of a bespoke PROGRESS-bar metaphor that fits the subject, e.g. 'a shoelace that tightens', 'a rocket climbing toward a planet', 'a plant that grows', 'a jar filling up'>", OR "default" to restore the plain bar. Use whenever they ask to change the progress bar / completion meter / loading bar / how progress looks.
+- "progressWidget": { "style":"circle", "placement":"hero"|"rail"|"nav"|"meta" } — a school-wide COMPLETION RING showing total % complete. placements: "hero" = inside the hero on the right; "rail" = its own column right of the hero (hero shrinks left); "nav" = above the section nav / left sidebar; "meta" = replaces the small bar under the hero. Use for "completion circle", "progress ring", "% circle" requests; set "progressWidget": null to go back to the plain bar.
+- "mentorship": { "layout":"focus"|"sidebar"|"topcards"|"minibar"|"bigbar"|"icons", "pace":"mentor"|"strict"|"relaxed" } — ONLY for mentorship-experience schools: how the mentor-led journey is displayed (mentor only / lesson titles in a side rail / small cards on top / compact bar / stretched big bar / gamified icon trail) and how demanding the mentor is before unlocking the next step.
+- "communityStyle": "classic"|"discord"|"topbar" — ONLY for community-experience schools: feed with widgets / left rail of rooms (Discord-like) / Skool-style top menu (not sticky).
+- "classroom": { "streamUrl":"https…", "title":"…", "about":"…" } — ONLY for classroom-experience schools: the live stream/Zoom link shown in the broadcast frame and its labels.
 - "certificate": patch object for the diploma students earn at 100% completion — include ONLY changed keys: { "title":"...", "org":"<awarding name>", "body":"<the recognition sentence>", "accent":"#hex", "signature":"<name>", "signatureRole":"<e.g. Instructor>", "photoUrl":"<https logo/photo>", "on":true|false }. Use for "design/redesign the certificate", "make the certificate gold", "change the certificate wording", "turn the certificate off".
 - "soul": "<a short description of a bespoke animated 'signature' centerpiece for the hero — e.g. 'a glowing constellation of the key ideas', 'an animated crest', 'drifting particles that form the topic'>", OR "remove" to take it away. A hidden delight — use ONLY when they explicitly ask for a hero/signature visual, a 'soul', or something special/animated at the top.
 - "genImage": { "prompt":"<a rich visual description to GENERATE an AI image from — expand their idea into a great image prompt>", "target":"cover"|"background"|"hero" } — use when they ask you to CREATE/generate an image ("generate a cover of…", "make me a background photo of a forest"). target: cover = the big banner image, background = the page background photo, hero = behind the title. The image is generated and placed automatically.
@@ -1195,11 +1214,29 @@ function journeyContext(school, progress) {
   }
   return `\nLEARNER'S JOURNEY: ${passed.length}/${lessons.length} lessons completed${recent ? ` (recently: ${recent})` : ""}. Currently on: "${current?.title || "—"}".${lockedNames ? ` STILL LOCKED (they have NOT seen these — don't assume the concepts; you may tease them): ${lockedNames}.` : " Everything is unlocked for them."}${classLine} Meet them exactly where they are.\n`;
 }
-function mentorOfficeSys(school, bus, journey = "") {
+function mentorOfficeSys(school, bus, journey = "", progress = null) {
   const dna = school.knowledgeDNA ? `\nKNOWLEDGE DNA:\n${String(school.knowledgeDNA).slice(0, 4000)}\n` : "";
+  // Mentorship experience: office hours ARE the school — the mentor teaches here and
+  // personally decides when each lesson opens (the app never auto-advances).
+  let gatekeeper = "";
+  if (experienceOf(school) === "mentorship" && progress) {
+    const ms = school.mentorship || {};
+    const lessons = (school.semesters || []).flatMap(s => s.lessons || []);
+    const syllabus = lessons.map(l => `#${l.number} "${l.title}" [${progress[l.number] || "locked"}]${l.passCriteria ? ` — pass bar: ${l.passCriteria}` : ""}`).join("\n");
+    const paceLine = ms.pace === "strict" ? "Be DEMANDING: require strong, concrete evidence in their own words before advancing — when in doubt, don't."
+      : ms.pace === "relaxed" ? "Advance generously: honest engagement and a reasonable grasp is enough."
+        : "Advance at YOUR judgement as their mentor — real understanding, not enthusiasm.";
+    gatekeeper = `\nMENTORSHIP PROGRESSION — YOU are the gatekeeper. This school advances ONLY through this conversation; the app never unlocks anything by itself.
+THE SYLLABUS (status per step):\n${syllabus}
+Teach the CURRENT open step right here in conversation. ${paceLine}${ms.paceNote ? ` The creator's pacing guidance: ${ms.paceNote}` : ""}
+When the student has genuinely met the current step's bar, END your reply with these control lines (each on its own line, nothing after them):
+PASSED: <that lesson's number>
+OPEN: <the next lesson's number>
+Use PASSED only for real evidence in their own messages (specific actions, specific reasoning — never "I will"). Use OPEN alone (without PASSED) only if you deliberately want to open a step early. NEVER mention these control lines or the mechanics — to the student it should simply feel like you decided they're ready.\n`;
+  }
   return `You are ${school.mentor.name}, mentor of "${school.name}" on Senseito — holding open OFFICE HOURS.
 ${school.mentor.systemVoice}
-${dna}${busContext(bus, school)}${journey}
+${dna}${trainingPreamble(school)}${busContext(bus, school)}${journey}${gatekeeper}
 THE SCHOOL: ${school.description} Lessons: ${school.semesters?.flatMap(s => s.lessons?.map(l => l.title)).join("; ")}
 The student can ask you ANYTHING related to this subject. Stay fully in character. Connect answers back to the school's lessons and missions when relevant. HONOR THEIR PROGRESS: only treat lessons they've completed as known ground; for a STILL-LOCKED lesson, don't dump its full content — give a short teaser and point them to the lesson(s) that unlock it. If they ask "what's next" or "what can I do now", name the lessons currently open to them, not locked ones. Push them toward action, not consumption. Never bullet lists. Replies under 150 words.
 ${MENTOR_WIDGET_NOTE}${schoolHasGarden(school) ? `\n${MENTOR_GARDEN_NOTE}` : ""}`;
@@ -1395,7 +1432,17 @@ const SECTION_META = {
   community: { title: "Community", icon: "💬" },
   students: { title: "Students", icon: "👥" },
   calendar: { title: "Calendar", icon: "📅" },
+  classroom: { title: "Classroom", icon: "🎥" },
 };
+// The 4 learning experiences. "lessons" hosts every classic shell (cards/steps/arcade/lms);
+// the other three swap the whole spine (see EXPERIENCE RULES in ARCHITECT_SYS).
+const EXPERIENCES = {
+  lessons: { label: "Lessons", icon: "📚", desc: "A curriculum of lessons" },
+  mentorship: { label: "Mentorship", icon: "🎓", desc: "The mentor unlocks each step" },
+  community: { label: "Community", icon: "💬", desc: "A private space, no lessons" },
+  classroom: { label: "Classroom", icon: "🎥", desc: "Live sessions + discussion" },
+};
+function experienceOf(school) { return EXPERIENCES[school?.experience] ? school.experience : "lessons"; }
 // Starting layouts the creator can pick (or "auto" = let the AI decide).
 const LAYOUTS = {
   course: { label: "Full Course", kinds: ["lessons", "mentor", "tools"], desc: "Lessons + AI mentor + tools" },
@@ -1592,7 +1639,10 @@ function schoolFacts(content) {
 
 // Real progress UI for builds/updates: smooth trickle bar (never stalls), live
 // label, and rotating fun facts from the user's own school so the wait feels alive.
-function BuildProgress({ pct = 0, label = "", facts = [], title = "Building your school…", preview = null }) {
+function BuildProgress({ pct = 0, label = "", facts = [], title = "Building your school…", preview = null, experience = null }) {
+  // Which of the 4 learning experiences is being built — drives a DIFFERENT skeleton
+  // (a community forming as lesson boxes would make no sense).
+  const exp = EXPERIENCES[preview?.experience] ? preview.experience : (EXPERIENCES[experience] ? experience : "lessons");
   const start = useRef(Date.now());
   const previewSince = useRef(0);
   const [disp, setDisp] = useState(Math.max(3, pct));
@@ -1630,12 +1680,33 @@ function BuildProgress({ pct = 0, label = "", facts = [], title = "Building your
   const elapsedS = (Date.now() - start.current) / 1000;
   const etaSecs = (shown > 6 && shown < 99) ? Math.round(elapsedS * (100 - shown) / shown) : null;
   const eta = pct >= 100 ? "Done!" : etaSecs == null ? "estimating…" : etaSecs > 90 ? `about ${Math.round(etaSecs / 60)} min left` : etaSecs > 25 ? "under a minute left" : "almost there…";
-  const PHASES = [
-    { upTo: 14, lines: ["Reading your vision…", "Finding the soul of your school…", "Imagining the perfect mentor…"] },
-    { upTo: 30, lines: ["Designing the curriculum…", "Mapping the key concepts…", "Shaping the learning journey…", "Choosing the right activities…"] },
-    { upTo: 96, lines: ["Writing your lessons…", "Crafting interactive activities…", "Tuning missions & pass criteria…", "Giving your mentor its voice…", "Adding the finishing touches…"] },
-    { upTo: 101, lines: ["Reviewing everything…", "Polishing the details…", "Almost ready…"] },
-  ];
+  const PHASE_SETS = {
+    lessons: [
+      { upTo: 14, lines: ["Reading your vision…", "Finding the soul of your school…", "Imagining the perfect mentor…"] },
+      { upTo: 30, lines: ["Designing the curriculum…", "Mapping the key concepts…", "Shaping the learning journey…", "Choosing the right activities…"] },
+      { upTo: 96, lines: ["Writing your lessons…", "Crafting interactive activities…", "Tuning missions & pass criteria…", "Giving your mentor its voice…", "Adding the finishing touches…"] },
+      { upTo: 101, lines: ["Reviewing everything…", "Polishing the details…", "Almost ready…"] },
+    ],
+    mentorship: [
+      { upTo: 14, lines: ["Reading your vision…", "Imagining the perfect mentor…", "Studying how they'd teach…"] },
+      { upTo: 30, lines: ["Designing the mentor's syllabus…", "Deciding what mastery looks like…", "Setting the mentor's pace…"] },
+      { upTo: 96, lines: ["Giving your mentor its voice…", "Preparing each step of the journey…", "Teaching the mentor when to advance a student…", "Writing the mentor's materials…"] },
+      { upTo: 101, lines: ["The mentor is warming up…", "Polishing the details…", "Almost ready…"] },
+    ],
+    community: [
+      { upTo: 14, lines: ["Reading your vision…", "Feeling out your community's culture…", "Studying your material…"] },
+      { upTo: 30, lines: ["Designing the rooms…", "Turning your teachings into discussion spaces…", "Naming each room…"] },
+      { upTo: 96, lines: ["Building the discussion rooms…", "Setting up the library…", "Arranging the member space…", "Hanging the welcome sign…"] },
+      { upTo: 101, lines: ["Opening the doors…", "Polishing the details…", "Almost ready…"] },
+    ],
+    classroom: [
+      { upTo: 14, lines: ["Reading your vision…", "Setting up the stage…", "Checking the cameras…"] },
+      { upTo: 30, lines: ["Designing your live classroom…", "Planning the first sessions…", "Arranging the calendar…"] },
+      { upTo: 96, lines: ["Wiring up the broadcast frame…", "Scheduling your sessions…", "Setting up the class discussion…", "Adjusting the lights…"] },
+      { upTo: 101, lines: ["Mic check, one two…", "Polishing the details…", "Almost ready…"] },
+    ],
+  };
+  const PHASES = PHASE_SETS[exp] || PHASE_SETS.lessons;
   const pool = (PHASES.find(p => shown < p.upTo) || PHASES[PHASES.length - 1]).lines;
   const flavor = pct >= 100 ? "Your school is ready! ✨" : (label && /\d+\/\d+|\d+ of \d+/.test(label) ? label : pool[pi % pool.length]);
   const PT = preview ? themeFor(preview) : null; // tint the loader with the school's own theme → smooth hand-off
@@ -1669,6 +1740,64 @@ function BuildProgress({ pct = 0, label = "", facts = [], title = "Building your
         {preview ? (() => {
           const lessons = (preview.semesters || []).flatMap(s => s.lessons || []);
           const allDone = pct >= 100;
+          const shim = (delay = 0) => <div style={{ position: "absolute", inset: 0, background: `linear-gradient(110deg,transparent 35%,${hexA(ac1, 0.10)} 50%,transparent 65%)`, backgroundSize: "200% 100%", animation: `shimmer 1.6s ${delay}s linear infinite` }} />;
+          // COMMUNITY — rooms open one by one; no lesson boxes here, they'd make no sense.
+          if (exp === "community") {
+            const rooms = (preview.community?.rooms || []).slice(0, 7);
+            const openCount = allDone ? rooms.length : Math.max(0, Math.min(rooms.length, Math.round(((shown - 30) / 64) * rooms.length)));
+            return (
+              <div style={{ marginTop: 16 }}>
+                <div style={{ background: B.surface2, border: `1px solid ${hexA(ac1, 0.35)}`, borderRadius: 12, padding: "13px 15px", marginBottom: 10, animation: "fadeUp 0.5s ease" }}>
+                  <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 16, fontWeight: 700, color: B.white }}>{preview.emoji || "💬"} {preview.name}</div>
+                  {preview.tagline && <div style={{ fontSize: 12, color: ac1, marginTop: 2, fontStyle: "italic" }}>{preview.tagline}</div>}
+                  <div style={{ fontSize: 11.5, color: B.mutedMid, marginTop: 5 }}>A private community — {rooms.length || "your"} rooms{preview.communityStyle ? ` · ${preview.communityStyle} style` : ""}</div>
+                </div>
+                <div style={{ fontSize: 11.5, fontWeight: 700, color: allDone ? "#4ADE80" : B.mutedMid, marginBottom: 7 }}>{allDone ? `✨ Your community is open — ${rooms.length} rooms ready` : `Opening the rooms — ${openCount} of ${rooms.length || "…"}`}</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {rooms.map((r, i) => { const open = i < openCount; return (
+                    <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, background: B.surface2, border: `1px solid ${open ? "rgba(74,222,128,0.3)" : B.border}`, borderRadius: 10, padding: "9px 12px", position: "relative", overflow: "hidden", opacity: open ? 1 : 0.6, transition: "border-color 0.4s, opacity 0.4s" }}>
+                      {!open && shim(i * 0.1)}
+                      <span style={{ fontSize: 15, position: "relative" }}>{r.icon || "#"}</span>
+                      <div style={{ position: "relative", minWidth: 0 }}>
+                        <div style={{ fontSize: 12.5, color: B.white, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.title}</div>
+                        {r.about && <div style={{ fontSize: 10.5, color: B.muted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.about}</div>}
+                      </div>
+                      <span style={{ marginLeft: "auto", fontSize: 10.5, color: open ? "#4ADE80" : B.muted, position: "relative", whiteSpace: "nowrap" }}>{open ? "open" : "setting up…"}</span>
+                    </div>
+                  ); })}
+                </div>
+              </div>
+            );
+          }
+          // CLASSROOM — a broadcast frame powers on, then the session calendar fills in.
+          if (exp === "classroom") {
+            const events = (preview.classroom?.events || []).slice(0, 4);
+            const evReady = allDone ? events.length : Math.max(0, Math.min(events.length, Math.round(((shown - 40) / 55) * events.length)));
+            const live = shown > 55;
+            return (
+              <div style={{ marginTop: 16 }}>
+                <div style={{ position: "relative", borderRadius: 14, border: `1px solid ${hexA(ac1, 0.35)}`, background: "#0a0a14", overflow: "hidden", aspectRatio: "16/7", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 10, animation: "fadeUp 0.5s ease" }}>
+                  {!live && shim()}
+                  <div style={{ textAlign: "center", position: "relative" }}>
+                    <div style={{ width: 44, height: 44, margin: "0 auto 8px", borderRadius: "50%", background: live ? hexA(ac1, 0.9) : B.surface3, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18, color: "#fff", boxShadow: live ? `0 0 30px ${hexA(ac1, 0.55)}` : "none", transition: "all 0.6s ease" }}>▶</div>
+                    <div style={{ fontSize: 12, color: live ? B.white : B.muted, fontWeight: 700 }}>{allDone ? `${preview.classroom?.title || preview.name} — ready to go live` : live ? "Broadcast frame powered on" : "Wiring the broadcast frame…"}</div>
+                  </div>
+                  <span style={{ position: "absolute", top: 10, left: 12, display: "inline-flex", alignItems: "center", gap: 6, fontSize: 10, fontWeight: 800, color: live ? "#F87171" : B.muted, letterSpacing: 1 }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: live ? "#F87171" : B.surface3, animation: live ? "pulse 1.2s infinite" : "none" }} />LIVE</span>
+                </div>
+                <div style={{ fontSize: 11.5, fontWeight: 700, color: allDone ? "#4ADE80" : B.mutedMid, marginBottom: 7 }}>{allDone ? "✨ Your classroom is ready — opening…" : `Scheduling sessions — ${evReady} of ${events.length || "…"}`}</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {events.map((ev, i) => { const done = i < evReady; return (
+                    <div key={i} style={{ display: "flex", alignItems: "center", gap: 10, background: B.surface2, border: `1px solid ${done ? "rgba(74,222,128,0.3)" : B.border}`, borderRadius: 10, padding: "8px 12px", position: "relative", overflow: "hidden", opacity: done ? 1 : 0.6 }}>
+                      {!done && shim(i * 0.1)}
+                      <span style={{ fontSize: 13, position: "relative" }}>📅</span>
+                      <span style={{ fontSize: 12.5, color: B.white, position: "relative", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{ev.title}</span>
+                      <span style={{ marginLeft: "auto", fontSize: 10.5, color: done ? "#4ADE80" : B.muted, position: "relative", whiteSpace: "nowrap" }}>{done ? (ev.date || "scheduled") : "scheduling…"}</span>
+                    </div>
+                  ); })}
+                </div>
+              </div>
+            );
+          }
           // Lessons reveal from the time-based cascade first, then keep filling as real authoring (pct) lands.
           const ready = allDone ? lessons.length : Math.max(0, Math.min(lessons.length, Math.round(Math.max((shown - 30) / 64, Math.min(rev, 0.4)) * lessons.length)));
           const mentorName = preview.mentorName || preview.mentor?.name;
@@ -1701,8 +1830,20 @@ function BuildProgress({ pct = 0, label = "", facts = [], title = "Building your
                   </div>
                 </div>
               )}
+              {/* Mentorship: the mentor "arrives" first — ghost chat bubbles — then their syllabus fills in. */}
+              {exp === "mentorship" && (
+                <div style={{ marginBottom: 10, background: B.surface2, border: `1px solid ${hexA(ac1, 0.3)}`, borderRadius: 12, padding: "11px 13px", animation: "fadeUp 0.5s ease" }}>
+                  <div style={{ display: "flex", gap: 8, alignItems: "flex-start", marginBottom: 7 }}>
+                    <div style={{ width: 26, height: 26, borderRadius: "50%", background: hexA(ac1, 0.85), display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: "#fff", flexShrink: 0 }}>🎓</div>
+                    <div style={{ background: B.surface3, borderRadius: "4px 12px 12px 12px", padding: "8px 12px", fontSize: 12, color: B.white, position: "relative", overflow: "hidden", minWidth: 160 }}>
+                      {allDone ? `${mentorName || "Your mentor"} is ready for your first student.` : <>{shim()}<span style={{ opacity: 0.75 }}>{mentorName || "Your mentor"} is preparing…</span></>}
+                    </div>
+                  </div>
+                  <div style={{ fontSize: 10.5, color: B.muted }}>In this school, {mentorName || "the mentor"} unlocks each step personally — students advance only when they're truly ready.</div>
+                </div>
+              )}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 7 }}>
-                <span style={{ fontSize: 11.5, fontWeight: 700, color: allDone ? "#4ADE80" : B.mutedMid }}>{allDone ? `✨ ${lessons.length} lesson${lessons.length !== 1 ? "s" : ""} ready — opening your school…` : `Writing your lessons — ${ready} of ${lessons.length} ready`}</span>
+                <span style={{ fontSize: 11.5, fontWeight: 700, color: allDone ? "#4ADE80" : B.mutedMid }}>{allDone ? `✨ ${lessons.length} ${exp === "mentorship" ? "syllabus step" : "lesson"}${lessons.length !== 1 ? "s" : ""} ready — opening your school…` : exp === "mentorship" ? `Preparing the mentor's syllabus — ${ready} of ${lessons.length} ready` : `Writing your lessons — ${ready} of ${lessons.length} ready`}</span>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 {lessons.slice(0, 9).map((l, i) => { const done = i < ready; return (
@@ -1729,6 +1870,63 @@ function BuildProgress({ pct = 0, label = "", facts = [], title = "Building your
           const sh = (at) => ({ opacity: shown >= at ? 1 : 0, maxHeight: shown >= at ? 200 : 0, transform: shown >= at ? "translateY(0)" : "translateY(8px)", overflow: "hidden", transition: "opacity 0.6s ease, transform 0.6s ease, max-height 0.6s ease" });
           const shimmer = (delay = 0) => <div style={{ position: "absolute", inset: 0, background: `linear-gradient(110deg,transparent 35%,${hexA(ac1, 0.12)} 50%,transparent 65%)`, backgroundSize: "200% 100%", animation: `shimmer 1.6s ${delay}s linear infinite` }} />;
           const ghostLine = (w, h = 12, mt = 0) => <div style={{ width: w, height: h, marginTop: mt, borderRadius: 6, background: B.surface3, position: "relative", overflow: "hidden" }}>{shimmer()}</div>;
+          const factCard = facts.length > 0 && <div key={fi} style={{ marginTop: 12, background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 11, padding: "12px 14px", fontSize: 13, color: B.white, lineHeight: 1.5, animation: "fadeUp 0.5s ease" }}>💡 {facts[fi]}</div>;
+          // MENTORSHIP skeleton — a conversation forming, not lesson boxes.
+          if (exp === "mentorship") return (
+            <div style={{ marginTop: 16 }}>
+              <div style={{ background: B.surface2, border: `1px solid ${hexA(ac1, 0.28)}`, borderRadius: 12, padding: "13px 15px" }}>
+                {[[6, "62%", false], [14, "48%", true], [22, "70%", false], [30, "40%", true]].map(([at, w, mine], i) => (
+                  <div key={i} style={{ ...sh(at), display: "flex", justifyContent: mine ? "flex-end" : "flex-start", gap: 8, marginBottom: 9 }}>
+                    {!mine && <div style={{ width: 24, height: 24, borderRadius: "50%", background: B.surface3, position: "relative", overflow: "hidden", flexShrink: 0 }}>{shimmer(i * 0.12)}</div>}
+                    <div style={{ width: w, height: 30, borderRadius: mine ? "12px 4px 12px 12px" : "4px 12px 12px 12px", background: B.surface3, position: "relative", overflow: "hidden" }}>{shimmer(i * 0.12)}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ ...sh(26), display: "flex", gap: 6, marginTop: 10 }}>
+                {[0, 1, 2, 3, 4].map(i => <div key={i} style={{ flex: 1, height: 26, borderRadius: 8, background: B.surface2, border: `1px solid ${B.border}`, position: "relative", overflow: "hidden" }}>{shimmer(i * 0.1)}</div>)}
+              </div>
+              {factCard}
+            </div>
+          );
+          // COMMUNITY skeleton — rooms rail + ghost posts with avatars.
+          if (exp === "community") return (
+            <div style={{ marginTop: 16, display: "flex", gap: 10 }}>
+              <div style={{ width: 120, flexShrink: 0, background: B.surface2, border: `1px solid ${hexA(ac1, 0.28)}`, borderRadius: 12, padding: 9, display: "flex", flexDirection: "column", gap: 7 }}>
+                {[6, 12, 18, 24].map((at, i) => <div key={i} style={{ ...sh(at), height: 20, borderRadius: 6, background: B.surface3, position: "relative", overflow: "hidden" }}>{shimmer(i * 0.12)}</div>)}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                {[[9, "74%"], [17, "58%"], [25, "66%"]].map(([at, w], i) => (
+                  <div key={i} style={{ ...sh(at), background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 11, padding: "10px 12px", marginBottom: 8 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <div style={{ width: 22, height: 22, borderRadius: "50%", background: B.surface3, position: "relative", overflow: "hidden", flexShrink: 0 }}>{shimmer(i * 0.1)}</div>
+                      {ghostLine("34%", 9)}
+                    </div>
+                    <div style={{ marginTop: 8 }}>{ghostLine(w, 10)}</div>
+                  </div>
+                ))}
+                {factCard}
+              </div>
+            </div>
+          );
+          // CLASSROOM skeleton — broadcast frame + mini calendar + comment rows.
+          if (exp === "classroom") return (
+            <div style={{ marginTop: 16 }}>
+              <div style={{ ...sh(6), aspectRatio: "16/7", maxHeight: 150, borderRadius: 14, background: "#0a0a14", border: `1px solid ${hexA(ac1, 0.28)}`, position: "relative", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                {shimmer()}
+                <div style={{ width: 38, height: 38, borderRadius: "50%", background: B.surface3, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 14, color: B.muted, position: "relative" }}>▶</div>
+              </div>
+              <div style={{ ...sh(16), display: "flex", gap: 6, marginTop: 10 }}>
+                {[0, 1, 2, 3, 4, 5, 6].map(i => <div key={i} style={{ flex: 1, height: 34, borderRadius: 8, background: B.surface2, border: `1px solid ${B.border}`, position: "relative", overflow: "hidden", opacity: shown >= 16 + i * 2 ? 1 : 0.25, transition: "opacity 0.5s ease" }}>{shimmer(i * 0.08)}</div>)}
+              </div>
+              {[24, 29].map((at, i) => (
+                <div key={i} style={{ ...sh(at), height: 30, borderRadius: 9, background: B.surface2, border: `1px solid ${B.border}`, position: "relative", display: "flex", alignItems: "center", gap: 8, padding: "0 11px", marginTop: 7 }}>
+                  <div style={{ width: 16, height: 16, borderRadius: "50%", background: B.surface3, position: "relative", overflow: "hidden", flexShrink: 0 }}>{shimmer(i * 0.1)}</div>
+                  {ghostLine(`${52 - i * 10}%`, 9)}
+                </div>
+              ))}
+              {factCard}
+            </div>
+          );
           return (
             <div style={{ marginTop: 16 }}>
               {/* ghost school card forms first */}
@@ -1756,6 +1954,70 @@ function BuildProgress({ pct = 0, label = "", facts = [], title = "Building your
         })()}
         <div style={{ fontSize: 11.5, color: B.muted, marginTop: 14, textAlign: "center" }}>Richer schools take a minute or two — please keep this tab open, it’s worth the wait.</div>
       </div>
+    </div>
+  );
+}
+
+// Update loader — deliberately DIFFERENT from the first-build loader: just the Senseito
+// mark, a slim bar, and one calm sentence about what's happening (real-time when we know,
+// looping stage phrases when we don't).
+function IterationLoader({ pct = 0, label = "" }) {
+  const [disp, setDisp] = useState(4);
+  const [pi, setPi] = useState(0);
+  const start = useRef(Date.now());
+  useEffect(() => {
+    const id = setInterval(() => {
+      const trickle = 92 * (1 - Math.exp(-((Date.now() - start.current) / 1000) / 25));
+      setDisp(d => { const ceiling = pct >= 100 ? 100 : pct + 24; let t = Math.max(pct, Math.min(trickle, ceiling)); if (t < d) t = d; return d + (t - d) * 0.2; });
+    }, 200);
+    return () => clearInterval(id);
+  }, [pct]);
+  useEffect(() => { const id = setInterval(() => setPi(p => p + 1), 2400); return () => clearInterval(id); }, []);
+  const shown = Math.min(100, Math.round(disp));
+  const STAGES = [
+    { upTo: 30, lines: ["Thinking…", "Thinking some more…", "Reading your school…"] },
+    { upTo: 60, lines: ["Working on it…", "Rewriting what changed…", "Keeping the rest untouched…"] },
+    { upTo: 90, lines: ["Making sure it looks good…", "Checking…", "Enhancing…"] },
+    { upTo: 101, lines: ["A little more…", "Almost there…"] },
+  ];
+  const pool = (STAGES.find(s => shown < s.upTo) || STAGES[STAGES.length - 1]).lines;
+  // Real-time beats poetry: if the pipeline told us exactly what it's doing, say that.
+  const line = pct >= 100 ? "Done — refreshing…" : (label && /\d+\/\d+|\d+ of \d+|…$/.test(label) ? label : pool[pi % pool.length]);
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 12, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: "12px 16px", boxShadow: "0 14px 44px rgba(0,0,0,0.35)" }}>
+      <SenseitoMark size={30} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div key={line} style={{ fontSize: 12.5, fontWeight: 600, color: B.white, marginBottom: 6, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", animation: "fadeUp 0.35s ease" }}>{line}</div>
+        <div style={{ height: 5, borderRadius: 3, background: B.surface2, overflow: "hidden" }}>
+          <div style={{ height: "100%", width: `${shown}%`, borderRadius: 3, background: "linear-gradient(90deg,#7C3AED,#06B6D4)", transition: "width 0.3s ease" }} />
+        </div>
+      </div>
+      <span style={{ fontSize: 11, color: B.muted, flexShrink: 0 }}>{shown}%</span>
+    </div>
+  );
+}
+
+// School-wide completion ring — an alternative to the progress bar. Placement is a
+// design choice (school.progressWidget = { style:"circle", placement:"hero"|"rail"|"nav"|"meta" }).
+function CompletionCircle({ pct = 0, size = 108, T, label = "complete", detail = "", onDark = false }) {
+  const stroke = Math.max(7, Math.round(size / 13));
+  const r = (size - stroke - 4) / 2, C = 2 * Math.PI * r, c = size / 2;
+  const p = Math.max(0, Math.min(100, Math.round(pct)));
+  const gid = `ccg-${String(T?.p || "7C3AED").replace("#", "")}`;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+      <div style={{ position: "relative", width: size, height: size }}>
+        <svg width={size} height={size} style={{ transform: "rotate(-90deg)", display: "block" }}>
+          <defs><linearGradient id={gid} x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stopColor={T?.p || "#7C3AED"} /><stop offset="100%" stopColor={T?.a || "#06B6D4"} /></linearGradient></defs>
+          <circle cx={c} cy={c} r={r} fill="none" stroke={onDark ? "rgba(255,255,255,0.18)" : "var(--surface3)"} strokeWidth={stroke} />
+          <circle cx={c} cy={c} r={r} fill="none" stroke={`url(#${gid})`} strokeWidth={stroke} strokeDasharray={C} strokeDashoffset={C * (1 - p / 100)} strokeLinecap="round" style={{ transition: "stroke-dashoffset 0.9s cubic-bezier(.2,1,.3,1)", filter: p > 0 ? `drop-shadow(0 0 ${Math.round(size / 16)}px ${T?.pg || "rgba(124,58,237,0.35)"})` : "none" }} />
+        </svg>
+        <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+          <span style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: Math.round(size * 0.24), fontWeight: 800, color: onDark ? "#fff" : B.white, lineHeight: 1 }}>{p}%</span>
+          <span style={{ fontSize: Math.max(8, Math.round(size * 0.085)), fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: onDark ? "rgba(255,255,255,0.75)" : B.muted, marginTop: 2 }}>{label}</span>
+        </div>
+      </div>
+      {detail && <span style={{ fontSize: 10.5, color: onDark ? "rgba(255,255,255,0.7)" : B.muted, textAlign: "center" }}>{detail}</span>}
     </div>
   );
 }
@@ -2564,23 +2826,125 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, onChooseFork, c
 // ─────────────────────────────────────────────────────────────
 // MENTOR OFFICE HOURS
 // ─────────────────────────────────────────────────────────────
-function MentorOffice({ school, T, chat, onChat, bus, onIngest, progress, onUpdate, readOnly }) {
+// Mentorship syllabus strip — the lesson trail around the mentor chat, in the creator's
+// chosen layout: sidebar rail · small top cards · mini/big progress bar · gamified icons.
+function MentorshipStrip({ school, T, progress, layout, onEnter }) {
+  const lessons = (school.semesters || []).flatMap(s => s.lessons || []);
+  if (!lessons.length || layout === "focus") return null;
+  const stOf = l => progress[l.number] || "locked";
+  const passed = lessons.filter(l => stOf(l) === "passed").length;
+  const current = lessons.find(l => stOf(l) === "active") || null;
+  const pct = lessons.length ? Math.round((passed / lessons.length) * 100) : 0;
+  const clickable = l => stOf(l) !== "locked";
+  if (layout === "minibar" || layout === "bigbar") {
+    const big = layout === "bigbar";
+    return (
+      <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: big ? "16px 20px" : "10px 16px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: big ? 10 : 6 }}>
+          <span style={{ fontSize: big ? 13 : 11.5, fontWeight: 800, color: B.white }}>{current ? `Step ${lessons.indexOf(current) + 1} of ${lessons.length}: ${current.title}` : passed === lessons.length ? "🏆 Journey complete" : `${passed}/${lessons.length} steps`}</span>
+          <span style={{ fontSize: 11, color: B.muted }}>{pct}%</span>
+        </div>
+        <div style={{ height: big ? 14 : 6, borderRadius: big ? 7 : 3, background: B.surface3, overflow: "hidden", position: "relative" }}>
+          <div style={{ width: `${pct}%`, height: "100%", background: `linear-gradient(90deg,${T.p},${T.a})`, borderRadius: big ? 7 : 3, transition: "width 0.6s ease" }} />
+          {big && lessons.map((l, i) => <span key={i} title={l.title} style={{ position: "absolute", left: `${((i + 1) / lessons.length) * 100}%`, top: 0, bottom: 0, width: 2, background: "rgba(0,0,0,0.35)" }} />)}
+        </div>
+        {big && current && <div style={{ fontSize: 11, color: B.muted, marginTop: 7 }}>Your mentor opens the next step when you're ready — keep the conversation going.</div>}
+      </div>
+    );
+  }
+  if (layout === "icons") return (
+    <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: "14px 16px", display: "flex", gap: 4, alignItems: "center", overflowX: "auto" }}>
+      {lessons.map((l, i) => { const st = stOf(l); return (
+        <Fragment key={l.number}>
+          {i > 0 && <span style={{ flex: "1 0 12px", height: 2, background: st === "locked" ? B.surface3 : T.p, opacity: st === "locked" ? 1 : 0.6, borderRadius: 1 }} />}
+          <button disabled={!clickable(l)} onClick={() => onEnter?.(l)} title={l.title}
+            style={{ width: 38, height: 38, borderRadius: "50%", flexShrink: 0, border: `2px solid ${st === "passed" ? "rgba(74,222,128,0.6)" : st === "active" ? T.p : B.borderMid}`, background: st === "passed" ? "rgba(74,222,128,0.12)" : st === "active" ? T.ps : B.surface2, color: st === "passed" ? "#4ADE80" : st === "active" ? T.hi : B.muted, fontSize: 15, cursor: clickable(l) ? "pointer" : "not-allowed", boxShadow: st === "active" ? `0 0 14px ${T.pg}` : "none", fontFamily: "inherit" }}>
+            {st === "passed" ? "★" : st === "active" ? "▸" : "🔒"}
+          </button>
+        </Fragment>
+      ); })}
+    </div>
+  );
+  if (layout === "topcards") return (
+    <div style={{ display: "flex", gap: 8, overflowX: "auto", paddingBottom: 2 }}>
+      {lessons.map((l, i) => { const st = stOf(l); return (
+        <button key={l.number} disabled={!clickable(l)} onClick={() => onEnter?.(l)} title={l.title}
+          style={{ flex: "0 0 148px", textAlign: "left", background: st === "active" ? T.ps : B.surface, border: `1px solid ${st === "passed" ? "rgba(74,222,128,0.35)" : st === "active" ? T.ba : B.border}`, borderRadius: 12, padding: "10px 12px", cursor: clickable(l) ? "pointer" : "not-allowed", fontFamily: "inherit", opacity: st === "locked" ? 0.55 : 1 }}>
+          <div style={{ fontSize: 10, fontWeight: 800, color: st === "passed" ? "#4ADE80" : st === "active" ? T.hi : B.muted, marginBottom: 4 }}>{st === "passed" ? "✓ DONE" : st === "active" ? `▸ STEP ${i + 1}` : `🔒 STEP ${i + 1}`}</div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: st === "locked" ? B.muted : B.white, lineHeight: 1.3, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{l.title}</div>
+        </button>
+      ); })}
+    </div>
+  );
+  // "sidebar" — vertical rail of titles (rendered beside the chat by MentorOffice).
+  return (
+    <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: 10, display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+      <div style={{ fontSize: 9.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.3, color: B.muted, padding: "3px 8px 7px" }}>The journey</div>
+      {lessons.map((l) => { const st = stOf(l); return (
+        <button key={l.number} disabled={!clickable(l)} onClick={() => onEnter?.(l)} title={l.title}
+          style={{ textAlign: "left", background: st === "active" ? T.ps : "none", border: `1px solid ${st === "active" ? T.ba : "transparent"}`, borderRadius: 8, color: st === "passed" ? "#4ADE80" : st === "active" ? T.hi : B.muted, padding: "7px 9px", cursor: clickable(l) ? "pointer" : "not-allowed", fontSize: 12, fontFamily: "inherit", fontWeight: st === "active" ? 700 : 500, display: "flex", alignItems: "center", gap: 7, opacity: st === "locked" ? 0.6 : 1 }}>
+          <span style={{ flexShrink: 0, fontSize: 11 }}>{st === "passed" ? "✓" : st === "active" ? "▸" : "🔒"}</span>
+          <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{l.title}</span>
+        </button>
+      ); })}
+    </div>
+  );
+}
+// Is the mentor "in office" right now, in the STUDENT's local time? windows: [{days:[0-6], from:"HH:MM", to:"HH:MM"}]
+function mentorInOffice(hours) {
+  if (!hours?.enabled || !(hours.windows || []).length) return true;
+  const now = new Date(); const day = now.getDay(); const mins = now.getHours() * 60 + now.getMinutes();
+  const toMin = (s) => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || "").trim()); return m ? (+m[1]) * 60 + (+m[2]) : null; };
+  return (hours.windows || []).some(w => {
+    if (Array.isArray(w.days) && w.days.length && !w.days.includes(day)) return false;
+    const f = toMin(w.from), t = toMin(w.to);
+    if (f == null || t == null) return true;
+    return t >= f ? (mins >= f && mins <= t) : (mins >= f || mins <= t); // overnight windows wrap
+  });
+}
+function fmtWindows(hours) {
+  const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  return (hours?.windows || []).map(w => `${(w.days || []).length ? w.days.map(d => DAYS[d]).join("/") : "Every day"} ${w.from || "00:00"}–${w.to || "23:59"}`).join(" · ");
+}
+
+function MentorOffice({ school, T, chat, onChat, bus, onIngest, progress, onUpdate, readOnly, onPassLesson, onOpenLesson, onEnterLesson, planCap = null }) {
   const msgs = chat?.length ? chat : [{ role: "assistant", content: `Office hours are open. Bring me something real — a question, a struggle, a situation from your life. We'll work on it together.` }];
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const bottomRef = useRef(null);
   useEffect(() => { const el = bottomRef.current?.parentElement; if (el) el.scrollTop = el.scrollHeight; }, [msgs, loading]);
+  const mentorship = experienceOf(school) === "mentorship";
+  const msLayout = school.mentorship?.layout || "sidebar";
+  const hours = school.mentorHours || {};
+  const inOffice = !readOnly || mentorInOffice(hours); // creators are never locked out of their own mentor
+  // Daily message limit per student — counted from the chat's own timestamps.
+  const dayKey = new Date().toDateString();
+  const usedToday = msgs.filter(m => m.role === "user" && m.ts && new Date(m.ts).toDateString() === dayKey).length;
+  // The tighter of the school-wide limit and the viewer's plan budget wins.
+  const capA = Number(school.mentorLimits?.msgsPerDay) || 0, capB = Number(planCap) || 0;
+  const cap = capA && capB ? Math.min(capA, capB) : (capA || capB);
+  const overCap = readOnly && cap > 0 && usedToday >= cap;
 
   async function send() {
-    if (!input.trim() || loading) return;
+    if (!input.trim() || loading || (readOnly && (!inOffice || overCap))) return;
     const userMsg = input.trim(); setInput("");
-    const next = [...msgs, { role: "user", content: userMsg }];
+    const next = [...msgs, { role: "user", content: userMsg, ts: Date.now() }];
     onChat(next); setLoading(true);
     try {
-      let reply = await api(mentorOfficeSys(school, bus, journeyContext(school, progress)), toApiMessages(next), 2000);
+      let reply = await api(mentorOfficeSys(school, bus, journeyContext(school, progress), mentorship ? progress : null), toApiMessages(next), 2000);
       const wd = reply.match(/WEED:\s*(.+)/i);
       if (wd) { onIngest?.({ title: "Office hours" }, { type: "mindset", weed: wd[1].trim() }); reply = reply.replace(/\n?\s*WEED:\s*.+/i, "").trim(); }
-      onChat([...next, { role: "assistant", content: reply }]);
+      // Mentorship gatekeeping: the mentor marks the step passed and opens the next one.
+      const sys = [];
+      if (mentorship) {
+        const pm = reply.match(/(^|\n)\s*PASSED:\s*(\d+)/i);
+        const om = reply.match(/(^|\n)\s*OPEN:\s*(\d+)/i);
+        reply = reply.replace(/(^|\n)\s*PASSED:\s*\d+\s*/gi, "\n").replace(/(^|\n)\s*OPEN:\s*\d+\s*/gi, "\n").trim();
+        const all = (school.semesters || []).flatMap(s => s.lessons || []);
+        if (pm) { const n = +pm[2]; const l = all.find(x => x.number === n); if (l && progress[n] !== "passed") { onPassLesson?.(n); sys.push({ role: "system", content: `✅ ${school.mentor.name} marked "${l.title}" complete.` }); } }
+        if (om) { const n = +om[2]; const l = all.find(x => x.number === n); if (l && (progress[n] === "locked" || progress[n] === undefined)) { onOpenLesson?.(n); sys.push({ role: "system", content: `🔓 ${school.mentor.name} opened the next step: "${l.title}".` }); } }
+      }
+      onChat([...next, { role: "assistant", content: reply }, ...sys]);
     } catch (e) { onChat([...next, { role: "assistant", content: `Error: ${e.message}` }]); }
     setLoading(false);
   }
@@ -2605,6 +2969,50 @@ function MentorOffice({ school, T, chat, onChat, bus, onIngest, progress, onUpda
             </select>
           </div>
           <div style={{ fontSize: 12.5, color: B.mutedMid, lineHeight: 1.6 }}><EditableText value={school.mentor?.personality || ""} placeholder="Describe their personality — calm and exacting? warm and funny?…" onSave={v => setMentor({ personality: v })} /></div>
+          {mentorship && (() => { const ms = school.mentorship || {}; const setMs = (p) => onUpdate({ data: { ...school, mentorship: { ...ms, ...p } } }); return (
+            <div style={{ marginTop: 13, paddingTop: 13, borderTop: `1px solid ${B.border}` }}>
+              <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.5, color: T.p, marginBottom: 9 }}>🧭 Mentorship journey — the mentor unlocks each step</div>
+              <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center", marginBottom: 9 }}>
+                <label style={{ fontSize: 11.5, color: B.muted, display: "flex", gap: 6, alignItems: "center" }}>Layout
+                  <select value={ms.layout || "sidebar"} onChange={e => setMs({ layout: e.target.value })} style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.white, fontFamily: "inherit", fontSize: 12, padding: "5px 8px", cursor: "pointer" }}>
+                    {[["focus", "Mentor only"], ["sidebar", "Titles in a side rail"], ["topcards", "Small cards on top"], ["minibar", "Small progress bar"], ["bigbar", "Stretched big bar"], ["icons", "Gamified icons"]].map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                  </select>
+                </label>
+                <label style={{ fontSize: 11.5, color: B.muted, display: "flex", gap: 6, alignItems: "center" }}>Pace
+                  <select value={ms.pace || "mentor"} onChange={e => setMs({ pace: e.target.value })} style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.white, fontFamily: "inherit", fontSize: 12, padding: "5px 8px", cursor: "pointer" }}>
+                    {[["mentor", "Mentor's judgement"], ["strict", "Strict — demand proof"], ["relaxed", "Relaxed — advance generously"]].map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                  </select>
+                </label>
+              </div>
+              <div style={{ fontSize: 12, color: B.mutedMid }}><EditableText value={ms.paceNote || ""} placeholder="Pacing guidance in your own words — e.g. 'never advance until they've done the drill twice'… (you can also train this in the Training Ground)" onSave={v => setMs({ paceNote: v })} /></div>
+            </div>
+          ); })()}
+          {(() => { const setData = (p) => onUpdate({ data: { ...school, ...p } }); const h = school.mentorHours || {}; const setH = (p) => setData({ mentorHours: { ...h, ...p } }); const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]; return (
+            <div style={{ marginTop: 13, paddingTop: 13, borderTop: `1px solid ${B.border}` }}>
+              <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.5, color: T.p, marginBottom: 9 }}>🕰️ Availability & limits</div>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: B.white, cursor: "pointer", marginBottom: h.enabled ? 9 : 0 }}>
+                <input type="checkbox" checked={!!h.enabled} onChange={e => setH({ enabled: e.target.checked, windows: (h.windows || []).length ? h.windows : [{ days: [1, 2, 3, 4, 5], from: "09:00", to: "17:00" }] })} />
+                Office hours — the mentor is only available at set times (in each student's local time)
+              </label>
+              {h.enabled && (h.windows || []).map((w, i) => (
+                <div key={i} style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 7, background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 9, padding: "7px 9px" }}>
+                  {DAYS.map((d, di) => { const on = !(w.days || []).length || (w.days || []).includes(di); const toggle = () => { const cur = (w.days || []).length ? [...w.days] : [0, 1, 2, 3, 4, 5, 6]; const nx = cur.includes(di) ? cur.filter(x => x !== di) : [...cur, di]; setH({ windows: h.windows.map((x, xi) => xi === i ? { ...x, days: nx } : x) }); }; return (
+                    <button key={di} onClick={toggle} style={{ background: on ? T.ps : "none", border: `1px solid ${on ? T.ba : B.borderMid}`, borderRadius: 6, color: on ? T.hi : B.muted, padding: "2px 7px", cursor: "pointer", fontSize: 10.5, fontWeight: 700, fontFamily: "inherit" }}>{d}</button>
+                  ); })}
+                  <input type="time" value={w.from || "09:00"} onChange={e => setH({ windows: h.windows.map((x, xi) => xi === i ? { ...x, from: e.target.value } : x) })} style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 7, color: B.white, fontFamily: "inherit", fontSize: 11.5, padding: "3px 6px" }} />
+                  <span style={{ fontSize: 11, color: B.muted }}>–</span>
+                  <input type="time" value={w.to || "17:00"} onChange={e => setH({ windows: h.windows.map((x, xi) => xi === i ? { ...x, to: e.target.value } : x) })} style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 7, color: B.white, fontFamily: "inherit", fontSize: 11.5, padding: "3px 6px" }} />
+                  <button onClick={() => setH({ windows: h.windows.filter((_, xi) => xi !== i) })} style={{ background: "none", border: "none", color: "#F87171", cursor: "pointer", fontSize: 12, marginLeft: "auto" }}>✕</button>
+                </div>
+              ))}
+              {h.enabled && <button onClick={() => setH({ windows: [...(h.windows || []), { days: [], from: "09:00", to: "17:00" }] })} style={{ background: "none", border: `1px dashed ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "5px 11px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit", marginBottom: 4 }}>＋ Add hours</button>}
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, fontSize: 12.5, color: B.white }}>
+                Daily mentor messages per student:
+                <input type="number" min="0" value={school.mentorLimits?.msgsPerDay ?? ""} placeholder="∞" onChange={e => setData({ mentorLimits: { ...(school.mentorLimits || {}), msgsPerDay: e.target.value === "" ? undefined : Math.max(0, parseInt(e.target.value, 10) || 0) } })} style={{ width: 64, background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.white, fontFamily: "inherit", fontSize: 12.5, padding: "5px 8px" }} />
+                <span style={{ fontSize: 10.5, color: B.muted }}>(blank = unlimited · protects your AI budget)</span>
+              </div>
+            </div>
+          ); })()}
         </div>
       )}
       {(school.concepts || []).length > 0 && (
@@ -2629,9 +3037,13 @@ function MentorOffice({ school, T, chat, onChat, bus, onIngest, progress, onUpda
         <div style={{ fontSize: 13, color: B.muted, lineHeight: 1.65, marginBottom: 18 }}>{school.mentor.personality}</div>
         <div style={{ background: B.surface2, borderLeft: `3px solid ${T.p}`, borderRadius: "0 8px 8px 0", padding: "12px 16px", fontSize: 14, color: B.white, fontStyle: "italic", lineHeight: 1.65 }}>"{school.mentor.sampleLine}"</div>
       </div>
-      <div style={{ background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 18, overflow: "hidden", boxShadow: `0 0 40px ${T.pg}` }}>
+      {/* Mentorship: the syllabus lives around the chat, in the creator's chosen layout */}
+      {mentorship && msLayout !== "sidebar" && msLayout !== "focus" && <MentorshipStrip school={school} T={T} progress={progress || {}} layout={msLayout} onEnter={onEnterLesson} />}
+      <div style={mentorship && msLayout === "sidebar" ? { display: "flex", gap: 12, alignItems: "flex-start" } : undefined}>
+      {mentorship && msLayout === "sidebar" && <div style={{ width: 208, flexShrink: 0, position: "sticky", top: 10 }}><MentorshipStrip school={school} T={T} progress={progress || {}} layout="sidebar" onEnter={onEnterLesson} /></div>}
+      <div style={{ ...(mentorship && msLayout === "sidebar" ? { flex: 1, minWidth: 0 } : {}), background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 18, overflow: "hidden", boxShadow: `0 0 40px ${T.pg}` }}>
         <div style={{ padding: "13px 20px", borderBottom: `1px solid ${B.border}`, background: B.surface2, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: B.white }}>🕰️ Office Hours — ask anything</div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: B.white }}>{mentorship ? `🎓 ${school.mentor.name} — your journey happens here` : "🕰️ Office Hours — ask anything"}</div>
           {chat?.length > 0 && <button onClick={() => { if (window.confirm("Start over? Your office-hours conversation will be cleared.")) onChat([]); }} style={{ background: "none", border: `1px solid ${B.border}`, borderRadius: 7, color: B.muted, padding: "4px 10px", cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>↻ Start over</button>}
         </div>
         <div style={{ maxHeight: "min(58vh, 600px)", minHeight: 360, overflowY: "auto", padding: "18px 20px", display: "flex", flexDirection: "column", gap: 12 }}>
@@ -2647,13 +3059,25 @@ function MentorOffice({ school, T, chat, onChat, bus, onIngest, progress, onUpda
           {loading && <div style={{ display: "flex", gap: 4, paddingLeft: 38 }}>{[0, 1, 2].map(i => <div key={i} style={{ width: 6, height: 6, borderRadius: "50%", background: T.p, animation: `pulse 1s ${i * 0.2}s infinite` }} />)}</div>}
           <div ref={bottomRef} />
         </div>
-        <div style={{ padding: "13px 16px", borderTop: `1px solid ${B.border}`, background: B.surface2, display: "flex", gap: 10, alignItems: "flex-end" }}>
-          <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} placeholder={`Ask ${school.mentor.name} anything…`} rows={2}
+        {/* Out of office hours / over the daily cap — the student sees why, kindly. */}
+        {readOnly && !inOffice && (
+          <div style={{ padding: "12px 18px", borderTop: `1px solid ${B.border}`, background: "rgba(251,191,36,0.07)", fontSize: 12.5, color: "#FBBF24", lineHeight: 1.55 }}>
+            🕰️ {school.mentor.name} is out of office right now. Office hours (your local time): <b>{fmtWindows(hours) || "—"}</b>{hours.note ? ` — ${hours.note}` : ""}. Come back then!
+          </div>
+        )}
+        {readOnly && inOffice && overCap && (
+          <div style={{ padding: "12px 18px", borderTop: `1px solid ${B.border}`, background: "rgba(251,191,36,0.07)", fontSize: 12.5, color: "#FBBF24", lineHeight: 1.55 }}>
+            ⏳ You've used today's {cap} mentor message{cap === 1 ? "" : "s"}. {school.mentor.name} will be ready for you again tomorrow.
+          </div>
+        )}
+        <div style={{ padding: "13px 16px", borderTop: `1px solid ${B.border}`, background: B.surface2, display: "flex", gap: 10, alignItems: "flex-end", opacity: readOnly && (!inOffice || overCap) ? 0.55 : 1 }}>
+          <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); } }} placeholder={readOnly && !inOffice ? "Outside office hours…" : readOnly && overCap ? "Daily limit reached…" : `Ask ${school.mentor.name} anything…`} rows={2} disabled={readOnly && (!inOffice || overCap)}
             style={{ flex: 1, background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 10, color: B.white, fontFamily: "inherit", fontSize: 14, lineHeight: 1.5, padding: "9px 13px", resize: "none" }} />
           <MicButton onText={t => setInput(v => (v ? v.trim() + " " : "") + t)} T={T} />
-          <button onClick={send} disabled={loading || !input.trim()}
-            style={{ background: T.p, border: "none", borderRadius: 10, padding: "10px 16px", color: "white", fontFamily: "inherit", fontSize: 15, fontWeight: 700, cursor: "pointer", flexShrink: 0, opacity: loading || !input.trim() ? 0.5 : 1 }}>↑</button>
+          <button onClick={send} disabled={loading || !input.trim() || (readOnly && (!inOffice || overCap))}
+            style={{ background: T.p, border: "none", borderRadius: 10, padding: "10px 16px", color: "white", fontFamily: "inherit", fontSize: 15, fontWeight: 700, cursor: "pointer", flexShrink: 0, opacity: loading || !input.trim() || (readOnly && (!inOffice || overCap)) ? 0.5 : 1 }}>↑</button>
         </div>
+      </div>
       </div>
     </div>
   );
@@ -7151,7 +7575,7 @@ function AnalyticsDashboard({ school, schoolId, viewer, token, T, onClose }) {
   );
 }
 
-function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, publicBase, token, onSetSlug, onIterate, iterating = false, iterProg = { pct: 0, label: "" }, justBuilt = false, onRevealSeen, onStats, guideOpen = false, onGuideOpen, onGuideClose, onOpenMedia, addClassNonce = 0, viewer = null, onSignIn }) {
+function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, publicBase, token, onSetSlug, onIterate, iterating = false, iterProg = { pct: 0, label: "" }, justBuilt = false, onRevealSeen, onStats, guideOpen = false, onGuideOpen, onGuideClose, onOpenMedia, addClassNonce = 0, viewer = null, onSignIn, gates = null }) {
   const school = rec.data;
   const T = themeFor(school);
   const sk = skinCfg(school.skin, T);
@@ -7228,7 +7652,17 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
     })();
   }, [rec.published, rec.id, token]); // eslint-disable-line
   // Game Lab is a creator-only workspace (never a student section); strip any legacy stored ones.
-  const SECTIONS = getSections(school).filter(s => s.kind !== "gamelab");
+  // Plan/free-tier gates (students only): section allowlist + mentor toggle come straight
+  // from the plan the viewer bought (or the school's free-version config).
+  const SECTIONS = getSections(school).filter(s => s.kind !== "gamelab")
+    .filter(s => !readOnly || !gates || !Array.isArray(gates.sections) || !gates.sections.length || gates.sections.includes(s.id))
+    .filter(s => !(readOnly && gates && gates.mentor === false && s.kind === "mentor"));
+  // Lessons beyond the plan's cap stay visibly locked and can't be opened.
+  const gatedLessonNumbers = (() => {
+    if (!readOnly || !gates || !Number(gates.lessonsLimit)) return null;
+    const all = (school.semesters || []).flatMap(s => s.lessons || []);
+    return new Set(all.slice(Number(gates.lessonsLimit)).map(l => l.number));
+  })();
   const [gamelabOpen, setGamelabOpen] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [landingOpen, setLandingOpen] = useState(false);
@@ -7320,7 +7754,10 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const [ckDismissed, setCkDismissed] = useState(() => { try { return !!localStorage.getItem("sx_ck_" + rec.id); } catch { return false; } });
   const [ckCollapsed, setCkCollapsed] = useState(false);
   const dismissCk = () => { setCkDismissed(true); try { localStorage.setItem("sx_ck_" + rec.id, "1"); } catch { } };
-  const enterLesson = (l) => { if (!previewed) { setPreviewed(true); try { localStorage.setItem("sx_prev_" + rec.id, "1"); } catch { } } setActiveLesson(l); };
+  const enterLesson = (l) => {
+    if (gatedLessonNumbers?.has(l.number)) { showToast("🔒 That lesson isn't in your plan — upgrade to unlock it", "err"); return; }
+    if (!previewed) { setPreviewed(true); try { localStorage.setItem("sx_prev_" + rec.id, "1"); } catch { } } setActiveLesson(l);
+  };
   // CTA bricks can jump inside the school: "#tab:<sectionId>" or "#lesson:<number>".
   useEffect(() => {
     const h = (e) => {
@@ -7331,7 +7768,13 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
     window.addEventListener("sx-goto", h); return () => window.removeEventListener("sx-goto", h);
   }); // deliberately unmemoized — always sees fresh sections/lessons
 
-  const progress = rec.progress || {};
+  const progress = (() => {
+    const base = rec.progress || {};
+    if (!gatedLessonNumbers) return base;
+    const p = { ...base };
+    gatedLessonNumbers.forEach(n => { p[n] = "locked"; }); // plan cap wins over any unlock
+    return p;
+  })();
   const xp = rec.xp || 0;
   // Multi-class: which classes exist, and which one is in view (defaults to the first).
   const classes = getClasses(school);
@@ -7446,6 +7889,8 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
     // Branching lesson: the student's chosen fork unlocks the path — skip the linear auto-advance.
     const forked = (school.semesters || []).flatMap(s => s.lessons || []).find(l => l.number === lessonNumber)?.forks?.length;
     if (forked) { onUpdate({ progress: next, xp: nextXp }); return; }
+    // Mentorship experience: the MENTOR opens the next lesson (in conversation), never the app.
+    if (experienceOf(school) === "mentorship") { onUpdate({ progress: next, xp: nextXp }); return; }
     // Unlock the next locked lesson WITHIN THE SAME CLASS (classes advance independently).
     const sems = school.semesters || [];
     let cls = "__main"; sems.forEach(s => { if ((s.lessons || []).some(l => l.number === lessonNumber)) cls = s.classId || "__main"; });
@@ -7601,6 +8046,11 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const total = school.semesters?.reduce((a, s) => a + (s.lessons?.length || 0), 0) || 0;
   const passedCount = Object.values(progress).filter(v => v === "passed").length;
   const pct = total ? Math.round((passedCount / total) * 100) : 0;
+  // Completion ring (progressWidget) — style "circle" replaces the small bar; placement decides where it lives.
+  const pw = school.progressWidget || {};
+  const pwCircle = pw.style === "circle" && total > 0;
+  const pwPlace = pwCircle ? (pw.placement || "hero") : null;
+  const pwDetail = `${passedCount}/${total} lessons${school.gamification ? ` · ${xp} ${curLabel(school)}` : ""}`;
   const TABS = SECTIONS.map(s => [s.id, sectionTitle(s) + (s.kind === "tools" && rec.tools?.length ? ` (${rec.tools.length})` : "")]);
   // Shared LessonView render — used as a modal (cards/arcade) or inline (LMS shell).
   const renderLessonView = (l, inline) => (
@@ -7765,7 +8215,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
         {!readOnly && trainOpen && <TrainingGround school={school} T={T} media={media} onUpdate={onUpdate} onClose={() => setTrainOpen(false)} />}
         {!readOnly && analyticsOpen && <AnalyticsDashboard school={school} schoolId={rec.id} viewer={viewer} token={token} T={T} onClose={() => setAnalyticsOpen(false)} />}
         {calPopup && <CalendarPopup school={school} T={T} onClose={() => setCalPopup(false)} />}
-        {!readOnly && pricingOpen && <PricingModal school={school} schoolId={rec.id} token={token} T={T} onUpdate={onUpdate} onClose={() => setPricingOpen(false)} />}
+        {!readOnly && pricingOpen && <PricingModal school={school} schoolId={rec.id} token={token} userId={viewer?.user?.id} T={T} onUpdate={onUpdate} onClose={() => setPricingOpen(false)} />}
         {!readOnly && badgeEdit && <BadgeRuleEditor index={badgeEdit.i} school={school} T={T} onClose={() => setBadgeEdit(null)} onUpdate={onUpdate} />}
         {certOpen && <CertificateModal school={school} T={T} media={media} viewerName={readOnly ? (viewer ? viewerName(viewer) : "Student Name") : "Student Name"} earned={readOnly} onUpdate={readOnly ? undefined : onUpdate} onClose={() => setCertOpen(false)} />}
 
@@ -7809,7 +8259,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
           </div>
         )}
 
-        {iterating && <div style={{ position: "sticky", top: 12, zIndex: 90, marginBottom: 16 }}><BuildProgress title="Applying your change…" pct={iterProg.pct} label={iterProg.label} facts={[]} /></div>}
+        {iterating && <div style={{ position: "sticky", top: 12, zIndex: 90, marginBottom: 16 }}><IterationLoader pct={iterProg.pct} label={iterProg.label} /></div>}
 
         {school.overlay?.type === "mentorFab" && <MentorFab school={school} bus={bus} T={T} progress={progress} />}
         <div style={{ display: "flex", flexDirection: "column", gap: dens, zoom: school.fontScale || 1, opacity: iterating ? 0.35 : 1, filter: iterating ? "saturate(0.6)" : "none", transition: "opacity 0.4s, filter 0.4s", paddingTop: readOnly ? 18 : 0 }}>
@@ -7861,8 +8311,9 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
               {!readOnly && <button onClick={addClass} disabled={addingClass} title="Create a new class (its own teacher + curriculum) in this school" style={{ background: "none", border: `1px dashed ${T.ba}`, borderRadius: 100, color: T.hi, padding: "6px 13px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 700, opacity: addingClass ? 0.6 : 1 }}>{addingClass ? <><Spinner color={T.hi} />Building class…</> : "＋ Add a class"}</button>}
             </div>
           )}
-          {/* Banner — varies by the school's visual skin */}
-          <div data-guide="hero" style={{ background: B.surface, overflow: "hidden", animation: "fadeUp 0.5s ease", ...(school.cover ? { marginLeft: -20, marginRight: -20, borderRadius: 0, borderBottom: `1px solid ${B.border}` } : { border: `1px solid ${B.border}`, borderRadius: sk.radius }) }}>
+          {/* Banner — varies by the school's visual skin. With the "rail" completion ring the hero shrinks left and the ring gets its own column. */}
+          <div style={pwPlace === "rail" ? { display: "flex", gap: 14, alignItems: "stretch" } : undefined}>
+          <div data-guide="hero" style={{ ...(pwPlace === "rail" ? { flex: 1, minWidth: 0 } : {}), background: B.surface, overflow: "hidden", animation: "fadeUp 0.5s ease", ...((school.cover && pwPlace !== "rail") ? { marginLeft: -20, marginRight: -20, borderRadius: 0, borderBottom: `1px solid ${B.border}` } : { border: `1px solid ${B.border}`, borderRadius: sk.radius }) }}>
             {/* A full cover image IS the header — bleeds edge-to-edge; the title sits on it; no duplicated title/description below. */}
             {school.cover ? <div style={{ position: "relative" }}>
               <img src={school.cover} alt="" style={{ width: "100%", height: Number(school.coverHeight) > 0 ? Number(school.coverHeight) : "clamp(200px,30vw,300px)", objectFit: "cover", objectPosition: school.coverPos || "center", display: "block" }} />
@@ -7872,6 +8323,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
                 <div style={{ fontFamily: sk.font, fontSize: "clamp(24px,5vw,38px)", fontWeight: 800, letterSpacing: -0.6, color: "#fff", textShadow: "0 2px 18px rgba(0,0,0,0.55)" }}><EditableText value={school.name} readOnly={readOnly} onSave={v => onUpdate({ data: { ...school, name: v } })} /></div>
                 {hero.tagline !== false && school.tagline && <div style={{ fontSize: 14.5, color: "rgba(255,255,255,0.92)", marginTop: 6, fontStyle: sk.font.includes("Lora") ? "normal" : "italic", textShadow: "0 1px 10px rgba(0,0,0,0.55)" }}><EditableText value={school.tagline} readOnly={readOnly} onSave={v => onUpdate({ data: { ...school, tagline: v } })} /></div>}
               </div>}
+              {pwPlace === "hero" && <div style={{ position: "absolute", right: 22, bottom: 18 }}><CompletionCircle pct={pct} size={92} T={T} onDark /></div>}
               {!readOnly && <div style={{ position: "absolute", top: 8, right: 8, display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 3, background: "rgba(0,0,0,0.45)", borderRadius: 8, padding: 4 }} title="Set the cover's focal point">
                 {["0% 0%", "50% 0%", "100% 0%", "0% 50%", "50% 50%", "100% 50%", "0% 100%", "50% 100%", "100% 100%"].map(p => (
                   <button key={p} onClick={() => onUpdate({ data: { ...school, coverPos: p } })} title={p} style={{ width: 13, height: 13, borderRadius: 3, cursor: "pointer", border: "none", background: (school.coverPos || "50% 50%") === p ? "#fff" : "rgba(255,255,255,0.35)" }} />
@@ -7890,7 +8342,8 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
               const heroBg = onPhoto ? `${school.heroTint === false ? "" : "linear-gradient(rgba(8,8,16,0.48),rgba(8,8,16,0.62)),"}url("${school.heroImage}") center/cover` : (T.heroGrad || sk.top);
               const onC = onPhoto || sk.onColor; // light text when on a photo/colour
               return (
-            <div style={{ padding: sk.align === "center" ? "34px 28px 26px" : "30px 28px 22px", background: heroBg, borderBottom: `1px solid ${B.border}`, textAlign: sk.align, position: "relative" }}>
+            <div style={{ padding: sk.align === "center" ? "34px 28px 26px" : "30px 28px 22px", paddingRight: pwPlace === "hero" ? 138 : undefined, background: heroBg, borderBottom: `1px solid ${B.border}`, textAlign: sk.align, position: "relative" }}>
+              {pwPlace === "hero" && <div style={{ position: "absolute", right: 22, top: "50%", transform: "translateY(-50%)" }}><CompletionCircle pct={pct} size={96} T={T} onDark={onC} /></div>}
               {sk.accentBar && !onPhoto && <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 4, background: `linear-gradient(90deg,${T.p},${T.a})` }} />}
               {!readOnly && <div style={{ position: "absolute", top: 8, right: 8, display: "flex", gap: 6 }}>
                 <button onClick={() => { if (media) setBgPick("hero"); else { const u = window.prompt("Hero photo URL (https):", school.heroImage || ""); if (u != null) onUpdate({ data: { ...school, heroImage: u.trim() || undefined } }); } }} title="Photo behind the title" style={{ background: "rgba(0,0,0,0.4)", border: "none", borderRadius: 8, color: "#fff", padding: "4px 9px", cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>📷 Hero photo</button>
@@ -7912,12 +8365,21 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
                 ))}
               </div>
               <div style={{ textAlign: "right", minWidth: school.progressSkin?.code ? 260 : undefined }}>
-                <div style={{ fontSize: 12, color: B.muted, marginBottom: 5 }}>{passedCount}/{total} lessons{school.gamification ? ` · ${xp} ${curLabel(school)}` : ""}</div>
-                {school.progressSkin?.code
-                  ? <ProgressSkin code={school.progressSkin.code} pct={pct} T={T} />
-                  : <div style={{ width: 130, height: 5, background: B.surface3, borderRadius: 3, overflow: "hidden", marginLeft: "auto" }}><div style={{ width: `${pct}%`, height: "100%", background: T.p, borderRadius: 3, transition: "width 0.5s ease" }} /></div>}
+                {pwPlace === "meta" ? <CompletionCircle pct={pct} size={86} T={T} detail={pwDetail} /> : <>
+                  <div style={{ fontSize: 12, color: B.muted, marginBottom: 5 }}>{passedCount}/{total} lessons{school.gamification ? ` · ${xp} ${curLabel(school)}` : ""}</div>
+                  {school.progressSkin?.code
+                    ? <ProgressSkin code={school.progressSkin.code} pct={pct} T={T} />
+                    : !pwCircle && <div style={{ width: 130, height: 5, background: B.surface3, borderRadius: 3, overflow: "hidden", marginLeft: "auto" }}><div style={{ width: `${pct}%`, height: "100%", background: T.p, borderRadius: 3, transition: "width 0.5s ease" }} /></div>}
+                </>}
               </div>
             </div>
+          </div>
+          {/* "rail" — the completion ring in its own column, pushing the hero smaller to the left */}
+          {pwPlace === "rail" && (
+            <div style={{ flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", background: B.surface, border: `1px solid ${B.border}`, borderRadius: sk.radius, padding: "18px 24px", animation: "fadeUp 0.5s ease" }}>
+              <CompletionCircle pct={pct} size={118} T={T} detail={pwDetail} />
+            </div>
+          )}
           </div>
 
           {/* The school's signature centerpiece — only when summoned via the build chat (no longer a default). */}
@@ -7950,6 +8412,10 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
           {/* Tabs + section content — two-column when navStyle is "sidebar" */}
           <div style={{ display: "flex", flexDirection: sidebar ? "row" : "column", gap: sidebar ? 16 : dens, alignItems: "flex-start" }}>
           {!stepsShell && (<div style={{ position: "sticky", top: 10, zIndex: 80, ...(sidebar ? { width: Math.round(200 * (school.tabScale || 1)), flexShrink: 0 } : { width: "100%" }) }}>
+            {/* "nav" — the completion ring above the section nav / left sidebar */}
+            {pwPlace === "nav" && (sidebar
+              ? <div style={{ marginBottom: 10, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 12, padding: "14px 10px", display: "flex", justifyContent: "center" }}><CompletionCircle pct={pct} size={104} T={T} detail={pwDetail} /></div>
+              : <div style={{ marginBottom: 8, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 12, padding: "8px 14px", display: "flex", alignItems: "center", gap: 12 }}><CompletionCircle pct={pct} size={62} T={T} label="" /><div><div style={{ fontSize: 12.5, fontWeight: 800, color: B.white }}>{pct}% complete</div><div style={{ fontSize: 11, color: B.muted }}>{pwDetail}</div></div></div>)}
             <div data-guide="tabs" style={{ ...nv.bar, zoom: school.tabScale || 1 }}>
               {TABS.map(([k, l], ti) => (
                 <button key={k} draggable={!readOnly}
@@ -8212,10 +8678,14 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
               );
             })()}
           </>))}
-          {activeTab === "mentor" && <MentorOffice school={school} T={T} chat={rec.mentorChat || []} onChat={(msgs) => onUpdate({ mentorChat: msgs })} bus={bus} onIngest={ingestOutput} progress={progress} onUpdate={onUpdate} readOnly={readOnly} />}
+          {activeTab === "mentor" && <MentorOffice school={school} T={T} chat={rec.mentorChat || []} onChat={(msgs) => onUpdate({ mentorChat: msgs })} bus={bus} onIngest={ingestOutput} progress={progress} onUpdate={onUpdate} readOnly={readOnly} planCap={readOnly ? gates?.msgsPerDay : null}
+            onPassLesson={handlePass} onOpenLesson={(n) => onUpdate({ progress: { ...progress, [n]: progress[n] === "passed" ? "passed" : "active" } })} onEnterLesson={(l) => { const lessonsSec = SECTIONS.find(s => s.kind === "lessons"); if (shell === "lms" && lessonsSec) setTab(lessonsSec.id); enterLesson(l); }} />}
           {activeTab === "tools" && <ToolsSection rec={rec} T={T} onUpdate={onUpdate} buildTool={buildTool} buildingTool={buildingTool} readOnly={readOnly} onReloadIdeas={reloadIdeas} onEditTool={editTool} />}
           {SECTIONS.filter(s => s.kind === "community").map(sec => activeTab === sec.id
-            ? <CommunityBoard key={sec.id} school={school} schoolId={rec.id} T={T} viewer={viewer} onSignIn={onSignIn} isCreator={!readOnly} onUpdate={onUpdate} />
+            ? <CommunityHub key={sec.id} school={school} schoolId={rec.id} T={T} viewer={viewer} onSignIn={onSignIn} isCreator={!readOnly} onUpdate={onUpdate} />
+            : null)}
+          {SECTIONS.filter(s => s.kind === "classroom").map(sec => activeTab === sec.id
+            ? <ClassroomSection key={sec.id} school={school} schoolId={rec.id} T={T} viewer={viewer} onSignIn={onSignIn} isCreator={!readOnly} onUpdate={onUpdate} />
             : null)}
           {SECTIONS.filter(s => s.kind === "dashboard").map(sec => activeTab === sec.id
             ? <DashboardSection key={sec.id} section={sec} rec={rec} T={T} onUpdate={onUpdate} readOnly={readOnly} school={school} onIngest={ingestOutput} />
@@ -8246,7 +8716,7 @@ function Home({ onCreated, autofocus, onAutofocusDone, session, onRequireAuth })
   const [attaching, setAttaching] = useState(false);
   const [questions, setQuestions] = useState([]);    // proactive follow-ups
   const [answers, setAnswers] = useState({});
-  const [struct, setStruct] = useState({ layout: "auto", depth: "auto", interactivity: "auto" });
+  const [struct, setStruct] = useState({ layout: "auto", depth: "auto", interactivity: "auto", experience: "auto" });
   const [showStruct, setShowStruct] = useState(false);
   const [mode, setMode] = useState("normal"); // generation latitude: fast | normal | super
   const taRef = useRef(null);
@@ -8256,6 +8726,7 @@ function Home({ onCreated, autofocus, onAutofocusDone, session, onRequireAuth })
 
   function structHint() {
     const h = [];
+    if (struct.experience !== "auto") h.push(`CONFIRMED: the creator explicitly chose the "${struct.experience}" learning experience (${EXPERIENCES[struct.experience]?.desc}). Build exactly that experience — do not ask to confirm it.`);
     if (struct.layout !== "auto") h.push(`Use the "${struct.layout}" layout (${LAYOUTS[struct.layout]?.kinds.join(" + ")}).`);
     if (struct.depth !== "auto") h.push({ short: "Keep it short — about 3 lessons.", standard: "Standard depth — about 6 lessons.", deep: "Go deep — about 10 lessons." }[struct.depth]);
     if (struct.interactivity !== "auto") h.push({ light: "Keep it light — mostly reading/video, minimal interaction.", standard: "A balanced mix of reading and interactive practice.", hands: "Make it highly interactive — lots of practice, games, and tools." }[struct.interactivity]);
@@ -8288,11 +8759,15 @@ function Home({ onCreated, autofocus, onAutofocusDone, session, onRequireAuth })
       const plan = await apiJSON(ARCHITECT_SYS, [{ role: "user", content: planMsg }], 6000, "sonnet");
       if (plan.needMoreInfo) { setClarifyQ(plan.needMoreInfo); setClarifyA(""); setPhase("clarify"); return; }
       const content = plan.school || plan;
-      if (!content?.name || !Array.isArray(content.semesters) || !content.semesters.some(s => s.lessons?.length)) throw new Error("Couldn't draft the lessons — please try again or simplify the prompt.");
+      const exp = EXPERIENCES[content?.experience] ? content.experience : "lessons";
+      const needsLessons = exp === "lessons" || exp === "mentorship";
+      if (!content?.name || (needsLessons && (!Array.isArray(content.semesters) || !content.semesters.some(s => s.lessons?.length)))) throw new Error("Couldn't draft the lessons — please try again or simplify the prompt.");
+      if (!needsLessons) content.semesters = content.semesters || [];
 
       // PHASE 2 — author block data per semester (parallel, budgeted, graceful fallback).
       const facts = schoolFacts(content);
-      setProg({ pct: 30, label: `Writing the lessons for “${content.name}”…`, facts, preview: content });
+      const expLabel = exp === "community" ? `Opening the rooms of “${content.name}”…` : exp === "classroom" ? `Setting up the classroom for “${content.name}”…` : exp === "mentorship" ? `Preparing ${content.mentorName || "your mentor"}'s syllabus…` : `Writing the lessons for “${content.name}”…`;
+      setProg({ pct: 30, label: expLabel, facts, preview: content });
       // SUPER mode re-enables the bespoke "X factor" generators (a signature soul + a custom progress
       // metaphor + a themed XP currency), authored in parallel with lessons. Fast/Normal stay lean.
       const extraP = mode === "super" ? [
@@ -8417,6 +8892,14 @@ function Home({ onCreated, autofocus, onAutofocusDone, session, onRequireAuth })
               <button onClick={() => setAttached(null)} style={{ marginLeft: "auto", background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 13 }}>✕</button>
             </div>
           )}
+          {/* Learning experience picker — Auto lets the Architect classify; a pick is honored verbatim. */}
+          <div style={{ display: "flex", gap: 6, marginTop: 12, flexWrap: "wrap", alignItems: "center" }}>
+            <span style={{ fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.2, color: B.muted, marginRight: 2 }}>Experience</span>
+            {[["auto", "✨ Auto"], ...Object.entries(EXPERIENCES).map(([k, e]) => [k, `${e.icon} ${e.label}`])].map(([k, l]) => (
+              <button key={k} onClick={() => setStruct(s => ({ ...s, experience: k }))} title={k === "auto" ? "Let the Architect decide from your prompt" : EXPERIENCES[k]?.desc}
+                style={{ background: struct.experience === k ? "rgba(6,182,212,0.13)" : B.surface3, border: `1px solid ${struct.experience === k ? "rgba(6,182,212,0.5)" : B.borderMid}`, borderRadius: 100, color: struct.experience === k ? "#67E8F9" : B.mutedMid, padding: "5px 12px", cursor: "pointer", fontFamily: "inherit", fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap" }}>{l}</button>
+            ))}
+          </div>
           <div style={{ display: "flex", gap: 6, marginTop: 12, flexWrap: "wrap" }}>
             {[["fast", "⚡ Fast", "Quick & templated"], ["normal", "✨ Normal", "Balanced · recommended"], ["super", "🚀 Super", "Fully unchained · more tokens"]].map(([k, l, dsc]) => (
               <button key={k} onClick={() => setMode(k)} title={dsc} style={{ flex: "1 1 130px", background: mode === k ? "rgba(124,58,237,0.14)" : B.surface3, border: `1px solid ${mode === k ? "rgba(124,58,237,0.5)" : B.borderMid}`, borderRadius: 10, color: mode === k ? "#C4B5FD" : B.mutedMid, padding: "8px 11px", cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
@@ -8505,7 +8988,7 @@ function Home({ onCreated, autofocus, onAutofocusDone, session, onRequireAuth })
           </div>
         </div>
       )}
-      {phase === "building" && <div style={{ marginTop: 28 }}><BuildProgress pct={prog.pct} label={prog.label} facts={prog.facts} preview={prog.preview} /></div>}
+      {phase === "building" && <div style={{ marginTop: 28 }}><BuildProgress pct={prog.pct} label={prog.label} facts={prog.facts} preview={prog.preview} experience={struct.experience !== "auto" ? struct.experience : null} /></div>}
       {phase === "error" && (
         <div style={{ background: "rgba(239,68,68,0.07)", border: "1px solid rgba(239,68,68,0.22)", borderRadius: 14, padding: "16px 20px", marginTop: 16, display: "flex", alignItems: "center", gap: 12 }}>
           <span style={{ fontSize: 20 }}>⚠️</span><div style={{ fontSize: 13, color: B.mutedMid }}>{error} — adjust your prompt and try again.</div>
@@ -9030,7 +9513,7 @@ function WidgetEditor({ draft, isNew, T, media, school, onSave, onDelete, onClos
   );
 }
 
-function CommunityBoard({ school, schoolId, T, viewer, onSignIn, isCreator, onUpdate }) {
+function CommunityBoard({ school, schoolId, T, viewer, onSignIn, isCreator, onUpdate, room = null, hideExtras = false }) {
   const [posts, setPosts] = useState(null);
   const [profiles, setProfiles] = useState({});
   const [draft, setDraft] = useState("");
@@ -9040,17 +9523,18 @@ function CommunityBoard({ school, schoolId, T, viewer, onSignIn, isCreator, onUp
   const me = viewer?.user?.id;
   async function load() {
     try {
-      const rows = await supaFetch(`/rest/v1/community_posts?school_id=eq.${encodeURIComponent(schoolId)}&order=created_at.asc&limit=500`, viewer ? { token: viewer.token } : {});
+      const roomQ = room ? `&room=eq.${encodeURIComponent(room)}` : `&room=is.null`;
+      const rows = await supaFetch(`/rest/v1/community_posts?school_id=eq.${encodeURIComponent(schoolId)}${roomQ}&order=created_at.asc&limit=500`, viewer ? { token: viewer.token } : {});
       setPosts(rows || []);
       setProfiles(await fetchProfiles((rows || []).map(r => r.author_id), viewer?.token));
     } catch { setPosts([]); }
   }
-  useEffect(() => { load(); const id = setInterval(load, 20000); return () => clearInterval(id); }, [schoolId]); // eslint-disable-line
+  useEffect(() => { load(); const id = setInterval(load, 20000); return () => clearInterval(id); }, [schoolId, room]); // eslint-disable-line
   async function post(body, parent_id = null) {
     const t = body.trim(); if (!t || !viewer || busy) return;
     setBusy(true);
     try {
-      await supaFetch(`/rest/v1/community_posts`, { method: "POST", token: viewer.token, headers: { Prefer: "return=minimal" }, body: [{ school_id: schoolId, author_id: me, author_name: viewerName(viewer), body: t.slice(0, 3000), parent_id }] });
+      await supaFetch(`/rest/v1/community_posts`, { method: "POST", token: viewer.token, headers: { Prefer: "return=minimal" }, body: [{ school_id: schoolId, author_id: me, author_name: viewerName(viewer), body: t.slice(0, 3000), parent_id, room: room || null }] });
       setDraft(""); setReplyTo(null); setReplyDraft(""); await load();
     } catch { }
     setBusy(false);
@@ -9092,8 +9576,8 @@ function CommunityBoard({ school, schoolId, T, viewer, onSignIn, isCreator, onUp
   );
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <CommunityWidgets school={school} T={T} isCreator={isCreator} onUpdate={onUpdate} />
-      {onUpdate && <CommunityBlocks school={school} T={T} isCreator={isCreator} onUpdate={onUpdate} zone="top" />}
+      {!hideExtras && <CommunityWidgets school={school} T={T} isCreator={isCreator} onUpdate={onUpdate} />}
+      {!hideExtras && onUpdate && <CommunityBlocks school={school} T={T} isCreator={isCreator} onUpdate={onUpdate} zone="top" />}
       {viewer ? (
         <div style={{ display: "flex", gap: 10, background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 14, padding: "13px 15px" }}>
           <Avatar name={viewerName(viewer)} size={32} T={T} />
@@ -9110,7 +9594,174 @@ function CommunityBoard({ school, schoolId, T, viewer, onSignIn, isCreator, onUp
       {posts === null ? <div style={{ textAlign: "center", color: B.muted, fontSize: 13, padding: 20 }}>Loading the board…</div>
         : tops.length === 0 ? <div style={{ textAlign: "center", color: B.muted, fontSize: 13, padding: 26, border: `1px dashed ${B.borderMid}`, borderRadius: 14 }}>No posts yet — {isCreator ? "start the first discussion topic." : "be the first to say hi 👋"}</div>
         : tops.map(p => <PostCard key={p.id} p={p} />)}
-      {onUpdate && <CommunityBlocks school={school} T={T} isCreator={isCreator} onUpdate={onUpdate} zone="bottom" />}
+      {!hideExtras && onUpdate && <CommunityBlocks school={school} T={T} isCreator={isCreator} onUpdate={onUpdate} zone="bottom" />}
+    </div>
+  );
+}
+
+// ── CLASSROOM — the live-teaching experience: a broadcast frame front and center
+//    (YouTube/Vimeo/Twitch embed directly; Zoom links get a "join the room" card since
+//    Zoom can't be iframed without their SDK), the session calendar beside it, and a
+//    class discussion board underneath. ──
+function classroomEmbed(url) {
+  const u = String(url || "").trim();
+  if (!u) return null;
+  let m = u.match(/(?:youtube\.com\/(?:watch\?v=|live\/|embed\/)|youtu\.be\/)([\w-]{6,})/i);
+  if (m) return { kind: "iframe", src: `https://www.youtube.com/embed/${m[1]}` };
+  m = u.match(/vimeo\.com\/(?:event\/)?(\d+)/i);
+  if (m) return { kind: "iframe", src: `https://player.vimeo.com/video/${m[1]}` };
+  m = u.match(/twitch\.tv\/([\w_]+)/i);
+  if (m) return { kind: "iframe", src: `https://player.twitch.tv/?channel=${m[1]}&parent=${window.location.hostname}` };
+  if (/zoom\.us\//i.test(u)) return { kind: "join", href: u, label: "Zoom" };
+  if (/^https?:\/\//i.test(u)) return { kind: "join", href: u, label: "the live room" };
+  return null;
+}
+function nextClassEvent(events) {
+  const now = Date.now();
+  const list = (events || []).map(ev => ({ ...ev, at: new Date(`${ev.date || ""}T${ev.time || "00:00"}`).getTime() })).filter(ev => !isNaN(ev.at)).sort((a, b) => a.at - b.at);
+  return list.find(ev => ev.at > now - 90 * 60000) || null; // a session counts as "now" for 90 min
+}
+function ClassroomSection({ school, schoolId, T, viewer, onSignIn, isCreator, onUpdate }) {
+  const cr = school.classroom || {};
+  const setCr = (p) => onUpdate?.({ data: { ...school, classroom: { ...cr, ...p } } });
+  const embed = classroomEmbed(cr.streamUrl);
+  const nextEv = nextClassEvent(cr.events);
+  const [, tick] = useState(0);
+  useEffect(() => { const id = setInterval(() => tick(t => t + 1), 30000); return () => clearInterval(id); }, []);
+  const liveNow = nextEv && Math.abs(nextEv.at - Date.now()) < 90 * 60000;
+  const countdown = (at) => {
+    const d = at - Date.now(); if (d <= 0) return "now";
+    const days = Math.floor(d / 86400000), h = Math.floor((d % 86400000) / 3600000), min = Math.floor((d % 3600000) / 60000);
+    return days > 0 ? `in ${days}d ${h}h` : h > 0 ? `in ${h}h ${min}m` : `in ${min}m`;
+  };
+  const addEvent = () => {
+    const title = window.prompt("Session title:"); if (!title || !title.trim()) return;
+    const date = window.prompt("Date (YYYY-MM-DD):", new Date(Date.now() + 86400000).toISOString().slice(0, 10)) || "";
+    const time = window.prompt("Time (HH:MM, 24h):", "18:00") || "";
+    setCr({ events: [...(cr.events || []), { title: title.trim(), date: date.trim(), time: time.trim() }] });
+  };
+  const evs = (cr.events || []).map((ev, i) => ({ ...ev, i, at: new Date(`${ev.date || ""}T${ev.time || "00:00"}`).getTime() })).sort((a, b) => (a.at || 0) - (b.at || 0));
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div style={{ display: "flex", gap: 14, alignItems: "stretch", flexWrap: "wrap" }}>
+        {/* Broadcast frame */}
+        <div style={{ flex: "2 1 420px", minWidth: 0 }}>
+          <div style={{ position: "relative", borderRadius: 16, overflow: "hidden", border: `1px solid ${liveNow ? T.ba : B.border}`, background: "#08080f", aspectRatio: "16/9", boxShadow: liveNow ? `0 0 44px ${T.pg}` : "none" }}>
+            {embed?.kind === "iframe" ? (
+              <iframe title="Live classroom" src={embed.src} allow="autoplay; fullscreen; picture-in-picture" allowFullScreen style={{ position: "absolute", inset: 0, width: "100%", height: "100%", border: "none" }} />
+            ) : (
+              <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12, padding: 20, textAlign: "center" }}>
+                <div style={{ width: 62, height: 62, borderRadius: "50%", background: liveNow ? T.grad : B.surface2, border: `1px solid ${liveNow ? "transparent" : B.borderMid}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, boxShadow: liveNow ? `0 0 34px ${T.pg}` : "none" }}>🎥</div>
+                <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 17, fontWeight: 800, color: "#fff" }}>{cr.title || `${school.name} — Live Classroom`}</div>
+                {cr.about && <div style={{ fontSize: 12.5, color: "rgba(255,255,255,0.7)", maxWidth: 420, lineHeight: 1.6 }}>{cr.about}</div>}
+                {embed?.kind === "join" ? (
+                  <a href={embed.href} target="_blank" rel="noopener noreferrer" style={{ background: liveNow ? T.grad : B.surface2, border: liveNow ? "none" : `1px solid ${B.borderMid}`, borderRadius: 12, color: "#fff", padding: "12px 26px", fontSize: 14.5, fontWeight: 800, textDecoration: "none" }}>
+                    {liveNow ? "🔴 Join the live session →" : `Open ${embed.label} →`}
+                  </a>
+                ) : (
+                  <div style={{ fontSize: 12.5, color: "rgba(255,255,255,0.55)" }}>{isCreator ? "Paste your Zoom / stream link below — students will join from here." : nextEv ? `Next session ${countdown(nextEv.at)} — the room opens here.` : "No stream link yet — check the calendar for the next session."}</div>
+                )}
+              </div>
+            )}
+            {liveNow && <span style={{ position: "absolute", top: 12, left: 14, display: "inline-flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 800, color: "#fff", letterSpacing: 1, background: "rgba(220,38,38,0.9)", borderRadius: 100, padding: "3px 10px" }}><span style={{ width: 7, height: 7, borderRadius: "50%", background: "#fff", animation: "pulse 1.2s infinite" }} />LIVE</span>}
+          </div>
+          {isCreator && (
+            <div style={{ display: "flex", gap: 8, marginTop: 10, alignItems: "center" }}>
+              <input value={cr.streamUrl || ""} onChange={e => setCr({ streamUrl: e.target.value.trim() })} placeholder="Zoom meeting link, YouTube Live, Vimeo or Twitch URL…" style={{ flex: 1, background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 10, color: B.white, fontFamily: "inherit", fontSize: 12.5, padding: "9px 12px" }} />
+              <span style={{ fontSize: 10.5, color: B.muted, flexShrink: 0 }}>YouTube/Vimeo/Twitch embed · Zoom opens in the app</span>
+            </div>
+          )}
+        </div>
+        {/* Session calendar */}
+        <div style={{ flex: "1 1 240px", background: B.surface, border: `1px solid ${B.border}`, borderRadius: 16, padding: "15px 16px", display: "flex", flexDirection: "column", gap: 9, minWidth: 240 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.4, color: T.p }}>📅 Scheduled sessions</span>
+            {isCreator && <button onClick={addEvent} style={{ background: "none", border: `1px dashed ${B.borderMid}`, borderRadius: 7, color: B.mutedMid, padding: "2px 9px", cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>＋</button>}
+          </div>
+          {evs.length === 0 && <div style={{ fontSize: 12, color: B.muted, lineHeight: 1.6 }}>{isCreator ? "No sessions yet — add your first live class." : "No sessions scheduled yet."}</div>}
+          {evs.map(ev => { const isNext = !!(nextEv && ev.title === nextEv.title && ev.at === nextEv.at); return (
+            <div key={ev.i} style={{ background: isNext ? T.ps : B.surface2, border: `1px solid ${isNext ? T.ba : B.border}`, borderRadius: 11, padding: "9px 11px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ fontSize: 12.5, fontWeight: 700, color: isNext ? T.hi : B.white, flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{ev.title}</span>
+                {isCreator && <button onClick={() => setCr({ events: (cr.events || []).filter((_, xi) => xi !== ev.i) })} style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 11 }}>✕</button>}
+              </div>
+              <div style={{ fontSize: 11, color: B.muted, marginTop: 2 }}>{ev.date}{ev.time ? ` · ${ev.time}` : ""}{!isNaN(ev.at) && ev.at > Date.now() ? ` · ${countdown(ev.at)}` : ""}</div>
+              {ev.desc && <div style={{ fontSize: 11, color: B.mutedMid, marginTop: 3, lineHeight: 1.5 }}>{ev.desc}</div>}
+            </div>
+          ); })}
+        </div>
+      </div>
+      {/* Class discussion under the stream */}
+      <div>
+        <div style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.4, color: T.p, marginBottom: 9 }}>💬 Class discussion</div>
+        <CommunityBoard school={school} schoolId={schoolId} T={T} viewer={viewer} onSignIn={onSignIn} isCreator={isCreator} onUpdate={onUpdate} room="classroom" hideExtras />
+      </div>
+    </div>
+  );
+}
+
+// ── COMMUNITY HUB — the community-focused experience's shell. Three styles:
+//    classic  = the existing single feed with widgets;
+//    discord  = a left rail of rooms, each room its own board;
+//    topbar   = Skool-style TOP MENU (deliberately NOT sticky) with rooms + a Library page.
+//    Rooms live in school.community.rooms; posts are partitioned by the "room" column. ──
+function communityRooms(school) {
+  const raw = school?.community?.rooms;
+  const rooms = (Array.isArray(raw) ? raw : []).filter(r => r && r.title).map((r, i) => ({ id: r.id || slugify(r.title) || `room-${i}`, title: r.title, icon: r.icon || "#", about: r.about || "" }));
+  return rooms.length ? rooms : [{ id: null, title: "General", icon: "💬", about: "The main discussion" }];
+}
+function CommunityHub({ school, schoolId, T, viewer, onSignIn, isCreator, onUpdate }) {
+  const style = ["classic", "discord", "topbar"].includes(school.communityStyle) ? school.communityStyle : "classic";
+  const rooms = communityRooms(school);
+  const [roomId, setRoomId] = useState(rooms[0]?.id ?? null);
+  const active = rooms.find(r => r.id === roomId) || rooms[0];
+  const setRooms = (next) => onUpdate?.({ data: { ...school, community: { ...(school.community || {}), rooms: next } } });
+  const addRoom = () => { const t = window.prompt("Room name:"); if (!t || !t.trim()) return; const r = { id: slugify(t.trim()) || `room-${Date.now()}`, title: t.trim(), icon: "#" }; setRooms([...(school.community?.rooms || rooms.filter(x => x.id)), r]); setRoomId(r.id); };
+  const delRoom = (id) => { if (!window.confirm("Remove this room? Its posts stay in the database but won't be shown.")) return; const next = communityRooms(school).filter(r => r.id !== id); setRooms(next); if (roomId === id) setRoomId(next[0]?.id ?? null); };
+  const board = (extras) => <CommunityBoard school={school} schoolId={schoolId} T={T} viewer={viewer} onSignIn={onSignIn} isCreator={isCreator} onUpdate={onUpdate} room={active?.id || null} hideExtras={!extras} />;
+  if (style === "classic" || rooms.length <= 1 && style !== "topbar") {
+    return <CommunityBoard school={school} schoolId={schoolId} T={T} viewer={viewer} onSignIn={onSignIn} isCreator={isCreator} onUpdate={onUpdate} room={null} />;
+  }
+  if (style === "discord") return (
+    <div style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
+      <div style={{ width: 190, flexShrink: 0, position: "sticky", top: 10, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: 9, display: "flex", flexDirection: "column", gap: 2 }}>
+        <div style={{ fontSize: 9.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.3, color: B.muted, padding: "3px 8px 7px" }}>{school.name}</div>
+        {rooms.map(r => (
+          <div key={r.id ?? "general"} style={{ display: "flex", alignItems: "center" }}>
+            <button onClick={() => setRoomId(r.id)} title={r.about} style={{ flex: 1, textAlign: "left", background: (active?.id ?? null) === r.id ? T.ps : "none", border: `1px solid ${(active?.id ?? null) === r.id ? T.ba : "transparent"}`, borderRadius: 8, color: (active?.id ?? null) === r.id ? T.hi : B.mutedMid, padding: "7px 9px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: (active?.id ?? null) === r.id ? 700 : 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.icon} {r.title}</button>
+            {isCreator && r.id && <button onClick={() => delRoom(r.id)} title="Remove room" style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 10, padding: "0 4px" }}>✕</button>}
+          </div>
+        ))}
+        {isCreator && <button onClick={addRoom} style={{ background: "none", border: `1px dashed ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "6px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit", marginTop: 5 }}>＋ Add room</button>}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        {active?.about && <div style={{ fontSize: 12, color: B.muted, marginBottom: 10, padding: "0 2px" }}>{active.icon} <b style={{ color: B.mutedMid }}>{active.title}</b> — {active.about}</div>}
+        {board(rooms.indexOf(active) === 0)}
+      </div>
+    </div>
+  );
+  // topbar (Skool-style) — a plain menu row that scrolls WITH the page (not sticky), rooms + Library.
+  const items = [...rooms.map(r => ({ k: r.id ?? "general", label: `${r.icon} ${r.title}`, kind: "room", room: r })), { k: "__library", label: "📚 Library", kind: "library" }];
+  const [top, setTop] = [roomId === "__library" ? "__library" : (active?.id ?? "general"), (k) => setRoomId(k === "general" ? rooms[0]?.id ?? null : k)];
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 4, flexWrap: "wrap", borderBottom: `2px solid ${B.border}`, marginBottom: 14 }}>
+        {items.map(it => { const on = top === it.k; return (
+          <button key={it.k} onClick={() => setTop(it.k)} style={{ background: "none", border: "none", borderBottom: `2.5px solid ${on ? T.p : "transparent"}`, marginBottom: -2, color: on ? B.white : B.mutedMid, padding: "9px 14px", cursor: "pointer", fontSize: 13.5, fontWeight: on ? 800 : 600, fontFamily: "inherit" }}>{it.label}</button>
+        ); })}
+        {isCreator && <button onClick={addRoom} title="Add a community section" style={{ background: "none", border: "none", color: B.muted, padding: "9px 10px", cursor: "pointer", fontSize: 15, fontFamily: "inherit" }}>＋</button>}
+      </div>
+      {top === "__library"
+        ? <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <CommunityWidgets school={school} T={T} isCreator={isCreator} onUpdate={onUpdate} />
+            {onUpdate && <CommunityBlocks school={school} T={T} isCreator={isCreator} onUpdate={onUpdate} zone="top" />}
+            {onUpdate && <CommunityBlocks school={school} T={T} isCreator={isCreator} onUpdate={onUpdate} zone="bottom" />}
+          </div>
+        : <>
+            {active?.about && <div style={{ fontSize: 12, color: B.muted, marginBottom: 10 }}>{active.about}</div>}
+            {isCreator && active?.id && <div style={{ marginBottom: 8 }}><button onClick={() => delRoom(active.id)} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 7, color: B.muted, padding: "3px 10px", cursor: "pointer", fontSize: 10.5, fontFamily: "inherit" }}>Remove this section</button></div>}
+            {board(false)}
+          </>}
     </div>
   );
 }
@@ -9347,8 +9998,21 @@ function StudentProfileModal({ viewer, T, xp, passed, total, schoolName, onClose
   const [prof, setProf] = useState(null);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
+  const [keys, setKeys] = useState([]); // School Keys the creator issued to THIS student
   const avatarRef = useRef(null);
   useEffect(() => { loadProfile(viewer.token, viewer.user.id).then(p => { setProf(p); setName(p?.display_name || viewerName(viewer)); }); }, []); // eslint-disable-line
+  useEffect(() => {
+    (async () => {
+      try {
+        const rows = await supaFetch(`/rest/v1/coupons?issued_to=eq.${viewer.user.id}&select=id,school_id,code,label,duration_days,expires_at,redeemed,max_redemptions&order=created_at.desc&limit=30`, { token: viewer.token });
+        if (!rows?.length) { setKeys([]); return; }
+        const ids = [...new Set(rows.map(r => r.school_id))];
+        let names = {};
+        try { const ss = await supaFetch(`/rest/v1/schools?select=id,data->>name&id=in.(${ids.map(encodeURIComponent).join(",")})`, { token: viewer.token }); (ss || []).forEach(s => { names[s.id] = s.name; }); } catch { }
+        setKeys(rows.map(r => ({ ...r, schoolName: names[r.school_id] || "" })));
+      } catch { setKeys([]); }
+    })();
+  }, []); // eslint-disable-line
   async function saveName() {
     const n = name.trim(); if (!n) return;
     try { await saveProfile(viewer.token, viewer.user.id, { display_name: n }); setProf(p => ({ ...(p || {}), display_name: n })); } catch { }
@@ -9384,6 +10048,26 @@ function StudentProfileModal({ viewer, T, xp, passed, total, schoolName, onClose
               <div style={{ flex: 1, height: 6, background: "var(--surface3)", borderRadius: 3, overflow: "hidden" }}><div style={{ width: `${Math.round((passed / total) * 100)}%`, height: "100%", background: T.grad, borderRadius: 3 }} /></div>
               <span style={{ fontSize: 12, color: B.mutedMid, fontWeight: 700, whiteSpace: "nowrap" }}>{passed}/{total} lessons · {xp} XP</span>
             </div>
+          </div>
+        )}
+        {/* SCHOOL KEYS — entry codes creators sent after confirming a (PayPal) payment.
+            Monthly keys expire; renewing gets you a fresh one. */}
+        {keys.length > 0 && (
+          <div style={{ background: "var(--surface2)", border: `1px solid ${T.ba}`, borderRadius: 13, padding: "12px 15px", marginBottom: 16 }}>
+            <div style={{ fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.2, color: T.hi, marginBottom: 8 }}>🔑 Your School Keys</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {keys.map(k => { const used = k.max_redemptions && k.redeemed >= k.max_redemptions; const expired = k.expires_at && new Date(k.expires_at) < new Date(); return (
+                <div key={k.id} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", background: "var(--surface)", border: `1px solid ${B.border}`, borderRadius: 9, padding: "8px 10px", opacity: used || expired ? 0.6 : 1 }}>
+                  <span style={{ fontFamily: "'Space Grotesk',monospace", fontSize: 13.5, fontWeight: 800, color: T.hi, letterSpacing: 1.5 }}>{k.code}</span>
+                  <div style={{ flex: 1, minWidth: 120 }}>
+                    <div style={{ fontSize: 11.5, color: B.white, fontWeight: 600 }}>{k.schoolName || k.label || "School access"}</div>
+                    <div style={{ fontSize: 10, color: B.muted }}>{used ? "✓ redeemed" : expired ? "expired — ask the creator for a new one" : k.duration_days ? `unlocks ${k.duration_days} days of access` : "unlocks full access"}{k.expires_at && !expired && !used ? ` · use by ${new Date(k.expires_at).toLocaleDateString()}` : ""}</div>
+                  </div>
+                  {!used && !expired && <button onClick={() => navigator.clipboard?.writeText(k.code)} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 7, color: B.mutedMid, padding: "3px 10px", cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>Copy</button>}
+                </div>
+              ); })}
+            </div>
+            <div style={{ fontSize: 10.5, color: B.muted, marginTop: 7, lineHeight: 1.5 }}>Enter a key on the school's unlock screen. Monthly plans get a fresh key each time you renew.</div>
           </div>
         )}
         <FriendsCard session={viewer} />
@@ -9677,6 +10361,16 @@ function ProfileView({ session, profile, onProfile, achStats, schoolCount, syncS
 
 function AccountModal({ session, syncState, schoolCount, achStats, onSignOut, onClose }) {
   const unlocked = ACHIEVEMENTS.filter(a => a.test(achStats || { schools: schoolCount, published: 0, students: 0 })).map(a => a.id);
+  // Payments: Stripe connects ONCE per account here — it then covers every school.
+  const [stripeAcct, setStripeAcct] = useState(undefined);
+  useEffect(() => {
+    if (!session) { setStripeAcct(null); return; }
+    supaFetch(`/rest/v1/profiles?id=eq.${session.user.id}&select=stripe_account_id`, { token: session.token }).then(r => setStripeAcct(r?.[0]?.stripe_account_id || null)).catch(() => setStripeAcct(null));
+  }, [session?.user?.id]); // eslint-disable-line
+  async function disconnectStripe() {
+    if (!window.confirm("Disconnect Stripe from your account? Paid checkout stops working on all your schools until you reconnect.")) return;
+    try { await supaFetch(`/rest/v1/profiles?id=eq.${session.user.id}`, { method: "PATCH", token: session.token, headers: { Prefer: "return=minimal" }, body: { stripe_account_id: null, updated_at: new Date().toISOString() } }); setStripeAcct(null); } catch { }
+  }
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 400, background: "rgba(0,0,0,0.75)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={onClose}>
       <div style={{ background: B.surface, border: `1px solid ${B.borderMid}`, borderRadius: 18, width: "100%", maxWidth: 420, padding: 28 }} onClick={e => e.stopPropagation()}>
@@ -9698,6 +10392,20 @@ function AccountModal({ session, syncState, schoolCount, achStats, onSignOut, on
                 <span style={{ color: B.muted }}>{l}</span><span style={{ color: B.white, fontWeight: 600 }}>{v}</span>
               </div>
             ))}
+          </div>
+          <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, color: B.muted, marginBottom: 9 }}>💳 Payments</div>
+          <div style={{ marginBottom: 20 }}>
+            {stripeAcct ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.35)", borderRadius: 10, padding: "10px 13px" }}>
+                <span style={{ fontSize: 12.5, color: "#4ADE80", fontWeight: 700, flex: 1 }}>✓ Stripe connected — every school you own can take card payments</span>
+                <button onClick={disconnectStripe} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "5px 10px", cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>Disconnect</button>
+              </div>
+            ) : (
+              <>
+                <a href={session ? stripeConnectUserUrl(session.user.id) : "#"} style={{ display: "block", textAlign: "center", background: "#635BFF", color: "#fff", borderRadius: 10, padding: "11px", fontSize: 13, fontWeight: 800, textDecoration: "none", opacity: stripeAcct === undefined ? 0.6 : 1 }}>Connect with Stripe →</a>
+                <div style={{ fontSize: 10.5, color: B.muted, marginTop: 5, lineHeight: 1.5 }}>Connect once — it works for every school you create. Money goes straight to your own Stripe account; Senseito never touches it.</div>
+              </>
+            )}
           </div>
           <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, color: B.muted, marginBottom: 9 }}>🏆 Achievements <span style={{ color: B.mutedMid }}>({unlocked.length}/{ACHIEVEMENTS.length})</span></div>
           <div style={{ marginBottom: 20 }}><AchievementsGrid unlockedIds={unlocked} /></div>
@@ -9765,11 +10473,46 @@ function paypalPayUrl(pricing, schoolName) {
   return "";
 }
 // Paywall shown to signed-in students of a PAID school with no active entitlement.
-const PLAN_LABEL = { once: "", month: "/month", year: "/year" };
-function Paywall({ rec, stud, T, onEntitled }) {
+const PLAN_LABEL = { once: "", month: "/month", "6month": "/6 months", year: "/year" };
+// Normalize pricing → a list of plans. Old single-price schools become one "Full access" plan.
+function plansOf(pricing) {
+  const p = pricing || {};
+  if (Array.isArray(p.plans) && p.plans.length) return p.plans.filter(x => x && Number(x.price) > 0).map((x, i) => ({ id: x.id || `plan${i}`, label: x.label || "Full access", price: Number(x.price), interval: ["once", "month", "6month", "year"].includes(x.interval) ? x.interval : "once", trialDays: Number(x.trialDays) || 0, note: x.note || "", gates: x.gates || null }));
+  if (Number(p.price) > 0) return [{ id: "default", label: "Full access", price: Number(p.price), interval: p.interval || "once", trialDays: Number(p.trialDays) || 0, note: "", gates: null }];
+  return [];
+}
+// How many days a manually-issued School Key should last for a plan (PayPal manual flow).
+function planKeyDays(plan) { return plan?.interval === "month" ? 31 : plan?.interval === "6month" ? 186 : plan?.interval === "year" ? 366 : null; }
+// Is this entitlement currently good? (status + trial window + key/subscription expiry)
+function entActive(e) {
+  if (!e) return false;
+  if (e.expires_at && new Date(e.expires_at) < new Date()) return false;
+  if (e.status === "paid") return true;
+  if (e.status === "trial") return !e.trial_ends || new Date(e.trial_ends) > new Date();
+  return false;
+}
+// Resolve what the viewer may see. gates: null = everything;
+// else { mentor:false?, sections:[allowed ids]?, lessonsLimit:N?, msgsPerDay:N?, __free?:true }.
+function gatesFor(school, ent) {
+  const pricing = school?.pricing || {};
+  const paid = pricing.enabled && plansOf(pricing).length > 0;
+  if (!paid) return { access: true, gates: null };
+  if (entActive(ent)) {
+    const plan = plansOf(pricing).find(pl => pl.id === ent.plan_id);
+    return { access: true, gates: plan?.gates || null };
+  }
+  const f = pricing.free || {};
+  if (f.enabled) return { access: true, gates: { ...(f.gates || {}), __free: true } };
+  return { access: false, gates: null };
+}
+function Paywall({ rec, stud, T, onEntitled, onClose = null }) {
   const p = rec.data.pricing || {}; const cur = p.currency || "USD"; const sym = CURR_SYM[cur] || "";
-  const per = PLAN_LABEL[p.interval] || "";
+  const plans = plansOf(p);
+  const [planId, setPlanId] = useState(plans[0]?.id);
+  const plan = plans.find(x => x.id === planId) || plans[0];
+  const per = PLAN_LABEL[plan?.interval] || "";
   const [busy, setBusy] = useState(""); const [initiated, setInitiated] = useState(""); const [err, setErr] = useState("");
+  const [claimed, setClaimed] = useState(false);
   const [coupon, setCoupon] = useState(""); const [couponMsg, setCouponMsg] = useState("");
   async function applyCoupon() {
     const code = coupon.trim(); if (!code || busy) return; setBusy("coupon"); setCouponMsg("");
@@ -9785,185 +10528,312 @@ function Paywall({ rec, stud, T, onEntitled }) {
     setBusy(status); setErr("");
     try {
       const trial_ends = days ? new Date(Date.now() + days * 86400000).toISOString() : null;
-      await supaFetch(`/rest/v1/entitlements?on_conflict=school_id,user_id`, { method: "POST", token: stud.token, headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: [{ school_id: rec.id, user_id: stud.user.id, status, trial_ends, provider: provider || "manual", ref: ref || null, updated_at: new Date().toISOString() }] });
-      onEntitled({ status, trial_ends });
+      await supaFetch(`/rest/v1/entitlements?on_conflict=school_id,user_id`, { method: "POST", token: stud.token, headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: [{ school_id: rec.id, user_id: stud.user.id, status, trial_ends, provider: provider || "manual", ref: ref || null, plan_id: plan?.id || null, updated_at: new Date().toISOString() }] });
+      onEntitled({ status, trial_ends, plan_id: plan?.id || null });
     } catch (e) { setErr("Couldn't unlock: " + e.message); }
     setBusy("");
   }
-  async function grant(status, days, provider, ref) {
-    setBusy(status); setErr("");
+  // PayPal is NOT automatic: after paying, the student confirms here → a claim lands in the
+  // creator's Pricing panel ("this person paid / claims to have paid — confirm and send a key").
+  // The creator sends a School Key through Senseito; it appears in the student's profile.
+  async function fileClaim() {
+    setBusy("claim"); setErr("");
     try {
-      const trial_ends = days ? new Date(Date.now() + days * 86400000).toISOString() : null;
-      await supaFetch(`/rest/v1/entitlements?on_conflict=school_id,user_id`, { method: "POST", token: stud.token, headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: [{ school_id: rec.id, user_id: stud.user.id, status, trial_ends, provider: provider || "manual", ref: ref || null, updated_at: new Date().toISOString() }] });
-      onEntitled({ status, trial_ends });
-    } catch (e) { setErr("Couldn't unlock: " + e.message); }
+      await supaFetch(`/rest/v1/paypal_claims`, { method: "POST", token: stud.token, headers: { Prefer: "return=minimal" }, body: [{ school_id: rec.id, user_id: stud.user.id, email: stud.user.email, name: viewerName(stud), plan_id: plan?.id || null, plan_label: plan?.label || null, amount: plan?.price ?? null, currency: cur }] });
+      setClaimed(true);
+    } catch (e) { setErr("Couldn't send your confirmation: " + e.message); }
     setBusy("");
   }
-  const payUrl = paypalPayUrl(p, rec.data.name);
+  const payUrl = paypalPayUrl({ ...p, price: plan?.price }, rec.data.name);
   const stripeBase = /^https?:\/\//i.test(p.stripe || "") ? p.stripe.trim() : "";
-  const ref = `${rec.id}__${stud.user.id}`;
+  const ref = `${rec.id}__${stud.user.id}__${plan?.id || ""}`;
   const stripeUrl = stripeBase ? `${stripeBase}${stripeBase.includes("?") ? "&" : "?"}client_reference_id=${encodeURIComponent(ref)}&prefilled_email=${encodeURIComponent(stud.user.email || "")}` : "";
   const fn = async (name, body) => fetch(`${SUPA_URL}/functions/v1/${name}`, { method: "POST", headers: { apikey: SUPA_KEY, Authorization: `Bearer ${stud.token}`, "Content-Type": "application/json" }, body: JSON.stringify(body) }).then(r => r.json());
-  // Stripe: prefer platform-hosted Checkout on the creator's connected account; else the manual link.
+  // Stripe: platform-hosted Checkout on the creator's connected account (per-user OR legacy
+  // per-school connect — the edge function resolves both); else the manual payment link.
   const hasStripe = p.stripeConnected || stripeBase;
   async function payStripe() {
     setErr("");
     if (p.stripeConnected) {
       setBusy("stripe");
-      try { const d = await fn("stripe-checkout", { schoolId: rec.id, priceCents: Math.round(Number(p.price) * 100), currency: cur, name: rec.data.name, email: stud.user.email, interval: p.interval || "once", successUrl: window.location.href, cancelUrl: window.location.href }); if (d.url) { setInitiated("stripe"); window.location.href = d.url; return; } setErr(d.error || "Stripe error"); }
+      try { const d = await fn("stripe-checkout", { schoolId: rec.id, priceCents: Math.round(Number(plan.price) * 100), currency: cur, name: `${rec.data.name}${plan.label !== "Full access" ? ` — ${plan.label}` : ""}`, email: stud.user.email, interval: plan.interval || "once", planId: plan.id, successUrl: window.location.href, cancelUrl: window.location.href }); if (d.url) { setInitiated("stripe"); window.location.href = d.url; return; } setErr(d.error || "Stripe error"); }
       catch (e) { setErr(String(e)); }
       setBusy("");
     } else if (stripeUrl) { setInitiated("stripe"); window.open(stripeUrl, "_blank", "noopener"); }
   }
-  // PayPal: prefer platform-routed order (auto-verified); else the paypal.me/email link.
-  const hasPaypal = (PAYPAL_PLATFORM_ENABLED && /@/.test(p.paypal || "")) || payUrl;
-  async function payPaypal() {
+  const hasPaypal = !!payUrl;
+  function payPaypal() {
     setErr("");
-    if (PAYPAL_PLATFORM_ENABLED && /@/.test(p.paypal || "")) {
-      setBusy("paypal");
-      try { const d = await fn("paypal-create-order", { schoolId: rec.id, amount: Number(p.price), currency: cur, payeeEmail: p.paypal.trim(), name: rec.data.name, returnUrl: window.location.href, cancelUrl: window.location.href }); if (d.approveUrl) { setInitiated("paypal"); window.location.href = d.approveUrl; return; } }
-      catch { /* fall through to the link */ }
-      setBusy("");
-    }
     if (payUrl) { setInitiated("paypal"); window.open(payUrl, "_blank", "noopener"); }
   }
   // Auto-unlock: poll for the entitlement the Stripe webhook writes (and re-check when the tab regains focus).
   useEffect(() => {
     let tries = 0, stop = false;
     const check = async () => {
-      try { const r = await supaFetch(`/rest/v1/entitlements?select=status,trial_ends&school_id=eq.${rec.id}&user_id=eq.${stud.user.id}&limit=1`, { token: stud.token }); const e = r?.[0]; if (e && (e.status === "paid" || (e.status === "trial" && (!e.trial_ends || new Date(e.trial_ends) > new Date())))) { stop = true; onEntitled(e); } } catch { }
+      try { const r = await supaFetch(`/rest/v1/entitlements?select=status,trial_ends,plan_id,expires_at&school_id=eq.${rec.id}&user_id=eq.${stud.user.id}&limit=1`, { token: stud.token }); const e = r?.[0]; if (entActive(e)) { stop = true; onEntitled(e); } } catch { }
     };
     const id = setInterval(() => { if (stop || tries++ > 45) { clearInterval(id); return; } if (document.visibilityState === "visible") check(); }, 4000);
     const onVis = () => { if (document.visibilityState === "visible") check(); };
     document.addEventListener("visibilitychange", onVis);
     return () => { clearInterval(id); document.removeEventListener("visibilitychange", onVis); };
   }, []); // eslint-disable-line
+  const gateSummary = (g) => {
+    if (!g) return "Everything included";
+    const bits = [];
+    if (g.lessonsLimit) bits.push(`first ${g.lessonsLimit} lessons`);
+    if (Array.isArray(g.sections) && g.sections.length) bits.push(`${g.sections.length} section${g.sections.length > 1 ? "s" : ""}`);
+    if (g.mentor === false) bits.push("no AI mentor");
+    if (g.msgsPerDay) bits.push(`${g.msgsPerDay} mentor msgs/day`);
+    return bits.length ? bits.join(" · ") : "Everything included";
+  };
   return (
-    <div style={{ maxWidth: 460, margin: "26px auto 0", padding: "0 20px" }}>
-      <div style={{ background: T.heroGrad || T.gr, border: `1px solid ${T.ba}`, borderRadius: 20, padding: "28px 24px", textAlign: "center" }}>
+    <div style={{ maxWidth: plans.length > 1 ? 620 : 460, margin: "26px auto 0", padding: "0 20px" }}>
+      <div style={{ background: T.heroGrad || T.gr, border: `1px solid ${T.ba}`, borderRadius: 20, padding: "28px 24px", textAlign: "center", position: "relative" }}>
+        {onClose && <button onClick={onClose} style={{ position: "absolute", top: 12, right: 12, background: "rgba(255,255,255,0.14)", border: "none", borderRadius: 8, color: "#fff", padding: "5px 10px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>✕</button>}
         <div style={{ fontSize: 40, marginBottom: 8 }}>{rec.data.emoji || "🔒"}</div>
         <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 22, fontWeight: 800, color: "#fff", marginBottom: 6 }}>{rec.data.name}</div>
-        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.85)", marginBottom: 18, lineHeight: 1.6 }}>This school is <b>{sym}{p.price}{per} {cur}</b>. Unlock full access below.</div>
-        {hasStripe && <button onClick={payStripe} disabled={!!busy} style={{ display: "block", width: "100%", background: "#635BFF", color: "#fff", border: "none", borderRadius: 12, padding: "13px", fontSize: 15, fontWeight: 800, fontFamily: "inherit", cursor: "pointer", marginBottom: 10, opacity: busy ? 0.6 : 1 }}>{busy === "stripe" ? "Opening checkout…" : `Pay ${sym}${p.price}${per} with card (Stripe) →`}</button>}
-        {hasPaypal && <button onClick={payPaypal} disabled={!!busy} style={{ display: "block", width: "100%", background: "#0070BA", color: "#fff", border: "none", borderRadius: 12, padding: "13px", fontSize: 15, fontWeight: 800, fontFamily: "inherit", cursor: "pointer", marginBottom: 10, opacity: busy ? 0.6 : 1 }}>{busy === "paypal" ? "Opening PayPal…" : `Pay ${sym}${p.price}${per} with PayPal →`}</button>}
+        <div style={{ fontSize: 13, color: "rgba(255,255,255,0.85)", marginBottom: 16, lineHeight: 1.6 }}>{plans.length > 1 ? "Pick your plan:" : <>This school is <b>{sym}{plan?.price}{per} {cur}</b>. Unlock full access below.</>}</div>
+        {/* Plan cards — one per payment option the creator set up */}
+        {plans.length > 1 && (
+          <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(plans.length, 3)},1fr)`, gap: 8, marginBottom: 16 }}>
+            {plans.map(pl => { const on = pl.id === plan?.id; return (
+              <button key={pl.id} onClick={() => setPlanId(pl.id)} style={{ background: on ? "rgba(255,255,255,0.18)" : "rgba(255,255,255,0.07)", border: `2px solid ${on ? "#fff" : "rgba(255,255,255,0.22)"}`, borderRadius: 14, padding: "12px 10px", cursor: "pointer", fontFamily: "inherit", textAlign: "center" }}>
+                <div style={{ fontSize: 12, fontWeight: 800, color: "#fff", marginBottom: 3 }}>{pl.label}</div>
+                <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 19, fontWeight: 800, color: "#fff" }}>{sym}{pl.price}<span style={{ fontSize: 11, fontWeight: 600, opacity: 0.8 }}>{PLAN_LABEL[pl.interval]}</span></div>
+                <div style={{ fontSize: 10, color: "rgba(255,255,255,0.75)", marginTop: 3, lineHeight: 1.4 }}>{pl.note || gateSummary(pl.gates)}</div>
+                {pl.trialDays > 0 && <div style={{ fontSize: 9.5, color: "#6EE7B7", marginTop: 3, fontWeight: 700 }}>{pl.trialDays}-day free trial</div>}
+              </button>
+            ); })}
+          </div>
+        )}
+        {hasStripe && <button onClick={payStripe} disabled={!!busy} style={{ display: "block", width: "100%", background: "#635BFF", color: "#fff", border: "none", borderRadius: 12, padding: "13px", fontSize: 15, fontWeight: 800, fontFamily: "inherit", cursor: "pointer", marginBottom: 10, opacity: busy ? 0.6 : 1 }}>{busy === "stripe" ? "Opening checkout…" : `Pay ${sym}${plan?.price}${per} with card (Stripe) →`}</button>}
+        {hasPaypal && <>
+          <button onClick={payPaypal} disabled={!!busy} style={{ display: "block", width: "100%", background: "#0070BA", color: "#fff", border: "none", borderRadius: 12, padding: "13px", fontSize: 15, fontWeight: 800, fontFamily: "inherit", cursor: "pointer", marginBottom: 6, opacity: busy ? 0.6 : 1 }}>{busy === "paypal" ? "Opening PayPal…" : `Pay ${sym}${plan?.price}${per} with PayPal →`}</button>
+          <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.65)", marginBottom: 10, lineHeight: 1.5 }}>⚠️ PayPal is <b>not automatic</b> — after paying, confirm below and the creator will send your entry key (it appears in your profile under <b>School Keys</b>).</div>
+        </>}
         {!hasStripe && !hasPaypal && <div style={{ fontSize: 12.5, color: "#FBBF24", marginBottom: 10 }}>The creator hasn't connected a payment method yet.</div>}
-        {initiated && !p.stripeConnected && !(PAYPAL_PLATFORM_ENABLED && /@/.test(p.paypal || "")) && <button onClick={() => grant("paid", 0, initiated, "self-confirmed")} disabled={busy} style={{ width: "100%", background: "rgba(74,222,128,0.15)", border: "1px solid rgba(74,222,128,0.45)", borderRadius: 12, color: "#4ADE80", padding: "11px", cursor: "pointer", fontSize: 13.5, fontWeight: 800, fontFamily: "inherit", marginBottom: 10 }}>{busy === "paid" ? "Unlocking…" : "✓ I've completed payment — unlock"}</button>}
-        {Number(p.trialDays) > 0 && <button onClick={() => grant("trial", Number(p.trialDays), "trial")} disabled={busy} style={{ width: "100%", background: "rgba(255,255,255,0.12)", border: "1px solid rgba(255,255,255,0.28)", borderRadius: 12, color: "#fff", padding: "11px", cursor: "pointer", fontSize: 13.5, fontWeight: 800, fontFamily: "inherit", marginBottom: 10 }}>{busy === "trial" ? "Starting…" : `Start your ${p.trialDays}-day free trial`}</button>}
-        {/* Coupon redemption */}
+        {/* PayPal manual confirmation → files a claim for the creator to verify */}
+        {initiated === "paypal" && !claimed && (
+          <button onClick={fileClaim} disabled={!!busy} style={{ width: "100%", background: "rgba(74,222,128,0.15)", border: "1px solid rgba(74,222,128,0.45)", borderRadius: 12, color: "#4ADE80", padding: "11px", cursor: "pointer", fontSize: 13.5, fontWeight: 800, fontFamily: "inherit", marginBottom: 10 }}>{busy === "claim" ? "Sending…" : "✓ I've paid with PayPal — notify the creator"}</button>
+        )}
+        {claimed && (
+          <div style={{ background: "rgba(74,222,128,0.12)", border: "1px solid rgba(74,222,128,0.4)", borderRadius: 12, padding: "12px 14px", fontSize: 12.5, color: "#6EE7B7", lineHeight: 1.6, marginBottom: 10 }}>
+            📨 The creator has been notified. Once they confirm your payment they'll send you a <b>School Key</b> — you'll find it in your profile (👤 → School Keys) and can enter it below. {plan?.interval === "month" ? "Monthly plans get a fresh key each month you renew." : ""}
+          </div>
+        )}
+        {/* Legacy Stripe payment-link flow keeps the self-confirm (webhook may not be set up) */}
+        {initiated === "stripe" && !p.stripeConnected && <button onClick={() => grant("paid", 0, initiated, "self-confirmed")} disabled={busy} style={{ width: "100%", background: "rgba(74,222,128,0.15)", border: "1px solid rgba(74,222,128,0.45)", borderRadius: 12, color: "#4ADE80", padding: "11px", cursor: "pointer", fontSize: 13.5, fontWeight: 800, fontFamily: "inherit", marginBottom: 10 }}>{busy === "paid" ? "Unlocking…" : "✓ I've completed payment — unlock"}</button>}
+        {Number(plan?.trialDays) > 0 && <button onClick={() => grant("trial", Number(plan.trialDays), "trial")} disabled={busy} style={{ width: "100%", background: "rgba(255,255,255,0.12)", border: "1px solid rgba(255,255,255,0.28)", borderRadius: 12, color: "#fff", padding: "11px", cursor: "pointer", fontSize: 13.5, fontWeight: 800, fontFamily: "inherit", marginBottom: 10 }}>{busy === "trial" ? "Starting…" : `Start your ${plan.trialDays}-day free trial`}</button>}
+        {/* Coupon / School Key redemption */}
         <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
-          <input value={coupon} onChange={e => { setCoupon(e.target.value); setCouponMsg(""); }} onKeyDown={e => { if (e.key === "Enter") applyCoupon(); }} placeholder="Have a coupon code?" style={{ flex: 1, background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.25)", borderRadius: 10, color: "#fff", fontFamily: "inherit", fontSize: 13, padding: "10px 12px" }} />
+          <input value={coupon} onChange={e => { setCoupon(e.target.value); setCouponMsg(""); }} onKeyDown={e => { if (e.key === "Enter") applyCoupon(); }} placeholder="Coupon or School Key?" style={{ flex: 1, background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.25)", borderRadius: 10, color: "#fff", fontFamily: "inherit", fontSize: 13, padding: "10px 12px" }} />
           <button onClick={applyCoupon} disabled={busy || !coupon.trim()} style={{ background: "rgba(255,255,255,0.16)", border: "1px solid rgba(255,255,255,0.3)", borderRadius: 10, color: "#fff", padding: "0 16px", cursor: "pointer", fontSize: 13, fontWeight: 800, fontFamily: "inherit", opacity: (busy || !coupon.trim()) ? 0.5 : 1 }}>{busy === "coupon" ? "…" : "Apply"}</button>
         </div>
         {couponMsg && <div style={{ fontSize: 12, color: "#FCD34D", marginTop: 8 }}>{couponMsg}</div>}
         {err && <div style={{ fontSize: 12, color: "#FCA5A5", marginTop: 10 }}>{err}</div>}
-        <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.5)", marginTop: 14, lineHeight: 1.5 }}>Payment is handled securely on {hasStripe && hasPaypal ? "Stripe / PayPal" : hasStripe ? "Stripe" : "PayPal"}. Your access unlocks automatically once payment clears — just come back to this tab.</div>
+        {p.free?.enabled && onClose && <button onClick={onClose} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.7)", marginTop: 12, cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", textDecoration: "underline" }}>Keep using the free version</button>}
+        <div style={{ fontSize: 10.5, color: "rgba(255,255,255,0.5)", marginTop: 14, lineHeight: 1.5 }}>{hasStripe ? "Card payments unlock automatically once they clear — just come back to this tab." : ""}{hasPaypal ? " PayPal goes directly to the creator; access is granted with the key they send you." : ""}</div>
       </div>
     </div>
   );
 }
-// Creator pricing / PayPal + Stripe connection.
-function PricingModal({ school, schoolId, token, T, onUpdate, onClose }) {
+// Creator pricing: multiple plans with gating & trials, free-version controls, per-user
+// Stripe Connect status, PayPal manual-claims inbox, coupons & School Keys.
+function PricingModal({ school, schoolId, token, userId, T, onUpdate, onClose }) {
   const p = school.pricing || {};
   const set = (patch) => onUpdate({ data: { ...school, pricing: { ...(school.pricing || {}), ...patch } } });
   const inp = { width: "100%", boxSizing: "border-box", background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, fontFamily: "inherit", fontSize: 13, padding: "9px 11px" };
   const lbl = { fontSize: 10.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, color: B.muted, marginBottom: 5 };
   const linkOk = !p.paypal || /paypal\.me\//i.test(p.paypal) || /^https?:\/\//i.test(p.paypal) || /@/.test(p.paypal);
-  const webhookUrl = `${SUPA_URL}/functions/v1/stripe-webhook`;
-  const [whSecret, setWhSecret] = useState("");
-  const [whSaved, setWhSaved] = useState(false);
-  useEffect(() => { if (!token || !schoolId) return; supaFetch(`/rest/v1/payment_config?school_id=eq.${encodeURIComponent(schoolId)}&select=stripe_webhook_secret`, { token }).then(r => { if (r && r[0]?.stripe_webhook_secret) { setWhSecret(r[0].stripe_webhook_secret); setWhSaved(true); } }).catch(() => { }); }, [schoolId, token]);
-  const saveSecret = async () => {
-    if (!token || !schoolId) return;
-    try { await supaFetch(`/rest/v1/payment_config?on_conflict=school_id`, { method: "POST", token, headers: { Prefer: "resolution=merge-duplicates,return=minimal" }, body: [{ school_id: schoolId, stripe_webhook_secret: whSecret.trim() || null, updated_at: new Date().toISOString() }] }); setWhSaved(true); } catch { }
-  };
-  // ── Coupons ──
+  const sym = CURR_SYM[p.currency || "USD"] || "";
+  // ── Plans (multiple payment options per school) ──
+  const plans = Array.isArray(p.plans) && p.plans.length ? p.plans
+    : Number(p.price) > 0 ? [{ id: "default", label: "Full access", price: Number(p.price), interval: p.interval || "once", trialDays: Number(p.trialDays) || 0, gates: null }] : [];
+  const setPlans = (next) => set({ plans: next });
+  const patchPlan = (i, pp) => setPlans(plans.map((x, xi) => xi === i ? { ...x, ...pp } : x));
+  const addPlan = () => setPlans([...plans, { id: `plan-${Date.now().toString(36)}`, label: plans.length ? "New plan" : "Full access", price: 9.99, interval: "once", trialDays: 0, gates: null }]);
+  const sectionsList = getSections(school);
+  const lessonsTotal = (school.semesters || []).reduce((a, s) => a + (s.lessons?.length || 0), 0);
+  // ── Per-user Stripe Connect (connect once in settings — applies to every school) ──
+  const [profStripe, setProfStripe] = useState(undefined); // undefined = loading
+  useEffect(() => { if (!token || !userId) { setProfStripe(null); return; } supaFetch(`/rest/v1/profiles?id=eq.${userId}&select=stripe_account_id`, { token }).then(r => setProfStripe(r?.[0]?.stripe_account_id || null)).catch(() => setProfStripe(null)); }, [token, userId]);
+  // Keep the public flag in sync so the paywall offers card checkout (edge fn resolves the account).
+  useEffect(() => { if (profStripe && !p.stripeConnected) set({ stripeConnected: true }); }, [profStripe]); // eslint-disable-line
+  // ── PayPal claims inbox ("X says they paid — confirm & send a key") ──
+  const [claims, setClaims] = useState([]);
+  const loadClaims = () => { if (!token || !schoolId) return; supaFetch(`/rest/v1/paypal_claims?school_id=eq.${encodeURIComponent(schoolId)}&status=eq.pending&select=id,user_id,email,name,plan_id,plan_label,amount,currency,created_at&order=created_at.desc`, { token }).then(r => setClaims(r || [])).catch(() => { }); };
+  useEffect(() => { loadClaims(); }, [schoolId, token]); // eslint-disable-line
+  const randomCode = () => Array.from({ length: 8 }, () => "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"[Math.floor(Math.random() * 32)]).join("");
+  // Confirm a claim: mint a single-use School Key issued to that student (it shows up in
+  // their profile automatically), sized to their plan (monthly → expires in ~a month).
+  async function keyClaim(c) {
+    const plan = plansOf(p).find(x => x.id === c.plan_id);
+    const days = planKeyDays(plan);
+    const code = randomCode();
+    try {
+      await supaFetch(`/rest/v1/coupons`, { method: "POST", token, headers: { Prefer: "return=minimal" }, body: [{ school_id: schoolId, code, kind: "free", percent: 100, max_redemptions: 1, issued_to: c.user_id, duration_days: days, label: `School Key — ${c.plan_label || "access"}${c.name ? ` for ${c.name}` : ""}` }] });
+      await supaFetch(`/rest/v1/paypal_claims?id=eq.${c.id}`, { method: "PATCH", token, headers: { Prefer: "return=minimal" }, body: { status: "keyed", updated_at: new Date().toISOString() } });
+      loadClaims(); loadCoupons();
+      alert(`Key ${code} sent ✓ — it now shows in ${c.name || c.email || "the student"}'s profile under School Keys.`);
+    } catch (e) { alert("Couldn't create the key: " + e.message); }
+  }
+  async function dismissClaim(c) { try { await supaFetch(`/rest/v1/paypal_claims?id=eq.${c.id}`, { method: "PATCH", token, headers: { Prefer: "return=minimal" }, body: { status: "dismissed", updated_at: new Date().toISOString() } }); loadClaims(); } catch { } }
+  // ── Coupons (self-serve codes) + issued School Keys ──
   const [coupons, setCoupons] = useState([]);
   const [cCode, setCCode] = useState("");
   const [cMax, setCMax] = useState("");
-  const loadCoupons = () => { if (!token || !schoolId) return; supaFetch(`/rest/v1/coupons?school_id=eq.${encodeURIComponent(schoolId)}&select=id,code,kind,max_redemptions,redeemed,expires_at&order=created_at.desc`, { token }).then(r => setCoupons(r || [])).catch(() => { }); };
+  const [cExpDays, setCExpDays] = useState("");
+  const [cDur, setCDur] = useState("");
+  const loadCoupons = () => { if (!token || !schoolId) return; supaFetch(`/rest/v1/coupons?school_id=eq.${encodeURIComponent(schoolId)}&select=id,code,kind,max_redemptions,redeemed,expires_at,duration_days,issued_to,label&order=created_at.desc`, { token }).then(r => setCoupons(r || [])).catch(() => { }); };
   useEffect(() => { loadCoupons(); }, [schoolId, token]); // eslint-disable-line
   const genCoupon = async () => {
     if (!token || !schoolId) return;
-    const code = (cCode.trim() || Array.from({ length: 7 }, () => "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"[Math.floor(Math.random() * 32)]).join("")).toUpperCase();
+    const code = (cCode.trim() || randomCode().slice(0, 7)).toUpperCase();
     const max = cMax.trim() ? Math.max(1, parseInt(cMax, 10) || 0) : null;
-    try { await supaFetch(`/rest/v1/coupons`, { method: "POST", token, headers: { Prefer: "return=minimal" }, body: [{ school_id: schoolId, code, kind: "free", percent: 100, max_redemptions: max }] }); setCCode(""); setCMax(""); loadCoupons(); }
+    const expDays = cExpDays.trim() ? Math.max(1, parseInt(cExpDays, 10) || 0) : null;
+    const dur = cDur.trim() ? Math.max(1, parseInt(cDur, 10) || 0) : null;
+    try { await supaFetch(`/rest/v1/coupons`, { method: "POST", token, headers: { Prefer: "return=minimal" }, body: [{ school_id: schoolId, code, kind: "free", percent: 100, max_redemptions: max, expires_at: expDays ? new Date(Date.now() + expDays * 86400000).toISOString() : null, duration_days: dur }] }); setCCode(""); setCMax(""); setCExpDays(""); setCDur(""); loadCoupons(); }
     catch (e) { if (/duplicate|unique|409/i.test(e.message || "")) alert("That code already exists."); }
   };
   const delCoupon = async (id) => { try { await supaFetch(`/rest/v1/coupons?id=eq.${id}`, { method: "DELETE", token }); loadCoupons(); } catch { } };
+  // Per-plan access-gates editor: what this payment option actually unlocks.
+  const GatesEditor = ({ gates, onChange }) => {
+    const g = gates || {};
+    const custom = !!gates;
+    const secIds = Array.isArray(g.sections) ? g.sections : null;
+    const toggleSec = (id) => { const cur = secIds || sectionsList.map(s => s.id); const nx = cur.includes(id) ? cur.filter(x => x !== id) : [...cur, id]; onChange({ ...g, sections: nx }); };
+    return (
+      <div style={{ marginTop: 8 }}>
+        <div style={{ display: "flex", gap: 7, marginBottom: custom ? 9 : 0 }}>
+          {[[false, "Everything"], [true, "Only some things"]].map(([k, l]) => (
+            <button key={String(k)} onClick={() => onChange(k ? (gates || {}) : null)} style={{ flex: 1, background: custom === k ? T.ps : B.surface2, border: `1px solid ${custom === k ? T.ba : B.borderMid}`, borderRadius: 8, color: custom === k ? T.hi : B.mutedMid, padding: "6px", cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit" }}>{l}</button>
+          ))}
+        </div>
+        {custom && (
+          <div style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 9, padding: "9px 11px", display: "flex", flexDirection: "column", gap: 8 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12, color: B.white, cursor: "pointer" }}>
+              <input type="checkbox" checked={g.mentor !== false} onChange={e => onChange({ ...g, mentor: e.target.checked ? undefined : false })} /> AI mentor included
+            </label>
+            <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12, color: B.white }}>
+              Lessons: <input type="number" min="0" max={lessonsTotal || 99} value={g.lessonsLimit ?? ""} placeholder="all" onChange={e => onChange({ ...g, lessonsLimit: e.target.value === "" ? undefined : Math.max(0, parseInt(e.target.value, 10) || 0) })} style={{ width: 56, background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 7, color: B.white, fontFamily: "inherit", fontSize: 12, padding: "4px 7px" }} />
+              <span style={{ fontSize: 10.5, color: B.muted }}>first N only (blank = all {lessonsTotal})</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 12, color: B.white }}>
+              Mentor msgs/day: <input type="number" min="0" value={g.msgsPerDay ?? ""} placeholder="∞" onChange={e => onChange({ ...g, msgsPerDay: e.target.value === "" ? undefined : Math.max(0, parseInt(e.target.value, 10) || 0) })} style={{ width: 56, background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 7, color: B.white, fontFamily: "inherit", fontSize: 12, padding: "4px 7px" }} />
+              <span style={{ fontSize: 10.5, color: B.muted }}>token budget per student</span>
+            </div>
+            <div>
+              <div style={{ fontSize: 10.5, color: B.muted, marginBottom: 5 }}>Sections included ({secIds ? secIds.length : "all"}):</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                {sectionsList.map(s => { const on = !secIds || secIds.includes(s.id); return (
+                  <button key={s.id} onClick={() => toggleSec(s.id)} style={{ background: on ? T.ps : "none", border: `1px solid ${on ? T.ba : B.borderMid}`, borderRadius: 100, color: on ? T.hi : B.muted, padding: "3px 10px", cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>{s.icon} {s.title}</button>
+                ); })}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
   return createPortal(
     <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 2600, background: "rgba(2,2,8,0.74)", backdropFilter: "blur(8px)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "max(24px,6vh) 16px 40px", overflowY: "auto", fontFamily: "'Inter',sans-serif" }}>
-      <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 460, background: "var(--surface)", border: `1px solid ${T.ba}`, borderRadius: 18, padding: 20, boxShadow: "0 30px 90px rgba(0,0,0,0.6)" }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 560, background: "var(--surface)", border: `1px solid ${T.ba}`, borderRadius: 18, padding: 20, boxShadow: "0 30px 90px rgba(0,0,0,0.6)" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
           <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 16, fontWeight: 800, color: B.white }}>💳 Pricing & payments</div>
           <button onClick={onClose} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "5px 10px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>✕</button>
         </div>
+        {/* PayPal claims — surfaced on top so confirmations never get missed */}
+        {claims.length > 0 && (
+          <div style={{ background: "rgba(251,191,36,0.07)", border: "1px solid rgba(251,191,36,0.35)", borderRadius: 12, padding: "11px 13px", marginBottom: 14 }}>
+            <div style={{ fontSize: 12, fontWeight: 800, color: "#FBBF24", marginBottom: 8 }}>📨 {claims.length} PayPal payment confirmation{claims.length > 1 ? "s" : ""} waiting</div>
+            {claims.map(c => (
+              <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 9, padding: "8px 10px", marginBottom: 6 }}>
+                <div style={{ flex: 1, minWidth: 160 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, color: B.white }}>{c.name || c.email || "A student"} <span style={{ fontWeight: 400, color: B.muted }}>says they paid</span></div>
+                  <div style={{ fontSize: 11, color: B.muted }}>{c.plan_label || "Access"} · {CURR_SYM[c.currency] || ""}{c.amount ?? "?"} · {new Date(c.created_at).toLocaleDateString()}{c.email ? ` · ${c.email}` : ""}</div>
+                </div>
+                <button onClick={() => keyClaim(c)} style={{ background: T.grad, border: "none", borderRadius: 8, color: "#fff", padding: "7px 12px", cursor: "pointer", fontSize: 11.5, fontWeight: 800, fontFamily: "inherit" }}>✓ Confirm & send key</button>
+                <button onClick={() => dismissClaim(c)} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.muted, padding: "7px 10px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit" }}>Dismiss</button>
+              </div>
+            ))}
+            <div style={{ fontSize: 10.5, color: B.muted, lineHeight: 1.5 }}>Check your PayPal first, then confirm — the key lands in their profile automatically. Monthly plans: send a fresh key each month they renew.</div>
+          </div>
+        )}
         <label style={{ display: "flex", alignItems: "center", gap: 9, marginBottom: 16, fontSize: 13.5, color: B.white, cursor: "pointer" }}>
           <input type="checkbox" checked={!!p.enabled} onChange={e => set({ enabled: e.target.checked })} /> Charge for this school (students must pay to enter)
         </label>
         <div style={{ opacity: p.enabled ? 1 : 0.5, pointerEvents: p.enabled ? "auto" : "none", display: "flex", flexDirection: "column", gap: 13 }}>
-          <div style={{ display: "flex", gap: 10 }}>
-            <div style={{ flex: 1 }}><div style={lbl}>Price</div><input type="number" min="0" value={p.price ?? ""} onChange={e => set({ price: Math.max(0, +e.target.value || 0) })} placeholder="49" style={inp} /></div>
-            <div style={{ width: 110 }}><div style={lbl}>Currency</div><select value={p.currency || "USD"} onChange={e => set({ currency: e.target.value })} style={{ ...inp, cursor: "pointer" }}>{Object.keys(CURR_SYM).map(c => <option key={c} value={c}>{c}</option>)}</select></div>
+          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <div style={{ ...lbl, marginBottom: 0, flex: 1 }}>Payment options — add as many as you like (monthly, 6-months with a discount, yearly, a cheap lessons-only tier…)</div>
+            <div style={{ width: 96 }}><select value={p.currency || "USD"} onChange={e => set({ currency: e.target.value })} style={{ ...inp, cursor: "pointer" }}>{Object.keys(CURR_SYM).map(c => <option key={c} value={c}>{c}</option>)}</select></div>
+          </div>
+          {plans.map((pl, i) => (
+            <div key={pl.id || i} style={{ background: B.surface, border: `1px solid ${B.borderMid}`, borderRadius: 12, padding: "11px 13px" }}>
+              <div style={{ display: "flex", gap: 7, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+                <input value={pl.label || ""} onChange={e => patchPlan(i, { label: e.target.value })} placeholder="Plan name (e.g. Full access)" style={{ ...inp, flex: 2, minWidth: 130 }} />
+                <input type="number" min="0" step="0.01" value={pl.price ?? ""} onChange={e => patchPlan(i, { price: Math.max(0, +e.target.value || 0) })} placeholder="49" style={{ ...inp, width: 84, flex: "0 0 84px" }} />
+                <select value={pl.interval || "once"} onChange={e => patchPlan(i, { interval: e.target.value })} style={{ ...inp, width: 118, flex: "0 0 118px", cursor: "pointer" }}>
+                  {[["once", "One-time"], ["month", "Monthly"], ["6month", "Every 6 months"], ["year", "Yearly"]].map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                </select>
+                <select value={pl.trialDays || 0} onChange={e => patchPlan(i, { trialDays: +e.target.value })} title="Free trial" style={{ ...inp, width: 108, flex: "0 0 108px", cursor: "pointer" }}>
+                  {[[0, "No trial"], [1, "1-day trial"], [7, "7-day trial"], [14, "14-day trial"], [30, "30-day trial"]].map(([d, l]) => <option key={d} value={d}>{l}</option>)}
+                </select>
+                <button onClick={() => setPlans(plans.filter((_, xi) => xi !== i))} title="Remove plan" style={{ background: "none", border: "none", color: "#F87171", cursor: "pointer", fontSize: 13 }}>✕</button>
+              </div>
+              <input value={pl.note || ""} onChange={e => patchPlan(i, { note: e.target.value })} placeholder="Optional note shown on the plan card (e.g. 'Save 20% vs monthly')" style={{ ...inp, fontSize: 12, marginBottom: 2 }} />
+              <GatesEditor gates={pl.gates} onChange={(g) => patchPlan(i, { gates: g })} />
+              {(pl.interval === "month" || pl.interval === "6month" || pl.interval === "year") && <div style={{ fontSize: 10.5, color: B.muted, marginTop: 6 }}>Recurring billing auto-renews & auto-revokes via Stripe. Over PayPal it's manual: students confirm each payment and you send a fresh key.</div>}
+            </div>
+          ))}
+          <button onClick={addPlan} style={{ background: "none", border: `1px dashed ${B.borderMid}`, borderRadius: 10, color: B.mutedMid, padding: "9px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 700 }}>＋ Add a payment option</button>
+          {/* Free version — what non-payers can see */}
+          {(() => { const f = p.free || {}; const setF = (pp) => set({ free: { ...f, ...pp } }); return (
+            <div style={{ background: B.surface, border: `1px solid ${f.enabled ? T.ba : B.borderMid}`, borderRadius: 12, padding: "11px 13px" }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: B.white, cursor: "pointer" }}>
+                <input type="checkbox" checked={!!f.enabled} onChange={e => setF({ enabled: e.target.checked, gates: f.gates || { lessonsLimit: 1, mentor: false } })} />
+                🆓 Free version — let anyone in with limited access (choose sections, lessons & mentor budget)
+              </label>
+              {f.enabled && <GatesEditor gates={f.gates || {}} onChange={(g) => setF({ gates: g || {} })} />}
+            </div>
+          ); })()}
+          <div>
+            <div style={lbl}>Get paid — Stripe (once per account)</div>
+            {profStripe ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.35)", borderRadius: 10, padding: "10px 12px" }}>
+                <span style={{ fontSize: 13, color: "#4ADE80", fontWeight: 700, flex: 1 }}>✓ Stripe connected to your account — covers ALL your schools, auto-verified</span>
+              </div>
+            ) : p.stripeConnected ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.35)", borderRadius: 10, padding: "10px 12px" }}>
+                <span style={{ fontSize: 13, color: "#4ADE80", fontWeight: 700, flex: 1 }}>✓ Stripe connected (this school)</span>
+                <button onClick={() => set({ stripeConnected: false })} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "5px 10px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit" }}>Disconnect</button>
+              </div>
+            ) : (
+              <><a href={userId ? stripeConnectUserUrl(userId) : stripeConnectUrl(schoolId)} style={{ display: "block", textAlign: "center", background: "#635BFF", color: "#fff", borderRadius: 10, padding: "11px", fontSize: 13.5, fontWeight: 800, textDecoration: "none", opacity: profStripe === undefined ? 0.6 : 1 }}>Connect with Stripe →</a>
+                <div style={{ fontSize: 11, color: B.muted, marginTop: 5, lineHeight: 1.5 }}>One click, <b>once per account</b> — it then works for every school you create. Money goes straight to your Stripe account and students unlock automatically. (Also available in ⚙ Account settings.)</div></>
+            )}
           </div>
           <div>
-            <div style={lbl}>Billing</div>
-            <div style={{ display: "flex", gap: 7 }}>{[["once", "One-time"], ["month", "Monthly"], ["year", "Yearly"]].map(([k, l]) => <button key={k} onClick={() => set({ interval: k })} style={{ flex: 1, background: (p.interval || "once") === k ? T.ps : B.surface2, border: `1px solid ${(p.interval || "once") === k ? T.ba : B.borderMid}`, borderRadius: 9, color: (p.interval || "once") === k ? T.hi : B.mutedMid, padding: "9px", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>{l}</button>)}</div>
-            {(p.interval === "month" || p.interval === "year") && <div style={{ fontSize: 11, color: B.muted, marginTop: 5 }}>Recurring subscriptions require the <b>Stripe</b> connection (auto-renews & auto-revokes on cancel).</div>}
-          </div>
-          <div>
-            <div style={lbl}>Connect PayPal</div>
+            <div style={lbl}>Get paid — PayPal (manual)</div>
             <input value={p.paypal || ""} onChange={e => set({ paypal: e.target.value.trim() })} placeholder="paypal.me/yourname  ·  or your PayPal email" style={{ ...inp, borderColor: linkOk ? B.borderMid : "rgba(248,113,113,0.5)" }} />
-            <div style={{ fontSize: 11, color: B.muted, marginTop: 5, lineHeight: 1.5 }}>Paste your <b>paypal.me</b> link or PayPal email — buyers pay <b>you directly</b> (Senseito never touches it). {PAYPAL_PLATFORM_ENABLED ? "Auto-verified." : "Students confirm payment or use a coupon; for automatic unlock, use Stripe."}</div>
+            <div style={{ fontSize: 11, color: B.muted, marginTop: 5, lineHeight: 1.5 }}>Buyers pay <b>you directly</b> — Senseito never touches the money, so it's <b>not automatic</b>: when a student confirms they've paid, you get a notification at the top of this panel; you verify it in PayPal and send them a School Key with one click. Keys for monthly plans expire after a month — students renew by paying again.</div>
             {!linkOk && <div style={{ fontSize: 11, color: "#F87171", marginTop: 4 }}>Enter a paypal.me link or a valid email.</div>}
           </div>
-          <div>
-            <div style={lbl}>Connect Stripe</div>
-            {STRIPE_CONNECT_CLIENT_ID ? (
-              p.stripeConnected ? (
-                <div style={{ display: "flex", alignItems: "center", gap: 8, background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.35)", borderRadius: 10, padding: "10px 12px" }}>
-                  <span style={{ fontSize: 13, color: "#4ADE80", fontWeight: 700, flex: 1 }}>✓ Stripe connected — auto-verified</span>
-                  <button onClick={() => set({ stripeConnected: false })} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "5px 10px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit" }}>Disconnect</button>
-                </div>
-              ) : (
-                <><a href={stripeConnectUrl(schoolId)} style={{ display: "block", textAlign: "center", background: "#635BFF", color: "#fff", borderRadius: 10, padding: "11px", fontSize: 13.5, fontWeight: 800, textDecoration: "none" }}>Connect with Stripe →</a>
-                  <div style={{ fontSize: 11, color: B.muted, marginTop: 5, lineHeight: 1.5 }}>One click — no webhooks, no keys. Money goes straight to your Stripe account and students unlock automatically after paying.</div></>
-              )
-            ) : (<>
-              <input value={p.stripe || ""} onChange={e => set({ stripe: e.target.value.trim() })} placeholder="https://buy.stripe.com/…  (Stripe Payment Link)" style={{ ...inp, borderColor: (!p.stripe || /^https?:\/\//i.test(p.stripe)) ? B.borderMid : "rgba(248,113,113,0.5)" }} />
-              <div style={{ fontSize: 11, color: B.muted, marginTop: 5, lineHeight: 1.5 }}>In your <b>Stripe Dashboard → Payment Links</b>, create a link and paste it here. Money goes straight to your Stripe account.</div>
-              {/^https?:\/\//i.test(p.stripe || "") && <div style={{ marginTop: 10, background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 10, padding: 11 }}>
-                <div style={{ fontSize: 11.5, fontWeight: 700, color: T.hi, marginBottom: 6 }}>⚡ Automatic unlock (optional)</div>
-                <div style={{ fontSize: 11, color: B.muted, lineHeight: 1.55, marginBottom: 8 }}>Add a webhook in <b>Stripe → Developers → Webhooks</b> for <b>checkout.session.completed</b> at this URL, then paste its <b>Signing secret</b>. Students then unlock instantly.</div>
-                <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 8 }}>
-                  <input readOnly value={webhookUrl} onFocus={e => e.target.select()} style={{ ...inp, fontSize: 11.5, color: B.mutedMid }} />
-                  <button onClick={() => navigator.clipboard?.writeText(webhookUrl)} style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "8px 11px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit", flexShrink: 0 }}>Copy</button>
-                </div>
-                <div style={{ display: "flex", gap: 6 }}>
-                  <input value={whSecret} onChange={e => { setWhSecret(e.target.value); setWhSaved(false); }} placeholder="whsec_…  (Signing secret)" style={{ ...inp, fontSize: 12 }} />
-                  <button onClick={saveSecret} disabled={!token} style={{ background: whSaved ? "rgba(74,222,128,0.12)" : T.grad, border: whSaved ? "1px solid rgba(74,222,128,0.4)" : "none", borderRadius: 8, color: whSaved ? "#4ADE80" : "#fff", padding: "8px 13px", cursor: "pointer", fontSize: 12, fontWeight: 800, fontFamily: "inherit", flexShrink: 0 }}>{whSaved ? "✓ Saved" : "Save"}</button>
-                </div>
-              </div>}
-            </>)}
-          </div>
-          <div style={{ fontSize: 11, color: B.muted, background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 9, padding: "9px 11px", lineHeight: 1.5 }}>Connect either or both — students pick a method. {STRIPE_CONNECT_CLIENT_ID || PAYPAL_PLATFORM_ENABLED ? "Connected payments unlock the school automatically." : "With the webhook set up, unlocks are automatic; otherwise students confirm manually."}</div>
-          <div>
-            <div style={lbl}>Free trial</div>
-            <div style={{ display: "flex", gap: 7 }}>{[[0, "None"], [7, "7 days"], [14, "14 days"]].map(([d, l]) => <button key={d} onClick={() => set({ trialDays: d })} style={{ flex: 1, background: (p.trialDays || 0) === d ? T.ps : B.surface2, border: `1px solid ${(p.trialDays || 0) === d ? T.ba : B.borderMid}`, borderRadius: 9, color: (p.trialDays || 0) === d ? T.hi : B.mutedMid, padding: "9px", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>{l}</button>)}</div>
-            <div style={{ fontSize: 11, color: B.muted, marginTop: 5 }}>Students can start the trial instantly (no card needed).</div>
-          </div>
           <div style={{ borderTop: `1px solid ${B.border}`, paddingTop: 13 }}>
-            <div style={lbl}>🎟️ Coupon codes <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: 400 }}>— free access, no payment</span></div>
-            <div style={{ display: "flex", gap: 6, marginBottom: 9 }}>
-              <input value={cCode} onChange={e => setCCode(e.target.value.toUpperCase())} placeholder="CODE (or leave blank = random)" style={{ ...inp, flex: 2 }} />
-              <input value={cMax} onChange={e => setCMax(e.target.value.replace(/[^0-9]/g, ""))} placeholder="Max uses" style={{ ...inp, flex: 1 }} />
+            <div style={lbl}>🎟️ Coupons & School Keys <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: 400 }}>— free or timed access, no payment processor</span></div>
+            <div style={{ display: "flex", gap: 6, marginBottom: 9, flexWrap: "wrap" }}>
+              <input value={cCode} onChange={e => setCCode(e.target.value.toUpperCase())} placeholder="CODE (blank = random)" style={{ ...inp, flex: 2, minWidth: 120 }} />
+              <input value={cMax} onChange={e => setCMax(e.target.value.replace(/[^0-9]/g, ""))} placeholder="Max uses" title="How many students can redeem it" style={{ ...inp, flex: 1, minWidth: 70 }} />
+              <input value={cExpDays} onChange={e => setCExpDays(e.target.value.replace(/[^0-9]/g, ""))} placeholder="Expires in… days" title="The code stops working after this many days" style={{ ...inp, flex: 1, minWidth: 100 }} />
+              <input value={cDur} onChange={e => setCDur(e.target.value.replace(/[^0-9]/g, ""))} placeholder="Access lasts… days" title="How long the student's access lasts (blank = forever). 31 = a monthly key." style={{ ...inp, flex: 1, minWidth: 105 }} />
               <button onClick={genCoupon} disabled={!token} style={{ background: T.grad, border: "none", borderRadius: 9, color: "#fff", padding: "0 14px", cursor: "pointer", fontSize: 12.5, fontWeight: 800, fontFamily: "inherit", flexShrink: 0 }}>Create</button>
             </div>
             {coupons.length === 0 && <div style={{ fontSize: 11.5, color: B.muted }}>No codes yet. Create one and share it — students enter it on the paywall to get in free.</div>}
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               {coupons.map(c => (
-                <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 8, background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 9, padding: "7px 11px" }}>
+                <div key={c.id} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", background: B.surface2, border: `1px solid ${c.issued_to ? T.ba : B.border}`, borderRadius: 9, padding: "7px 11px" }}>
                   <span style={{ fontFamily: "'Space Grotesk',monospace", fontSize: 13, fontWeight: 800, color: T.hi, letterSpacing: 1 }}>{c.code}</span>
-                  <span style={{ fontSize: 11, color: B.muted }}>used {c.redeemed}{c.max_redemptions ? `/${c.max_redemptions}` : ""}</span>
+                  {c.issued_to && <span style={{ fontSize: 10, color: T.hi, background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 100, padding: "1px 8px", fontWeight: 700 }}>🔑 {c.label || "School Key"}</span>}
+                  <span style={{ fontSize: 11, color: B.muted }}>used {c.redeemed}{c.max_redemptions ? `/${c.max_redemptions}` : ""}{c.duration_days ? ` · ${c.duration_days}d access` : ""}{c.expires_at ? ` · code expires ${new Date(c.expires_at).toLocaleDateString()}` : ""}</span>
                   <span style={{ flex: 1 }} />
                   <button onClick={() => navigator.clipboard?.writeText(c.code)} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 7, color: B.mutedMid, padding: "3px 9px", cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>Copy</button>
                   <button onClick={() => delCoupon(c.id)} style={{ background: "none", border: "none", color: "#F87171", cursor: "pointer", fontSize: 12 }}>✕</button>
@@ -9981,6 +10851,7 @@ function PublicSchool({ slug }) {
   const [status, setStatus] = useState("loading");
   const [stud, setStud] = useState(null); // signed-in student { token, user }
   const [profOpen, setProfOpen] = useState(false); // student profile modal
+  const [upgradeOpen, setUpgradeOpen] = useState(false); // free-version users → the plans modal
   const [ent, setEnt] = useState(undefined); // entitlement row (undefined = not loaded, null = none)
   const [mode, setMode] = useThemeMode();
   const lsKey = `senseito_progress_${slug}`;
@@ -10037,9 +10908,9 @@ function PublicSchool({ slug }) {
   // Load the student's entitlement (paid / trial) for paid schools.
   useEffect(() => {
     if (!stud || !rec) { setEnt(undefined); return; }
-    if (!(rec.data.pricing?.enabled && Number(rec.data.pricing?.price) > 0)) { setEnt(null); return; }
+    if (!(rec.data.pricing?.enabled && plansOf(rec.data.pricing).length > 0)) { setEnt(null); return; }
     (async () => {
-      try { const rows = await supaFetch(`/rest/v1/entitlements?select=status,trial_ends&school_id=eq.${rec.id}&user_id=eq.${stud.user.id}&limit=1`, { token: stud.token }); setEnt((rows && rows[0]) || null); } catch { setEnt(null); }
+      try { const rows = await supaFetch(`/rest/v1/entitlements?select=status,trial_ends,plan_id,expires_at&school_id=eq.${rec.id}&user_id=eq.${stud.user.id}&limit=1`, { token: stud.token }); setEnt((rows && rows[0]) || null); } catch { setEnt(null); }
     })();
   }, [stud, rec]); // eslint-disable-line
 
@@ -10112,15 +10983,29 @@ function PublicSchool({ slug }) {
       ); })()}
       {(() => {
         const pricing = rec.data.pricing || {};
-        const paid = pricing.enabled && Number(pricing.price) > 0;
-        const hasAccess = !paid || (ent && (ent.status === "paid" || (ent.status === "trial" && (!ent.trial_ends || new Date(ent.trial_ends) > new Date()))));
+        const paid = pricing.enabled && plansOf(pricing).length > 0;
         if (!stud) return <div id="sx-enroll"><EnrollCard schoolId={rec.id} mentorName={rec.data?.mentor?.name} T={T} onSignIn={signIn} /></div>;
         if (paid && ent === undefined) return <div style={{ textAlign: "center", color: B.muted, fontSize: 13, padding: 40 }}>Checking your access…</div>;
-        if (paid && !hasAccess) return <Paywall rec={rec} stud={stud} T={T} onEntitled={setEnt} />;
+        const { access, gates } = gatesFor(rec.data, ent);
+        if (paid && !access) return <Paywall rec={rec} stud={stud} T={T} onEntitled={setEnt} />;
+        const freeMode = !!gates?.__free;
         const trialLeft = ent?.status === "trial" && ent.trial_ends ? Math.ceil((new Date(ent.trial_ends) - Date.now()) / 86400000) : null;
+        const keyLeft = entActive(ent) && ent?.expires_at ? Math.ceil((new Date(ent.expires_at) - Date.now()) / 86400000) : null;
         return (<>
-          <div style={{ maxWidth: 860, margin: "16px auto 0", padding: "0 20px" }}><div style={{ background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.3)", borderRadius: 14, padding: "12px 18px", fontSize: 13, color: "#6EE7B7", fontWeight: 600 }}>✓ Enrolled as {stud.user.email}{trialLeft != null ? ` · free trial: ${trialLeft} day${trialLeft === 1 ? "" : "s"} left` : ""} — your progress saves automatically.</div></div>
-          <Boundary><SchoolPage rec={merged} readOnly onUpdate={(patch) => setLocalState(s => ({ ...s, ...patch }))} viewer={stud} onSignIn={signIn} /></Boundary>
+          {freeMode ? (
+            <div style={{ maxWidth: 860, margin: "16px auto 0", padding: "0 20px" }}><div style={{ background: "rgba(251,191,36,0.07)", border: "1px solid rgba(251,191,36,0.35)", borderRadius: 14, padding: "12px 18px", fontSize: 13, color: "#FBBF24", fontWeight: 600, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <span style={{ flex: 1 }}>🆓 You're on the free version — some sections and lessons are locked.</span>
+              <button onClick={() => setUpgradeOpen(true)} style={{ background: T.grad, border: "none", borderRadius: 9, color: "#fff", padding: "8px 16px", cursor: "pointer", fontSize: 12.5, fontWeight: 800, fontFamily: "inherit" }}>Unlock everything →</button>
+            </div></div>
+          ) : (
+            <div style={{ maxWidth: 860, margin: "16px auto 0", padding: "0 20px" }}><div style={{ background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.3)", borderRadius: 14, padding: "12px 18px", fontSize: 13, color: "#6EE7B7", fontWeight: 600 }}>✓ Enrolled as {stud.user.email}{trialLeft != null ? ` · free trial: ${trialLeft} day${trialLeft === 1 ? "" : "s"} left` : ""}{keyLeft != null ? ` · access key: ${keyLeft} day${keyLeft === 1 ? "" : "s"} left (renew for a new key)` : ""} — your progress saves automatically.</div></div>
+          )}
+          {upgradeOpen && (
+            <div onClick={() => setUpgradeOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 700, background: "rgba(2,2,8,0.78)", backdropFilter: "blur(8px)", overflowY: "auto", padding: "4vh 0 60px" }}>
+              <div onClick={e => e.stopPropagation()}><Paywall rec={rec} stud={stud} T={T} onEntitled={(e) => { setEnt(e); setUpgradeOpen(false); }} onClose={() => setUpgradeOpen(false)} /></div>
+            </div>
+          )}
+          <Boundary><SchoolPage rec={merged} readOnly onUpdate={(patch) => setLocalState(s => ({ ...s, ...patch }))} viewer={stud} onSignIn={signIn} gates={gates} /></Boundary>
         </>);
       })()}
       {stud && <MessengerDock viewer={stud} />}
@@ -10520,7 +11405,10 @@ export default function Senseito() {
   function applyDesign(rec, d) {
     if (!d || typeof d !== "object") return false;
     const cur = rec.data; const patch = {};
-    for (const k of ["theme", "skin", "density", "font", "fontScale", "cover", "coverPos", "minimal", "progression", "navStyle", "navGrad", "effect", "lessonGrid", "tabScale"]) if (k in d) patch[k] = d[k];
+    for (const k of ["theme", "skin", "density", "font", "fontScale", "cover", "coverPos", "minimal", "progression", "navStyle", "navGrad", "effect", "lessonGrid", "tabScale", "communityStyle"]) if (k in d) patch[k] = d[k];
+    if ("progressWidget" in d) patch.progressWidget = d.progressWidget === null ? undefined : { style: "circle", placement: ["hero", "rail", "nav", "meta"].includes(d.progressWidget?.placement) ? d.progressWidget.placement : "hero" };
+    if ("mentorship" in d && d.mentorship && typeof d.mentorship === "object") patch.mentorship = { ...(cur.mentorship || {}), ...d.mentorship };
+    if ("classroom" in d && d.classroom && typeof d.classroom === "object") patch.classroom = { ...(cur.classroom || {}), ...d.classroom };
     if (d.template && TEMPLATES[d.template]) { const t = TEMPLATES[d.template]; patch.template = d.template; patch.theme = t.theme; patch.skin = t.skin; patch.font = t.font; patch.density = t.density; }
     if ("palette" in d) patch.palette = d.palette === null ? undefined : { ...(cur.palette || {}), ...(d.palette || {}) };
     if ("hero" in d) patch.hero = d.hero === null ? undefined : { ...(cur.hero || {}), ...(d.hero || {}) };
