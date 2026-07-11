@@ -14,9 +14,9 @@ const MediaAuthCtx = createContext(null);
 const SUPA_URL = "https://raaffebeteodotpwyfgi.supabase.co";
 const SUPA_KEY = "sb_publishable_PaP7U71NhtqY980fd4RnWg_gvpf1gtA";
 const PROXY = `${SUPA_URL}/functions/v1/claude-proxy`;
-// Platform Stripe Connect client id (ca_…). Paste yours to enable one-click "Connect Stripe".
-// (Public value — safe in the client; the secret key lives only in the edge functions.)
-const STRIPE_CONNECT_CLIENT_ID = "";
+// Platform Stripe Connect client id (ca_…). Public value — safe in the client; the secret
+// key lives only in the edge functions.
+const STRIPE_CONNECT_CLIENT_ID = "ca_REnCFfQr3lGdiZ2HwG6GfRUt3jfxx9pV";
 const stripeConnectUrl = (schoolId) => `https://connect.stripe.com/oauth/authorize?response_type=code&client_id=${STRIPE_CONNECT_CLIENT_ID}&scope=read_write&state=${encodeURIComponent(schoolId)}&redirect_uri=${encodeURIComponent(`${SUPA_URL}/functions/v1/stripe-connect`)}`;
 // Whether the platform PayPal app is wired (enables auto-verified PayPal via the platform).
 const PAYPAL_PLATFORM_ENABLED = false;
