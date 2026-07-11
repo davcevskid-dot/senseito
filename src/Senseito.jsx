@@ -9913,7 +9913,7 @@ function PricingModal({ school, schoolId, token, T, onUpdate, onClose }) {
           <div>
             <div style={lbl}>Connect PayPal</div>
             <input value={p.paypal || ""} onChange={e => set({ paypal: e.target.value.trim() })} placeholder="paypal.me/yourname  ·  or your PayPal email" style={{ ...inp, borderColor: linkOk ? B.borderMid : "rgba(248,113,113,0.5)" }} />
-            <div style={{ fontSize: 11, color: B.muted, marginTop: 5, lineHeight: 1.5 }}>Paste your <b>paypal.me</b> link (easiest) or your PayPal email.{PAYPAL_PLATFORM_ENABLED ? " Use your PayPal email for automatic unlock — payments route straight to you and verify themselves." : ""}</div>
+            <div style={{ fontSize: 11, color: B.muted, marginTop: 5, lineHeight: 1.5 }}>Paste your <b>paypal.me</b> link or PayPal email — buyers pay <b>you directly</b> (Senseito never touches it). {PAYPAL_PLATFORM_ENABLED ? "Auto-verified." : "Students confirm payment or use a coupon; for automatic unlock, use Stripe."}</div>
             {!linkOk && <div style={{ fontSize: 11, color: "#F87171", marginTop: 4 }}>Enter a paypal.me link or a valid email.</div>}
           </div>
           <div>
