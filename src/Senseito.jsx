@@ -471,6 +471,19 @@ const ICO_PATHS = {
   folder2: "M3 6a2 2 0 012-2h4l2 2h8a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2z",
   file: "M6 2h8l4 4v16H6zM14 2v4h4M9 13h6M9 17h6",
   card: "M3 6h18v12H3zM3 10h18M7 15h4",
+  book: "M4 19.5A2.5 2.5 0 016.5 17H20V3H6.5A2.5 2.5 0 004 5.5v14zM4 19.5A2.5 2.5 0 006.5 22H20v-5M8 7h8M8 11h5",
+  gradcap: "M22 9L12 4 2 9l10 5 10-5zM6 11.5V16c0 1.6 2.7 3 6 3s6-1.4 6-3v-4.5M22 9v5",
+  people: "M9 11a4 4 0 100-8 4 4 0 000 8zM17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2M16 3.5a4 4 0 010 7M23 21v-2a4 4 0 00-3-3.85",
+  camera: "M2 7a1 1 0 011-1h11a1 1 0 011 1v10a1 1 0 01-1 1H3a1 1 0 01-1-1zM15 10.5L22 6v12l-7-4.5",
+  bolt: "M13 2L4 14h6l-1 8 9-12h-6l1-8",
+  target: "M12 12m-9 0a9 9 0 1018 0 9 9 0 10-18 0M12 12m-5 0a5 5 0 1010 0 5 5 0 10-10 0M12 12m-1.2 0a1.2 1.2 0 102.4 0 1.2 1.2 0 10-2.4 0",
+  heart: "M20.8 6.6a5 5 0 00-8-1.3l-.8.8-.8-.8a5 5 0 00-8 1.3 5 5 0 001 5.8L12 20.2l7.8-7.8a5 5 0 001-5.8z",
+  dumbbell: "M6.5 6.5v11M17.5 6.5v11M2.5 9.5v5M21.5 9.5v5M6.5 12h11",
+  briefcase: "M3 8h18v12H3zM8 8V6a2 2 0 012-2h4a2 2 0 012 2v2M3 13h18M10.5 13v2h3v-2",
+  gear: "M12 15a3 3 0 100-6 3 3 0 000 6zM19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 008 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H2a2 2 0 110-4h.09A1.65 1.65 0 004 8a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33 1.65 1.65 0 001-1.51V2a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82v.08a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z",
+  user: "M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2M12 11a4 4 0 100-8 4 4 0 000 8",
+  chat: "M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2zM8 9h8M8 12.5h5",
+  key: "M21 2l-9.6 9.6M15.5 7.5l3 3L21 8l-3-3M11.4 11.6a5 5 0 11-3-3 5 5 0 013 3z",
 };
 function Ico({ name, size = 15, fill = false, style }) {
   const d = ICO_PATHS[name]; if (!d) return null;
@@ -8704,6 +8717,99 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
 // ─────────────────────────────────────────────────────────────
 // HOME
 // ─────────────────────────────────────────────────────────────
+// Lovable-style typewriter hint: looping example prompts typed into the big box, with
+// word-swap beats ("book" ⌫ → "program" ⌫ → "video"). Pure overlay — never touches input.
+const HINT_SCRIPTS = [
+  ["I have a ", { swap: ["book", "program", "video", "podcast"] }, " I want to turn into a school…"],
+  ["I want to ", { swap: ["learn", "understand", "master"] }, " negotiation from a tough, no-excuses mentor…"],
+  ["I need an onboarding system for my new employees…"],
+  ["I need a mentor to teach me Stoicism and not let me advance until it sticks…"],
+  ["I want to make a school about ", { swap: ["crypto trading", "breathwork", "copywriting"] }, " for complete beginners…"],
+  ["I run a ", { swap: ["community", "coaching business"] }, " and want a private space with rooms for my people…"],
+];
+// Isolated component so the ~40Hz typing ticks re-render ONLY this overlay, never Home.
+function TypewriterHint({ active }) {
+  const hint = useTypewriterHint(active);
+  if (!active) return null;
+  return (
+    <div aria-hidden="true" style={{ position: "absolute", inset: 0, pointerEvents: "none", color: B.muted, fontSize: 15, lineHeight: 1.65, fontStyle: "italic", whiteSpace: "pre-wrap", overflow: "hidden" }}>
+      {hint}<span style={{ display: "inline-block", width: 2, height: "1em", background: "#A78BFA", verticalAlign: "text-bottom", marginLeft: 1, animation: "blink 1s steps(2) infinite" }} />
+    </div>
+  );
+}
+function useTypewriterHint(active) {
+  const [txt, setTxt] = useState("");
+  useEffect(() => {
+    if (!active) { setTxt(""); return; }
+    let alive = true;
+    const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+    (async () => {
+      let si = 0;
+      while (alive) {
+        const script = HINT_SCRIPTS[si % HINT_SCRIPTS.length];
+        let base = "";
+        for (const seg of script) {
+          if (!alive) return;
+          if (typeof seg === "string") {
+            for (const ch of seg) { if (!alive) return; base += ch; setTxt(base); await sleep(26); }
+          } else {
+            for (let k = 0; k < seg.swap.length; k++) {
+              const w = seg.swap[k]; let cur = "";
+              for (const ch of w) { if (!alive) return; cur += ch; setTxt(base + cur); await sleep(42); }
+              if (k < seg.swap.length - 1) {
+                await sleep(850);
+                for (let x = w.length - 1; x >= 0; x--) { if (!alive) return; setTxt(base + w.slice(0, x)); await sleep(24); }
+              } else base += w;
+            }
+          }
+        }
+        await sleep(2100);
+        for (let x = base.length; x >= 0; x -= 2) { if (!alive) return; setTxt(base.slice(0, Math.max(0, x))); await sleep(8); }
+        si++; await sleep(420);
+      }
+    })();
+    return () => { alive = false; };
+  }, [active]);
+  return txt;
+}
+// Tiny animated wireframe previews for the experience cards — the OUTLINE of each layout,
+// softly alive (staggered pulses), never busy.
+function ExpWire({ kind, on }) {
+  const c = on ? "rgba(103,232,249,0.75)" : "rgba(148,152,180,0.4)";
+  const f = on ? "rgba(103,232,249,0.16)" : "rgba(148,152,180,0.1)";
+  const bar = (w, d, h = 5) => <div style={{ width: w, height: h, borderRadius: 3, background: f, border: `1px solid ${c}`, animation: `blink 2.6s ${d}s ease-in-out infinite` }} />;
+  const box = { width: "100%", height: 58, borderRadius: 10, border: `1px dashed ${c}`, padding: 7, boxSizing: "border-box", display: "flex", gap: 6, overflow: "hidden" };
+  if (kind === "lessons") return (
+    <div style={{ ...box, flexDirection: "column", justifyContent: "space-between" }}>
+      {["82%", "64%", "73%"].map((w, i) => <div key={i} style={{ display: "flex", gap: 5, alignItems: "center" }}><div style={{ width: 8, height: 8, borderRadius: 3, border: `1px solid ${c}`, background: i === 0 ? f : "transparent", animation: `blink 2.6s ${i * 0.45}s ease-in-out infinite` }} />{bar(w, i * 0.45)}</div>)}
+    </div>
+  );
+  if (kind === "mentorship") return (
+    <div style={{ ...box, flexDirection: "column", justifyContent: "center", gap: 5 }}>
+      <div style={{ display: "flex", gap: 5, alignItems: "center" }}><div style={{ width: 11, height: 11, borderRadius: "50%", border: `1px solid ${c}`, background: f, animation: "blink 2.6s ease-in-out infinite" }} /><div style={{ width: "56%", height: 9, borderRadius: "3px 7px 7px 7px", background: f, border: `1px solid ${c}`, animation: "blink 2.6s ease-in-out infinite" }} /></div>
+      <div style={{ display: "flex", justifyContent: "flex-end" }}><div style={{ width: "42%", height: 9, borderRadius: "7px 3px 7px 7px", background: f, border: `1px solid ${c}`, animation: "blink 2.6s 0.9s ease-in-out infinite" }} /></div>
+      <div style={{ display: "flex", gap: 3 }}>{[0, 1, 2, 3].map(i => <div key={i} style={{ flex: 1, height: 4, borderRadius: 2, background: i < 2 ? f : "transparent", border: `1px solid ${c}`, animation: i === 1 ? "blink 2.6s 1.4s ease-in-out infinite" : "none" }} />)}</div>
+    </div>
+  );
+  if (kind === "community") return (
+    <div style={box}>
+      <div style={{ width: 20, display: "flex", flexDirection: "column", gap: 4, borderRight: `1px dashed ${c}`, paddingRight: 5 }}>{[0, 1, 2].map(i => <div key={i} style={{ height: 5, borderRadius: 2, background: i === 0 ? f : "transparent", border: `1px solid ${c}`, animation: `blink 2.6s ${i * 0.5}s ease-in-out infinite` }} />)}</div>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 5, justifyContent: "center" }}>
+        {[0, 1].map(i => <div key={i} style={{ display: "flex", gap: 4, alignItems: "center" }}><div style={{ width: 9, height: 9, borderRadius: "50%", border: `1px solid ${c}`, background: f, animation: `blink 2.6s ${i * 0.7}s ease-in-out infinite` }} /><div style={{ flex: 1, height: 6, borderRadius: 3, background: f, border: `1px solid ${c}`, animation: `blink 2.6s ${i * 0.7}s ease-in-out infinite` }} /></div>)}
+      </div>
+    </div>
+  );
+  // classroom
+  return (
+    <div style={{ ...box, flexDirection: "column", gap: 5 }}>
+      <div style={{ flex: 1, borderRadius: 6, border: `1px solid ${c}`, background: f, display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ width: 0, height: 0, borderTop: "5px solid transparent", borderBottom: "5px solid transparent", borderLeft: `8px solid ${c}`, animation: "blink 2s ease-in-out infinite" }} />
+      </div>
+      <div style={{ display: "flex", gap: 4 }}>{[0, 1, 2, 3, 4].map(i => <div key={i} style={{ flex: 1, height: 5, borderRadius: 2, border: `1px solid ${c}`, background: i === 2 ? f : "transparent", animation: i === 2 ? "blink 2.6s ease-in-out infinite" : "none" }} />)}</div>
+    </div>
+  );
+}
+const EXP_ICONS = { lessons: "book", mentorship: "gradcap", community: "people", classroom: "camera" };
 function Home({ onCreated, autofocus, onAutofocusDone, session, onRequireAuth }) {
   const [prompt, setPrompt] = useState(() => { try { const p = localStorage.getItem("senseito_pending_prompt"); if (p) { localStorage.removeItem("senseito_pending_prompt"); return p; } } catch { } return ""; });
   const [gated, setGated] = useState(false); // tried to build without an account
@@ -8718,6 +8824,7 @@ function Home({ onCreated, autofocus, onAutofocusDone, session, onRequireAuth })
   const [answers, setAnswers] = useState({});
   const [struct, setStruct] = useState({ layout: "auto", depth: "auto", interactivity: "auto", experience: "auto" });
   const [showStruct, setShowStruct] = useState(false);
+  const [expOpen, setExpOpen] = useState(false); // experience cards hidden until opened — Auto otherwise
   const [mode, setMode] = useState("normal"); // generation latitude: fast | normal | super
   const taRef = useRef(null);
   const [prog, setProg] = useState({ pct: 0, label: "", facts: [] });
@@ -8882,9 +8989,12 @@ function Home({ onCreated, autofocus, onAutofocusDone, session, onRequireAuth })
       )}
       {(phase === "idle" || phase === "error") && (
         <div style={{ background: B.surface, border: `1px solid ${focused ? "rgba(124,58,237,0.48)" : B.border}`, borderRadius: 16, padding: "18px 18px 14px", boxShadow: focused ? "0 0 0 3px rgba(124,58,237,0.08)" : "none", transition: "all 0.25s", marginTop: phase === "error" ? 20 : 0 }}>
-          <textarea ref={taRef} value={prompt} onChange={e => setPrompt(e.target.value)} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)} onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") build(); }}
-            placeholder='Describe your school… e.g. "A 10-week Stoic school taught by Marcus Aurelius. He will not let me advance until I prove the lesson stuck." — or paste a book chapter / YouTube transcript and say "teach me this".'
-            rows={3} style={{ background: "transparent", border: "none", color: B.white, fontFamily: "inherit", fontSize: 15, lineHeight: 1.65, resize: "none", width: "100%" }} />
+          <div style={{ position: "relative" }}>
+            <textarea ref={taRef} value={prompt} onChange={e => setPrompt(e.target.value)} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)} onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") build(); }}
+              placeholder="" rows={3} style={{ background: "transparent", border: "none", color: B.white, fontFamily: "inherit", fontSize: 15, lineHeight: 1.65, resize: "none", width: "100%", position: "relative", zIndex: 1 }} />
+            {/* Typewriter hint — types looping example prompts like someone is writing them */}
+            <TypewriterHint active={!prompt} />
+          </div>
           {attached && (
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, background: "rgba(6,182,212,0.08)", border: "1px solid rgba(6,182,212,0.3)", borderRadius: 10, padding: "8px 12px" }}>
               <span style={{ fontSize: 13, color: "#67E8F9" }}>📎 {attached.name}</span>
@@ -8892,19 +9002,46 @@ function Home({ onCreated, autofocus, onAutofocusDone, session, onRequireAuth })
               <button onClick={() => setAttached(null)} style={{ marginLeft: "auto", background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 13 }}>✕</button>
             </div>
           )}
-          {/* Learning experience picker — Auto lets the Architect classify; a pick is honored verbatim. */}
-          <div style={{ display: "flex", gap: 6, marginTop: 12, flexWrap: "wrap", alignItems: "center" }}>
-            <span style={{ fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.2, color: B.muted, marginRight: 2 }}>Experience</span>
-            {[["auto", "✨ Auto"], ...Object.entries(EXPERIENCES).map(([k, e]) => [k, `${e.icon} ${e.label}`])].map(([k, l]) => (
-              <button key={k} onClick={() => setStruct(s => ({ ...s, experience: k }))} title={k === "auto" ? "Let the Architect decide from your prompt" : EXPERIENCES[k]?.desc}
-                style={{ background: struct.experience === k ? "rgba(6,182,212,0.13)" : B.surface3, border: `1px solid ${struct.experience === k ? "rgba(6,182,212,0.5)" : B.borderMid}`, borderRadius: 100, color: struct.experience === k ? "#67E8F9" : B.mutedMid, padding: "5px 12px", cursor: "pointer", fontFamily: "inherit", fontSize: 11.5, fontWeight: 700, whiteSpace: "nowrap" }}>{l}</button>
-            ))}
+          {/* Learning experience — hidden behind a toggle. Auto unless the creator opens & picks;
+              the 4 cards are 2×2, rounded, each with a softly animated outline of its layout. */}
+          <div style={{ marginTop: 12 }}>
+            <button onClick={() => setExpOpen(o => !o)} style={{ display: "inline-flex", alignItems: "center", gap: 7, background: struct.experience !== "auto" ? "rgba(6,182,212,0.1)" : B.surface3, border: `1px solid ${struct.experience !== "auto" ? "rgba(6,182,212,0.45)" : B.borderMid}`, borderRadius: 100, color: struct.experience !== "auto" ? "#67E8F9" : B.mutedMid, padding: "6px 14px", cursor: "pointer", fontFamily: "inherit", fontSize: 11.5, fontWeight: 700 }}>
+              <Ico name={struct.experience === "auto" ? "sparkle" : EXP_ICONS[struct.experience]} size={13} />
+              Experience: {struct.experience === "auto" ? "Auto" : EXPERIENCES[struct.experience]?.label}
+              <span style={{ display: "inline-block", transform: expOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s", fontSize: 9 }}>▼</span>
+            </button>
+            {expOpen && (
+              <div style={{ marginTop: 9, animation: "fadeUp 0.25s ease" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  {Object.entries(EXPERIENCES).map(([k, e]) => { const on = struct.experience === k; return (
+                    <button key={k} onClick={() => setStruct(s => ({ ...s, experience: on ? "auto" : k }))} title={on ? "Click again to go back to Auto" : e.desc}
+                      style={{ textAlign: "left", background: on ? "rgba(6,182,212,0.09)" : B.surface2, border: `1.5px solid ${on ? "rgba(103,232,249,0.55)" : B.borderMid}`, borderRadius: 15, padding: "12px 13px", cursor: "pointer", fontFamily: "inherit", transition: "border-color 0.2s, background 0.2s, transform 0.15s" }}
+                      onMouseEnter={ev => { ev.currentTarget.style.transform = "translateY(-2px)"; }} onMouseLeave={ev => { ev.currentTarget.style.transform = "none"; }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3, color: on ? "#67E8F9" : B.white }}>
+                        <Ico name={EXP_ICONS[k]} size={16} />
+                        <span style={{ fontSize: 13, fontWeight: 800 }}>{e.label}</span>
+                        {on && <span style={{ marginLeft: "auto", color: "#67E8F9" }}><Ico name="check" size={13} /></span>}
+                      </div>
+                      <div style={{ fontSize: 10.5, color: B.muted, marginBottom: 8 }}>{e.desc}</div>
+                      <ExpWire kind={k} on={on} />
+                    </button>
+                  ); })}
+                </div>
+                <div style={{ fontSize: 10.5, color: B.muted, marginTop: 7, display: "flex", alignItems: "center", gap: 6 }}>
+                  <Ico name="sparkle" size={11} /> No pick = Auto — the Architect chooses the best experience from your prompt.
+                  {struct.experience !== "auto" && <button onClick={() => setStruct(s => ({ ...s, experience: "auto" }))} style={{ background: "none", border: "none", color: "#67E8F9", cursor: "pointer", fontSize: 10.5, fontFamily: "inherit", fontWeight: 700, textDecoration: "underline", padding: 0 }}>Reset to Auto</button>}
+                </div>
+              </div>
+            )}
           </div>
           <div style={{ display: "flex", gap: 6, marginTop: 12, flexWrap: "wrap" }}>
-            {[["fast", "⚡ Fast", "Quick & templated"], ["normal", "✨ Normal", "Balanced · recommended"], ["super", "🚀 Super", "Fully unchained · more tokens"]].map(([k, l, dsc]) => (
-              <button key={k} onClick={() => setMode(k)} title={dsc} style={{ flex: "1 1 130px", background: mode === k ? "rgba(124,58,237,0.14)" : B.surface3, border: `1px solid ${mode === k ? "rgba(124,58,237,0.5)" : B.borderMid}`, borderRadius: 10, color: mode === k ? "#C4B5FD" : B.mutedMid, padding: "8px 11px", cursor: "pointer", fontFamily: "inherit", textAlign: "left" }}>
-                <div style={{ fontSize: 12.5, fontWeight: 700 }}>{l}</div>
-                <div style={{ fontSize: 10.5, opacity: 0.85, marginTop: 1 }}>{dsc}</div>
+            {[["fast", "bolt", "Fast", "Quick & templated"], ["normal", "sparkle", "Normal", "Balanced · recommended"], ["super", "rocket", "Super", "Fully unchained · more tokens"]].map(([k, ic, l, dsc]) => (
+              <button key={k} onClick={() => setMode(k)} title={dsc} style={{ flex: "1 1 130px", display: "flex", alignItems: "center", gap: 9, background: mode === k ? "rgba(124,58,237,0.14)" : B.surface3, border: `1px solid ${mode === k ? "rgba(124,58,237,0.5)" : B.borderMid}`, borderRadius: 10, color: mode === k ? "#C4B5FD" : B.mutedMid, padding: "8px 11px", cursor: "pointer", fontFamily: "inherit", textAlign: "left", transition: "border-color 0.2s, background 0.2s" }}>
+                <span style={{ width: 28, height: 28, borderRadius: 9, flexShrink: 0, background: mode === k ? "rgba(124,58,237,0.22)" : B.surface2, border: `1px solid ${mode === k ? "rgba(124,58,237,0.45)" : B.border}`, display: "flex", alignItems: "center", justifyContent: "center" }}><Ico name={ic} size={14} /></span>
+                <span>
+                  <span style={{ display: "block", fontSize: 12.5, fontWeight: 700 }}>{l}</span>
+                  <span style={{ display: "block", fontSize: 10.5, opacity: 0.85, marginTop: 1 }}>{dsc}</span>
+                </span>
               </button>
             ))}
           </div>
@@ -8930,18 +9067,18 @@ function Home({ onCreated, autofocus, onAutofocusDone, session, onRequireAuth })
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))", gap: 12, marginTop: 22 }}>
             {[
-              ["life", "🧠", "Life Coaching", "Break limiting beliefs and design an ideal life — with journaling missions."],
-              ["fitness", "💪", "Fitness", "A body-transformation program with a tough-love coach and real missions."],
-              ["business", "🚀", "Business", "Zero to first revenue — pitch simulations and real client role-plays."],
-              ["mindset", "✨", "Mindset", "Neuroscience-backed identity work with a calm, surgical mentor."],
-              ["relationships", "❤️", "Relationships", "Attachment, boundaries and hard conversations — practised safely."],
-              ["productivity", "🎯", "Productivity", "A deep-work school built on flow science and daily output tracking."],
+              ["life", "brain", "Life Coaching", "Break limiting beliefs and design an ideal life — with journaling missions."],
+              ["fitness", "dumbbell", "Fitness", "A body-transformation program with a tough-love coach and real missions."],
+              ["business", "briefcase", "Business", "Zero to first revenue — pitch simulations and real client role-plays."],
+              ["mindset", "sparkle", "Mindset", "Neuroscience-backed identity work with a calm, surgical mentor."],
+              ["relationships", "heart", "Relationships", "Attachment, boundaries and hard conversations — practised safely."],
+              ["productivity", "target", "Productivity", "A deep-work school built on flow science and daily output tracking."],
             ].map(([key, icon, title, desc]) => (
               <button key={key} onClick={() => { setPrompt(CHIP_PROMPTS[key]); setTimeout(() => { taRef.current?.focus(); taRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }); }, 40); }}
                 style={{ textAlign: "left", background: B.surface, border: `1px solid ${B.border}`, borderRadius: 18, padding: "20px 18px", cursor: "pointer", fontFamily: "inherit", transition: "transform 0.15s, border-color 0.2s, box-shadow 0.2s" }}
                 onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-3px)"; e.currentTarget.style.borderColor = "rgba(124,58,237,0.45)"; e.currentTarget.style.boxShadow = "0 12px 34px rgba(124,58,237,0.16)"; }}
                 onMouseLeave={e => { e.currentTarget.style.transform = "none"; e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.boxShadow = "none"; }}>
-                <div style={{ width: 42, height: 42, borderRadius: 12, background: "rgba(124,58,237,0.1)", border: "1px solid rgba(124,58,237,0.28)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, marginBottom: 12 }}>{icon}</div>
+                <div style={{ width: 42, height: 42, borderRadius: 12, background: "rgba(124,58,237,0.1)", border: "1px solid rgba(124,58,237,0.28)", display: "flex", alignItems: "center", justifyContent: "center", color: "#A78BFA", marginBottom: 12 }}><Ico name={icon} size={20} /></div>
                 <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 15.5, fontWeight: 700, color: B.white, marginBottom: 5 }}>{title}</div>
                 <div style={{ fontSize: 12.5, color: B.mutedMid, lineHeight: 1.55 }}>{desc}</div>
                 <div style={{ fontSize: 12, color: "#A78BFA", fontWeight: 700, marginTop: 12 }}>Try this →</div>
@@ -10238,6 +10375,17 @@ function ProfileView({ session, profile, onProfile, achStats, schoolCount, syncS
   const [genRatio, setGenRatio] = useState("1:1");
   const [genBusy, setGenBusy] = useState(false);
   const [cropItem, setCropItem] = useState(null); // image being cropped
+  const [ptab, setPtab] = useState("main"); // main | media | friends | settings
+  // Settings tab: per-account Stripe Connect (one connection covers every school).
+  const [stripeAcct, setStripeAcct] = useState(undefined);
+  useEffect(() => {
+    if (!userId) { setStripeAcct(null); return; }
+    supaFetch(`/rest/v1/profiles?id=eq.${userId}&select=stripe_account_id`, { token: session.token }).then(r => setStripeAcct(r?.[0]?.stripe_account_id || null)).catch(() => setStripeAcct(null));
+  }, [userId]); // eslint-disable-line
+  async function disconnectStripe() {
+    if (!window.confirm("Disconnect Stripe from your account? Paid checkout stops working on all your schools until you reconnect.")) return;
+    try { await supaFetch(`/rest/v1/profiles?id=eq.${userId}`, { method: "PATCH", token: session.token, headers: { Prefer: "return=minimal" }, body: { stripe_account_id: null, updated_at: new Date().toISOString() } }); setStripeAcct(null); } catch { }
+  }
   const fileRef = useRef(null);
   const avatarRef = useRef(null);
   async function generate() {
@@ -10304,21 +10452,59 @@ function ProfileView({ session, profile, onProfile, achStats, schoolCount, syncS
             <div style={{ fontSize: 12.5, color: B.muted, marginTop: 3 }}>{session?.user?.email}</div>
             <div style={{ fontSize: 11.5, color: syncState === "error" ? "#F87171" : "#4ADE80", marginTop: 4 }}>{syncState === "saving" ? "☁️ Saving…" : syncState === "error" ? "⚠ Sync error" : "☁️ Cloud synced"} · {schoolCount} school{schoolCount === 1 ? "" : "s"}</div>
           </div>
-          <button onClick={onSignOut} style={{ padding: "9px 15px", borderRadius: 10, border: "1px solid rgba(248,113,113,0.3)", background: "rgba(248,113,113,0.07)", color: "#F87171", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, cursor: "pointer", alignSelf: "center" }}>Sign out</button>
+          <button onClick={() => setPtab("settings")} title="Account settings" style={{ padding: "9px 13px", borderRadius: 10, border: `1px solid ${B.borderMid}`, background: B.surface2, color: B.mutedMid, fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, cursor: "pointer", alignSelf: "center", display: "inline-flex", alignItems: "center", gap: 7 }}><Ico name="gear" size={14} /> Settings</button>
         </div>
       </div>
 
-      {/* Achievements */}
-      <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 18, padding: 20, marginBottom: 18 }}>
-        <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, color: B.muted, marginBottom: 13 }}>🏆 Achievements <span style={{ color: B.mutedMid }}>({unlocked.length}/{ACHIEVEMENTS.length})</span></div>
-        <AchievementsGrid unlockedIds={unlocked} />
+      {/* Tabs — everything lives inside the profile: Main · Media · Friends · Settings */}
+      <div style={{ display: "flex", gap: 6, marginBottom: 18, flexWrap: "wrap" }}>
+        {[["main", "user", "Main"], ["media", "image", "Media"], ["friends", "people", "Friends"], ["settings", "gear", "Settings"]].map(([k, ic, l]) => (
+          <button key={k} onClick={() => setPtab(k)} style={{ display: "inline-flex", alignItems: "center", gap: 7, background: ptab === k ? "rgba(124,58,237,0.14)" : B.surface, border: `1px solid ${ptab === k ? "rgba(124,58,237,0.5)" : B.border}`, borderRadius: 100, color: ptab === k ? "#C4B5FD" : B.mutedMid, padding: "8px 16px", cursor: "pointer", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, transition: "background 0.2s, border-color 0.2s" }}><Ico name={ic} size={14} /> {l}</button>
+        ))}
       </div>
 
-      {/* Friends — cross-school, with requests + DM */}
-      <FriendsCard session={session} />
+      {/* MAIN — achievements & activity */}
+      {ptab === "main" && <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 18, padding: 20, marginBottom: 18 }}>
+        <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, color: B.muted, marginBottom: 13 }}>🏆 Achievements <span style={{ color: B.mutedMid }}>({unlocked.length}/{ACHIEVEMENTS.length})</span></div>
+        <AchievementsGrid unlockedIds={unlocked} />
+      </div>}
 
-      {/* Media library */}
-      <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 18, padding: 20 }}>
+      {/* FRIENDS — cross-school, with requests + DM */}
+      {ptab === "friends" && <FriendsCard session={session} />}
+
+      {/* SETTINGS — account, payments, sign out */}
+      {ptab === "settings" && (
+        <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 18, padding: 20, display: "flex", flexDirection: "column", gap: 18 }}>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, color: B.muted, marginBottom: 10, display: "flex", alignItems: "center", gap: 7 }}><Ico name="user" size={13} /> Account</div>
+            <div style={{ display: "grid", gap: 8 }}>
+              {[["Provider", "Google"], ["Email", session?.user?.email || "—"], ["Schools", schoolCount], ["Cloud sync", syncState === "saving" ? "Saving…" : syncState === "error" ? "Error — will retry" : "✓ Synced"]].map(([l, v]) => (
+                <div key={l} style={{ display: "flex", justifyContent: "space-between", background: B.surface2, borderRadius: 10, padding: "10px 14px", fontSize: 13 }}>
+                  <span style={{ color: B.muted }}>{l}</span><span style={{ color: B.white, fontWeight: 600 }}>{v}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 1.2, color: B.muted, marginBottom: 10, display: "flex", alignItems: "center", gap: 7 }}><Ico name="card" size={13} /> Payments</div>
+            {stripeAcct ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.35)", borderRadius: 10, padding: "10px 13px" }}>
+                <span style={{ fontSize: 12.5, color: "#4ADE80", fontWeight: 700, flex: 1 }}>✓ Stripe connected — every school you own can take card payments</span>
+                <button onClick={disconnectStripe} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "5px 10px", cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>Disconnect</button>
+              </div>
+            ) : (
+              <>
+                <a href={userId ? stripeConnectUserUrl(userId) : "#"} style={{ display: "block", textAlign: "center", background: "#635BFF", color: "#fff", borderRadius: 10, padding: "11px", fontSize: 13, fontWeight: 800, textDecoration: "none", opacity: stripeAcct === undefined ? 0.6 : 1 }}>Connect with Stripe →</a>
+                <div style={{ fontSize: 10.5, color: B.muted, marginTop: 5, lineHeight: 1.5 }}>Connect once — it works for every school you create. Money goes straight to your own Stripe account; Senseito never touches it.</div>
+              </>
+            )}
+          </div>
+          <button onClick={onSignOut} style={{ padding: "11px", borderRadius: 10, border: "1px solid rgba(248,113,113,0.3)", background: "rgba(248,113,113,0.07)", color: "#F87171", fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>Sign out</button>
+        </div>
+      )}
+
+      {/* MEDIA library */}
+      {ptab === "media" && <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 18, padding: 20 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
           <div>
             <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 16, fontWeight: 700, color: B.white }}>📁 Media library</div>
@@ -10353,7 +10539,7 @@ function ProfileView({ session, profile, onProfile, achStats, schoolCount, syncS
               </div>
             ))}
           </div>}
-      </div>
+      </div>}
       {cropItem && <CropModal item={cropItem} token={session.token} userId={userId} onSaved={refresh} onClose={() => setCropItem(null)} />}
     </div>
   );
