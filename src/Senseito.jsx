@@ -484,7 +484,27 @@ const ICO_PATHS = {
   user: "M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2M12 11a4 4 0 100-8 4 4 0 000 8",
   chat: "M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2zM8 9h8M8 12.5h5",
   key: "M21 2l-9.6 9.6M15.5 7.5l3 3L21 8l-3-3M11.4 11.6a5 5 0 11-3-3 5 5 0 013 3z",
+  cal: "M8 2v4M16 2v4M3 9h18M5 4h14a2 2 0 012 2v14a2 2 0 01-2 2H5a2 2 0 01-2-2V6a2 2 0 012-2z",
+  eye: "M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12zM12 15a3 3 0 100-6 3 3 0 000 6z",
+  info: "M12 22a10 10 0 100-20 10 10 0 000 20zM12 16v-5M12 8h.01",
+  lock: "M5 11h14a1 1 0 011 1v8a1 1 0 01-1 1H5a1 1 0 01-1-1v-8a1 1 0 011-1zM8 11V7a4 4 0 118 0v4",
+  unlock2: "M5 11h14a1 1 0 011 1v8a1 1 0 01-1 1H5a1 1 0 01-1-1v-8a1 1 0 011-1zM8 11V7a4 4 0 017.8-1.3",
+  shield: "M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10zM9 12l2 2 4-4",
+  play: "M8 5.5v13l11-6.5z",
+  arrowR: "M5 12h14M13 6l6 6-6 6",
 };
+// SVG monogram tile — the modern default school mark (replaces default emojis).
+function Monogram({ name, T, size = 32, inline = false }) {
+  const ch = (String(name || "S").trim()[0] || "S").toUpperCase();
+  const gid = `mg-${String(T?.p || "#7C3AED").replace("#", "")}`;
+  return (
+    <svg width={size} height={size} viewBox="0 0 40 40" style={{ display: inline ? "inline-block" : "block", verticalAlign: inline ? "middle" : undefined, flexShrink: 0 }} aria-hidden="true">
+      <defs><linearGradient id={gid} x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stopColor={T?.p || "#7C3AED"} /><stop offset="100%" stopColor={T?.a || "#06B6D4"} /></linearGradient></defs>
+      <rect x="1" y="1" width="38" height="38" rx="11" fill={`url(#${gid})`} opacity="0.92" />
+      <text x="20" y="27" textAnchor="middle" fontFamily="'Space Grotesk',sans-serif" fontWeight="800" fontSize="19" fill="#fff">{ch}</text>
+    </svg>
+  );
+}
 function Ico({ name, size = 15, fill = false, style }) {
   const d = ICO_PATHS[name]; if (!d) return null;
   return (
@@ -872,12 +892,15 @@ function tplStyle(school) { return TEMPLATE_STYLE[school?.template] || TEMPLATE_
 // Distinct tab/nav treatments per template — { bar (container style), tab(active) }.
 function navStyles(nav, T) {
   switch (nav) {
-    case "topbar": return { bar: { display: "flex", gap: 2, borderBottom: `1px solid ${B.border}`, overflowX: "auto" }, tab: a => ({ flex: "0 0 auto", padding: "11px 18px", border: "none", borderBottom: `2px solid ${a ? T.p : "transparent"}`, background: "transparent", color: a ? B.white : B.mutedMid, fontFamily: "inherit", fontSize: 13, fontWeight: 600, cursor: "pointer", borderRadius: 0, transition: "all 0.2s" }) };
+    case "topbar": return { bar: { display: "flex", gap: 2, borderBottom: `1px solid ${B.border}`, overflowX: "auto", WebkitOverflowScrolling: "touch" }, tab: a => ({ flex: "0 0 auto", padding: "11px 18px", border: "none", borderBottom: `2px solid ${a ? T.p : "transparent"}`, background: "transparent", color: a ? B.white : B.mutedMid, fontFamily: "inherit", fontSize: 13, fontWeight: 600, cursor: "pointer", borderRadius: 0, transition: "all 0.2s" }) };
+    // "header" — a classic website top menu: clean text links on a plain bar. Deliberately
+    // NOT sticky (SchoolPage drops position:sticky for this style) — it scrolls away.
+    case "header": return { bar: { display: "flex", gap: 4, alignItems: "center", background: B.surface, border: `1px solid ${B.border}`, borderRadius: 12, padding: "6px 10px", overflowX: "auto", WebkitOverflowScrolling: "touch" }, tab: a => ({ flex: "0 0 auto", padding: "9px 15px", border: "none", background: "transparent", color: a ? B.white : B.mutedMid, fontFamily: "inherit", fontSize: 13.5, fontWeight: a ? 800 : 600, letterSpacing: 0.2, cursor: "pointer", borderRadius: 8, textDecoration: a ? "underline" : "none", textUnderlineOffset: 6, transition: "all 0.2s", whiteSpace: "nowrap" }) };
     case "chunky": return { bar: { display: "flex", gap: 8, flexWrap: "wrap" }, tab: a => ({ flex: "1 1 auto", minWidth: 96, padding: "13px 12px", border: `2px solid ${a ? "transparent" : B.borderMid}`, borderRadius: 16, background: a ? `linear-gradient(135deg,${T.p},${T.a})` : B.surface, color: a ? "white" : B.mutedMid, fontFamily: "inherit", fontSize: 14, fontWeight: 700, cursor: "pointer", boxShadow: a ? `0 6px 18px ${T.pg}` : "none", transition: "all 0.2s" }) };
     case "minimal": return { bar: { display: "flex", gap: 22, justifyContent: "center", borderBottom: `1px solid ${B.border}` }, tab: a => ({ flex: "0 0 auto", padding: "9px 4px", border: "none", borderBottom: `2px solid ${a ? T.p : "transparent"}`, background: "transparent", color: a ? B.white : B.muted, fontFamily: "inherit", fontSize: 13.5, fontWeight: a ? 700 : 500, letterSpacing: 0.3, cursor: "pointer", borderRadius: 0, transition: "all 0.2s" }) };
-    case "soft": return { bar: { display: "flex", gap: 6, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 100, padding: 5 }, tab: a => ({ flex: "1 1 auto", minWidth: 88, padding: "9px 10px", border: "none", borderRadius: 100, background: a ? T.ps : "transparent", color: a ? T.hi : B.mutedMid, fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", transition: "all 0.2s" }) };
+    case "soft": return { bar: { display: "flex", gap: 6, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 100, padding: 5, overflowX: "auto", WebkitOverflowScrolling: "touch" }, tab: a => ({ flex: "1 1 auto", minWidth: 88, padding: "9px 10px", border: "none", borderRadius: 100, background: a ? T.ps : "transparent", color: a ? T.hi : B.mutedMid, fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", transition: "all 0.2s", whiteSpace: "nowrap" }) };
     case "sidebar": return { bar: { display: "flex", flexDirection: "column", gap: 4, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: 6 }, tab: a => ({ width: "100%", textAlign: "left", padding: "10px 12px", border: "none", borderRadius: 10, background: a ? `linear-gradient(135deg,${T.p},${T.p}CC)` : "transparent", color: a ? "white" : B.mutedMid, fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", boxShadow: a ? `0 0 16px ${T.pg}` : "none", transition: "all 0.2s" }) };
-    default: return { bar: { display: "flex", gap: 4, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: 5, backdropFilter: "blur(8px)" }, tab: a => ({ flex: "1 1 auto", minWidth: 90, padding: "10px 8px", border: "none", borderRadius: 10, background: a ? `linear-gradient(135deg,${T.p},${T.p}CC)` : "transparent", color: a ? "white" : B.mutedMid, fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", boxShadow: a ? `0 0 16px ${T.pg}` : "none", transition: "all 0.2s" }) };
+    default: return { bar: { display: "flex", gap: 4, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: 5, backdropFilter: "blur(8px)", overflowX: "auto", WebkitOverflowScrolling: "touch" }, tab: a => ({ flex: "1 1 auto", minWidth: 90, padding: "10px 8px", border: "none", borderRadius: 10, background: a ? `linear-gradient(135deg,${T.p},${T.p}CC)` : "transparent", color: a ? "white" : B.mutedMid, fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", boxShadow: a ? `0 0 16px ${T.pg}` : "none", transition: "all 0.2s", whiteSpace: "nowrap" }) };
   }
 }
 
@@ -1005,7 +1028,11 @@ NUMBERING & MOVING LESSONS: lesson "number" values are assigned AUTOMATICALLY by
 - "Change lesson X's number to N" → this means MOVE it so it becomes the Nth lesson overall — reorder it into that position, keeping it in the part that position falls in. Don't just relabel.
 - "Move lesson X to part 2" → physically move the object into part 2's "lessons" array.
 - Keep parts contiguous (part 1 holds the first lessons, part 2 the next, etc.). The app also refreshes each part's lesson-range label, so don't fret about week/range text.
-SECTIONS: the experience is made of "sections" (kinds: lessons, mentor, tools, dashboard). PRESERVE the existing sections and their order unless the instruction asks to add/remove/reorder them. A "dashboard" section has its own "blockTypes": [type strings] — keep them unless asked; if adding a tool to a dashboard, append a blockType. A dashboard section MAY also include "cols": 1, 2 or 3 (how many columns its bricks lay out in) — set/change it when the user asks about columns/layout. If the user asks for a new always-available tool/section (or "just a chat", a stats panel, etc.), you may add a section. Design/display bricks (divider, callout, image, cta_button, stat_grid) are allowed on dashboards.
+LESSON ACCESS & ROUTING (bulk edits welcome — apply to EVERY lesson the instruction names, e.g. "lock lessons 3 to 7" or "unlock every RolePlay lesson"):
+- "open": true → the lesson is unlocked for everyone regardless of progress; "open": false (or omit) → normal gating. Set/clear it per lesson on command.
+- "unlocks": "<the id of another lesson>" → when THIS lesson is passed, THAT lesson opens instead of the next one in order (A→B routing). Use each lesson's "id" field, never its number. Remove the field to restore normal order.
+- "discussion": true → a class discussion board appears inside the lesson after its activities (students + creator converse there). Set on command ("add a discussion to lesson 4").
+SECTIONS: the experience is made of "sections" (kinds: lessons, mentor, tools, dashboard, community, classroom, calendar, students, counselor). PRESERVE the existing sections and their order unless the instruction asks to add/remove/reorder them. A "dashboard" section has its own "blockTypes": [type strings] — keep them unless asked; if adding a tool to a dashboard, append a blockType. A dashboard section MAY also include "cols": 1, 2 or 3 (how many columns its bricks lay out in) — set/change it when the user asks about columns/layout. If the user asks for a new always-available tool/section (or "just a chat", a stats panel, etc.), you may add a section. Design/display bricks (divider, callout, image, cta_button, stat_grid) are allowed on dashboards.
 BLOCKS: keep each lesson's existing "blockTypes" unless the instruction changes them. When ADDING or RE-ORIENTING lessons, give each 1-3 blockTypes allowed for the school's learningPath (see list). Do NOT output block data — only type names. Block contents are authored in a separate step.
 Allowed block types per learning path:
 ${PATH_GUIDE}
@@ -1093,6 +1120,8 @@ DECIDE which of three modes this message is:
 1) JUST TALKING — a question, brainstorming, asking your opinion/advice, or thinking out loud ("what do you think of…", "should I…", "how would you design…", "explain…"). Then reply helpfully and set BOTH action and design to null. DO NOT edit the school. If their wish is ambiguous, ASK ONE clarifying question in the reply and keep action/design null — wait for their answer before changing anything.
 2) DESIGN / LAYOUT change — they want to change how it LOOKS or is ARRANGED (colors, gradient, theme, font, spacing/density, cover image, hero title/tagline/description, a floating chat bubble, which sections exist or their order/columns, "just one chat in the middle, no title", etc.). Put the change in "design" (action = null). NEVER turn a design request into a learning activity/block. "add a cover" = a hero cover image, NOT a photo-upload activity.
 3) CONTENT / STRUCTURE change — add/remove/rewrite lessons, activities, bricks, dashboards, tools, copy. Put a precise one-line instruction in "action" (design = null). NOTE: lesson numbers and each part's lesson-range label are managed AUTOMATICALLY by the app (renumbered by position, parts kept contiguous). So for "add a lesson to part 1", "move lesson 5 to part 2", or "make this lesson number 4", just describe the move/insert in plain terms in "action" — say which part and where in the order — and never tell the creator they must fix numbers by hand.
+LESSON ACCESS, LOCKING & ROUTING — fully supported, NEVER refuse these: "unlock all lessons", "lock lessons 3-7", "make lesson 2 stay locked until lesson 5 is passed", "when lesson 1 is passed unlock lesson 4", "add a discussion to lesson 3" (a class discussion board inside that lesson, after its activities). BULK orders across many lessons are fine — pass the whole instruction through as one "action" and the editor applies it lesson by lesson.
+YOU CAN DO ALMOST ANYTHING here — if a request doesn't match a listed design key, don't refuse and don't silently drop it: translate it into the closest supported "action"/"design" and say what you're doing. Only say something is impossible when it truly has no path (e.g. changing Senseito's own platform code).
 
 "design" object — include ONLY the keys you're changing:
 - "template": the whole experience vibe — one of ${TEMPLATE_KEYS.join(", ")} (${Object.entries(TEMPLATES).map(([k, t]) => `${k}=${t.label}`).join("; ")}). Use for "make this corporate/business", "make it kid-friendly/game-like", "turn this into a quick skill". Sets theme/skin/font/density together.
@@ -1107,7 +1136,10 @@ DECIDE which of three modes this message is:
 - "minimal": true/false — minimalist mode. When true, deliberately terse/short activities are shown as-is and never hidden or flagged as empty. Use for "keep it minimal", "distilled one-liner lessons", "don't pad the content".
 - "progression": "list" | "map" | "arcade" — how the lessons section is laid out. "map" = a Duolingo-style winding path of lesson nodes ("make the lessons a map/journey/path"). "arcade" = a gamified single "run" screen with an XP/streak HUD that auto-advances to the next lesson as you clear each ("make it a game", "arcade mode", "play it like a game", "one continuous game"). (Add-anywhere — works on any theme.)
 - "effect": an ambient animated background effect for the whole school — one of ${EFFECT_KEYS.join(", ")}. Use when the user asks for atmosphere/vibes ("add an aurora effect", "make it feel cosmic/starry" → starfield, "add a glow", "floating embers/sparks" → embers, "subtle grid", "flowing gradient" → mesh). Set "effect": "none" to remove it.
-- "navStyle": "pills" | "topbar" | "chunky" | "minimal" | "soft" | "sidebar" — override the section navigation style independently of the theme. "sidebar" = a left vertical nav with content beside it (two-column).
+- "navStyle": "pills" | "topbar" | "header" | "chunky" | "minimal" | "soft" | "sidebar" — override the section navigation style independently of the theme. "sidebar" = a left vertical nav with content beside it (two-column). "header" = a classic website top menu that is NOT sticky (it scrolls away with the page) — use for "make the sections a normal website header/menu on top, not sticky".
+- "navSticky": false — the section nav scrolls away with the page instead of sticking to the top (any style). true restores sticking.
+- "heroCard": true — the hero/banner renders as a rounded CARD (bordered, inset) even with a cover image, instead of bleeding edge-to-edge. false restores the default. Use for "make the hero a card".
+- "hoverFx": true — lesson cards and bricks get a hover lift + glow effect. false removes it. Use for "add a hover effect".
 - "lessonGrid": { "cols": 1|2|3 } — how lesson cards are laid out in the lessons section. Use for "lessons as square cards", "3 in a row", "grid of lessons" (cols 3), "two columns" (2). Set { "cols": 1 } to restore the full-width rows. (Creators can also widen ONE card with the ⤢ button on the card, cycling 1 col → 2 cols → FULL WIDTH across every column → back — mention that if they ask to resize a single lesson or make one span the whole row.)
 - "tabScale": number 0.8–1.4 — size of the section tabs/nav. Use for "make the tabs bigger/smaller" (1 = default).
 - "navGrad": a CSS gradient string for the navigation/sidebar background, e.g. "linear-gradient(180deg,#ef4444,#3b82f6)". Use for "make the sidebar a red→blue gradient". "" to clear.
@@ -1127,7 +1159,7 @@ IMPORTANT: "brand" is ONLY a company logo + nav links bar. A picture/illustratio
 - "layout": one of ${Object.keys(LAYOUTS).join(", ")} (only for a wholesale re-arrange into a known shape).
 Don't invent image URLs — if they want a cover but gave no link, ASK for one (mode 1) instead of guessing.
 Be concrete about THIS project's sections, lessons, dashboards and tools.
-REPLY HONESTY (critical): the "action" is the ONLY thing that actually changes the school — your "reply" must NOT claim anything beyond that single action. Do NOT say you added other bricks, do NOT invent placement details ("after the habit_checker"), and do NOT promise multiple changes in one go. Refer to lessons by their TITLE, never by a number (numbers shift when lessons are added/removed). When you set an action, keep the reply to a short, plain acknowledgement of just that one change (e.g. "On it — adding a fear & progress journal."). If you cannot actually do what's asked, say so plainly instead of claiming success.`;
+REPLY HONESTY (critical): the "action"/"design" you output is the ONLY thing that actually changes the school — your "reply" must NOT claim anything beyond it. If you set neither, your reply must make clear NOTHING was changed (never say "done" while both are null). Do NOT say you added other bricks, do NOT invent placement details ("after the habit_checker"), and do NOT promise multiple changes in one go. Refer to lessons by their TITLE, never by a number (numbers shift when lessons are added/removed). When you set an action, keep the reply to a short, plain acknowledgement of just that one change (e.g. "On it — adding a fear & progress journal."). If you cannot actually do what's asked, say so plainly instead of claiming success.`;
 
 function conceptLabelOf(school, id) { return (school?.concepts || []).find(c => c.id === id)?.label || id; }
 // Turn the per-learner bus into a short context line the mentor/bricks can use.
@@ -1184,7 +1216,7 @@ ${trainingPreamble(school)}${dna}${busContext(bus, school)}
 THIS LESSON: "${lesson.title}" (${lesson.type})
 CONCEPT: ${lesson.concept}
 MISSION: ${lesson.mission}
-PASS CRITERIA: ${lesson.passCriteria}${lesson.mentorBrief ? `\nYOUR BRIEF FOR THIS LESSON (the creator's instructions — follow them): ${lesson.mentorBrief}` : ""}
+PASS CRITERIA: ${lesson.passCriteria}${lesson.mentorBrief ? `\nYOUR BRIEF FOR THIS LESSON (the creator's instructions — follow them): ${lesson.mentorBrief}` : ""}${(lesson.theory && String(lesson.theory).trim()) ? `\nTHE LESSON'S THEORY (the student reads this first — reference and build on it, never contradict it):\n${flattenText(lesson.theory).slice(0, 1800)}` : ""}${lesson.theoryVideo ? `\nTHEORY VIDEO: the student watches a video in this lesson (${lesson.theoryVideo}).${lesson.theoryTranscript ? ` ITS TRANSCRIPT (teach from exactly this):\n${String(lesson.theoryTranscript).slice(0, 2500)}` : " No transcript was provided — ask what they took from it rather than assuming its exact contents."}` : ""}
 ${modeNote}${unlockNote}${forkNote}${status}
 LESSON TYPE BEHAVIOR:
 - Quiz: run it live, one question at a time, react to each answer.
@@ -1446,7 +1478,10 @@ const SECTION_META = {
   students: { title: "Students", icon: "👥" },
   calendar: { title: "Calendar", icon: "📅" },
   classroom: { title: "Classroom", icon: "🎥" },
+  counselor: { title: "Counselor's Office", icon: "🛡️" },
 };
+// SVG icon per section kind — tabs render these instead of emojis.
+const SECTION_ICO = { lessons: "book", mentor: "gradcap", tools: "wand", dashboard: "cards", gamelab: "game", community: "people", students: "user", calendar: "cal", classroom: "camera", counselor: "shield" };
 // The 4 learning experiences. "lessons" hosts every classic shell (cards/steps/arcade/lms);
 // the other three swap the whole spine (see EXPERIENCE RULES in ARCHITECT_SYS).
 const EXPERIENCES = {
@@ -2562,7 +2597,7 @@ function TrainingGround({ school, T, media, onUpdate, onClose }) {
   );
 }
 
-function LessonView({ school, lesson, T: Tprop, onClose, onPass, onChooseFork, canEdit, onUpdateBlock, chat, onChat, bus, onIngest, outputs: outputsProp, onOutputs, blockOverrides, onOverrideBlock, inline = false }) {
+function LessonView({ school, lesson, T: Tprop, onClose, onPass, onChooseFork, canEdit, onUpdateBlock, chat, onChat, bus, onIngest, outputs: outputsProp, onOutputs, blockOverrides, onOverrideBlock, inline = false, schoolId = null, viewer = null }) {
   // Per-lesson accent override (lesson.accent) recolors the whole lesson modal.
   const T = (lesson.accent && HEX_RE.test(lesson.accent))
     ? { ...Tprop, p: lesson.accent, pg: hexA(lesson.accent, 0.18), ps: hexA(lesson.accent, 0.09), as_: hexA(lesson.accent, 0.12), ba: hexA(lesson.accent, 0.4), hi: lesson.accent, gr: `linear-gradient(135deg,${hexA(lesson.accent, 0.22)},${hexA(lesson.accent, 0.08)})`, grad: `linear-gradient(135deg,${lesson.accent},${lesson.accent}CC)` }
@@ -2611,7 +2646,7 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, onChooseFork, c
 
   // ── Flow stages: Theory → Mentor → Activities (whatever subset exists) ──
   // Theory gates the mentor; the mentor gates the activities (it must UNLOCK them).
-  const hasTheory = !!(lesson.theory && String(lesson.theory).trim());
+  const hasTheory = !!((lesson.theory && String(lesson.theory).trim()) || lesson.theoryVideo);
   const theoryRead = msgs.some(m => m.role === "theory_done");
   const mentorUnlocked = msgs.some(m => m.role === "unlock");
   const mentorEngaged = msgs.filter(m => m.role === "user").length >= 2; // safety net so no one gets stuck
@@ -2753,6 +2788,10 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, onChooseFork, c
 
         {activeTab === "theory" && (
           <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px", display: "flex", flexDirection: "column", gap: 16 }}>
+            {/* Theory media — a video/embed the creator attached; the mentor knows its context. */}
+            {lesson.theoryVideo && (() => { const em = classroomEmbed(lesson.theoryVideo); return em?.kind === "iframe"
+              ? <div style={{ position: "relative", aspectRatio: "16/9", borderRadius: 12, overflow: "hidden", border: `1px solid ${B.border}`, background: "#08080f" }}><iframe title="Lesson video" src={em.src} allow="autoplay; fullscreen; picture-in-picture" allowFullScreen style={{ position: "absolute", inset: 0, width: "100%", height: "100%", border: "none" }} /></div>
+              : em?.kind === "join" ? <a href={em.href} target="_blank" rel="noopener noreferrer" style={{ display: "flex", alignItems: "center", gap: 10, background: B.surface2, border: `1px solid ${T.ba}`, borderRadius: 12, padding: "12px 15px", color: T.hi, fontSize: 13, fontWeight: 700, textDecoration: "none" }}><Ico name="play" size={15} /> Open the lesson video →</a> : null; })()}
             <div style={{ display: "flex", justifyContent: "flex-end" }}><SpeakButton text={lesson.theory} /></div>
             <Markdown text={String(lesson.theory || "")} />
             {!canEdit && <button onClick={markTheoryRead} style={{ ...pBtn(T), alignSelf: "center", marginTop: 4 }}>{stages[stages.indexOf("theory") + 1] === "mentor" ? "I've read this — talk to my mentor →" : stages.length > 1 ? "I've read this — continue →" : "✓ Done"}</button>}
@@ -2795,6 +2834,13 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, onChooseFork, c
               {!passed && np.mode === "mentor" && showMentor && (np.activityPct === 0 || allActivitiesDone || (np.activityPct < 100 && ratio >= np.activityPct / 100)) &&
                 <button onClick={() => setTab("mentor")} style={{ ...pBtn(T), alignSelf: "center" }}>{mission ? "✅ Done — report to" : "💬 Talk to"} {school.mentor.name} →</button>}
               {passed && <div style={{ textAlign: "center", padding: "12px 14px", background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.25)", borderRadius: 10, fontSize: 13, color: "#4ADE80", fontWeight: 600 }}>✅ Lesson complete — hit "Complete →" above.</div>}
+              {/* Per-lesson class discussion — a separate section after the activities. */}
+              {lesson.discussion && schoolId && (
+                <div style={{ borderTop: `1px solid ${B.border}`, paddingTop: 14, marginTop: 4 }}>
+                  <div style={{ fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.3, color: T.p, marginBottom: 10, display: "flex", alignItems: "center", gap: 7 }}><Ico name="people" size={13} /> Class discussion — this lesson</div>
+                  <CommunityBoard school={school} schoolId={schoolId} T={T} viewer={viewer} onSignIn={() => { }} isCreator={canEdit} onUpdate={null} room={`lesson-${lesson.number}`} hideExtras />
+                </div>
+              )}
             </>)}
           </div>
         )}
@@ -3023,6 +3069,13 @@ function MentorOffice({ school, T, chat, onChat, bus, onIngest, progress, onUpda
                 Daily mentor messages per student:
                 <input type="number" min="0" value={school.mentorLimits?.msgsPerDay ?? ""} placeholder="∞" onChange={e => setData({ mentorLimits: { ...(school.mentorLimits || {}), msgsPerDay: e.target.value === "" ? undefined : Math.max(0, parseInt(e.target.value, 10) || 0) } })} style={{ width: 64, background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.white, fontFamily: "inherit", fontSize: 12.5, padding: "5px 8px" }} />
                 <span style={{ fontSize: 10.5, color: B.muted }}>(blank = unlimited · protects your AI budget)</span>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10, fontSize: 12.5, color: B.white, flexWrap: "wrap" }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer" }}>
+                  <input type="checkbox" checked={!!school.contact?.enabled} onChange={e => setData({ contact: { ...(school.contact || {}), enabled: e.target.checked } })} />
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Ico name="chat" size={13} /> "Contact me" button — students can message YOU (the human) directly</span>
+                </label>
+                {school.contact?.enabled && <input value={school.contact?.label || ""} onChange={e => setData({ contact: { ...school.contact, label: e.target.value } })} placeholder="Button label (default: 💬 Contact the coach)" style={{ flex: 1, minWidth: 180, background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.white, fontFamily: "inherit", fontSize: 12, padding: "6px 9px" }} />}
               </div>
             </div>
           ); })()}
@@ -5920,7 +5973,7 @@ function LessonCardSq({ lesson, idx, T, progress, onEnter, onEdit, onToggleSpan,
     <div style={{ gridColumn: lesson.span === "full" ? "1 / -1" : lesson.span === 2 ? "span 2" : undefined, background: B.surface, border: `1px solid ${st === "passed" ? "rgba(74,222,128,0.3)" : st === "active" ? T.ba : B.border}`, borderRadius: 16, overflow: "hidden", display: "flex", flexDirection: "column", opacity: locked && readOnly ? 0.55 : 1, boxShadow: st === "active" ? `0 0 20px ${T.pg}` : "none", animation: "fadeUp 0.4s ease backwards", animationDelay: `${Math.min(idx, 8) * 40}ms` }}>
       {lesson.cover
         ? <img src={lesson.cover} alt="" style={{ width: "100%", height: 88, objectFit: "cover", objectPosition: lesson.coverPos || "center" }} />
-        : <div style={{ height: 62, background: T.gr, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, borderBottom: `1px solid ${B.border}` }}>{tm.icon}</div>}
+        : <div style={{ height: 62, background: T.gr, display: "flex", alignItems: "center", justifyContent: "center", borderBottom: `1px solid ${B.border}` }}><span style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 24, fontWeight: 800, color: T.p, opacity: 0.9, letterSpacing: 1 }}>{String(lesson.number || idx + 1).padStart(2, "0")}</span></div>}
       <div style={{ padding: "11px 13px 13px", flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6 }}>
           <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", color: st === "passed" ? "#4ADE80" : T.p }}>{st === "passed" ? "✓ Done" : `Lesson ${lesson.number || idx + 1}`}</span>
@@ -5939,11 +5992,61 @@ function LessonCardSq({ lesson, idx, T, progress, onEnter, onEdit, onToggleSpan,
   );
 }
 
+// "ⓘ" — everything a student (or the creator) should know about a lesson at a glance:
+// what it teaches, how it's passed, and the exact steps to take.
+function LessonInfoModal({ lesson, school, T, onClose }) {
+  const np = normPass(lesson.passLogic, (lesson.blocks || []).length, lesson.mentorGuidance !== false);
+  const modeLabel = {
+    mentoronly: `Pure conversation — ${school.mentor?.name || "the mentor"} decides when you've truly got it`,
+    mentor: `${school.mentor?.name || "The mentor"} evaluates your work and decides when you pass`,
+    activities: `Complete the activities${np.activityPct ? ` (${np.activityPct}% required)` : ""}`,
+    hybrid: `Do most of the activities AND get ${school.mentor?.name || "the mentor"}'s approval`,
+    manual: "Mark it done yourself when you're satisfied",
+  }[np.mode] || "The mentor decides";
+  const steps = [];
+  if (lesson.theory && String(lesson.theory).trim()) steps.push(["book", `Read the theory${lesson.theoryVideo ? " & watch the video" : ""}`]);
+  if (np.mode !== "activities") steps.push(["chat", `Talk it through with ${school.mentor?.name || "the mentor"}`]);
+  (lesson.blocks || []).forEach(b => steps.push(["bolt", BLOCK_META[b.type]?.label || b.type]));
+  if (lesson.mission) steps.push(["target", `Mission: ${String(lesson.mission).slice(0, 110)}`]);
+  if (lesson.discussion) steps.push(["people", "Join the class discussion under the lesson"]);
+  const unlockTarget = lesson.unlocks ? (school.semesters || []).flatMap(s => s.lessons || []).find(l => l.id === lesson.unlocks) : null;
+  return createPortal(
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 320, background: "rgba(2,2,8,0.72)", backdropFilter: "blur(7px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, fontFamily: "'Inter',sans-serif" }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 420, background: "var(--surface)", border: `1px solid ${T.ba}`, borderRadius: 18, padding: 20, animation: "fadeUp 0.25s ease" }}>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, marginBottom: 4 }}>
+          <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 16, fontWeight: 800, color: B.white, lineHeight: 1.3 }}>{lesson.title}</div>
+          <button onClick={onClose} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "4px 9px", cursor: "pointer", fontSize: 13, fontFamily: "inherit", flexShrink: 0 }}>✕</button>
+        </div>
+        {lesson.concept && <div style={{ fontSize: 12.5, color: B.mutedMid, lineHeight: 1.6, marginBottom: 13 }}>{flattenText(lesson.concept)}</div>}
+        <div style={{ background: "var(--surface2)", border: `1px solid ${B.border}`, borderRadius: 11, padding: "10px 13px", marginBottom: 11 }}>
+          <div style={{ fontSize: 9.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.3, color: T.hi, marginBottom: 4 }}>How you pass</div>
+          <div style={{ fontSize: 12.5, color: B.white, lineHeight: 1.55 }}>{modeLabel}</div>
+          {lesson.passCriteria && <div style={{ fontSize: 11.5, color: B.muted, lineHeight: 1.55, marginTop: 5 }}>The bar: {flattenText(lesson.passCriteria)}</div>}
+        </div>
+        {steps.length > 0 && <div style={{ background: "var(--surface2)", border: `1px solid ${B.border}`, borderRadius: 11, padding: "10px 13px" }}>
+          <div style={{ fontSize: 9.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.3, color: T.hi, marginBottom: 7 }}>Your steps</div>
+          {steps.map(([ic, s], i) => (
+            <div key={i} style={{ display: "flex", gap: 9, alignItems: "flex-start", fontSize: 12.5, color: B.mutedMid, lineHeight: 1.55, marginBottom: i < steps.length - 1 ? 6 : 0 }}>
+              <span style={{ width: 18, height: 18, borderRadius: 6, background: T.ps, border: `1px solid ${T.ba}`, color: T.hi, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0, marginTop: 1 }}><Ico name={ic} size={11} /></span>
+              <span>{s}</span>
+            </div>
+          ))}
+        </div>}
+        {(hasReward(lesson.reward) || unlockTarget) && <div style={{ fontSize: 11.5, color: T.hi, marginTop: 10, display: "flex", flexDirection: "column", gap: 4 }}>
+          {hasReward(lesson.reward) && <span>🎁 There's a reward waiting when you complete this.</span>}
+          {unlockTarget && <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}><Ico name="arrowR" size={12} /> Passing this opens: {unlockTarget.title}</span>}
+        </div>}
+      </div>
+    </div>, document.body);
+}
+
 function LessonRow({ lesson, idx, T, progress, onEnter, onEdit, onToggleLock, readOnly, mentorName, games = [], school }) {
   const tm = TM[lesson.type] || TM.Dialogue;
   const state = progress[lesson.number] || "locked";
   const [playReward, setPlayReward] = useState(false);
   const [openBrick, setOpenBrick] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
+  const unlockTarget = !readOnly && lesson.unlocks ? (school?.semesters || []).flatMap(s => s.lessons || []).find(l => l.id === lesson.unlocks) : null;
   const rewardGame = lesson.reward?.gameId ? games.find(g => g.id === lesson.reward.gameId) : null;
   // lesson.open is a SCHOOL-level override (set by the creator) that ships to the
   // published version — an open lesson is never gated, for creator and students alike.
@@ -5957,7 +6060,9 @@ function LessonRow({ lesson, idx, T, progress, onEnter, onEdit, onToggleLock, re
       <div style={{ flex: 1, minWidth: 0, padding: "15px 8px 15px 14px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
           <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: 1, textTransform: "uppercase", color: state === "passed" ? "#4ADE80" : T.p }}>{state === "passed" ? "✓ Completed" : `Lesson ${lesson.number || idx + 1}`}</span>
-          <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5, padding: "2px 7px", borderRadius: 5, background: tm.bg, color: tm.c }}>{tm.icon} {lesson.type}</span>
+          <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5, padding: "2px 7px", borderRadius: 5, background: tm.bg, color: tm.c }}>{lesson.type}</span>
+          <button onClick={() => setInfoOpen(true)} title="Lesson info — what it teaches, how you pass, your steps" style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", padding: 1, display: "inline-flex" }}><Ico name="info" size={13} /></button>
+          {unlockTarget && <span title={`Passing this opens "${unlockTarget.title}" instead of the next lesson in order`} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 10, fontWeight: 700, color: T.hi, background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 100, padding: "1px 8px" }}><Ico name="arrowR" size={10} /> {unlockTarget.title.slice(0, 24)}</span>}
         </div>
         <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 15.5, fontWeight: 700, color: B.white, marginBottom: 4, lineHeight: 1.25 }}>{lesson.title}</div>
         {lesson.concept && <div style={{ fontSize: 12.5, color: B.mutedMid, lineHeight: 1.55, marginBottom: 9 }}>{lesson.concept.slice(0, 110)}{lesson.concept.length > 110 ? "…" : ""}</div>}
@@ -5973,11 +6078,12 @@ function LessonRow({ lesson, idx, T, progress, onEnter, onEdit, onToggleLock, re
         </div>}
         {playReward && rewardGame?.code && <GamePlayModal code={rewardGame.code} title={rewardGame.title} T={T} onClose={() => setPlayReward(false)} />}
         {openBrick && lesson.reward?.brick && <RewardBrickModal block={lesson.reward.brick} school={school} T={T} onClose={() => setOpenBrick(false)} />}
+        {infoOpen && <LessonInfoModal lesson={lesson} school={school} T={T} onClose={() => setInfoOpen(false)} />}
       </div>
       <div style={{ display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "flex-end", gap: 7, padding: "12px 14px 12px 0", flexShrink: 0 }}>
         {!readOnly && (
           <div style={{ display: "flex", gap: 6 }}>
-            <button onClick={() => onToggleLock(lesson.number, lesson.open)} title={lesson.open ? "Open to everyone — click to gate it" : "Gated — click to open it for all students"} style={{ ...iconBtn, color: lesson.open ? "#4ADE80" : B.muted }}>{lesson.open ? "🔓" : "🔒"}</button>
+            <button onClick={() => onToggleLock(lesson.number, lesson.open)} title={lesson.open ? "Open to everyone — click to gate it" : "Gated — click to open it for all students"} style={{ ...iconBtn, color: lesson.open ? "#4ADE80" : B.muted, display: "inline-flex" }}><Ico name={lesson.open ? "unlock2" : "lock"} size={13} /></button>
             <button onClick={() => onEdit(lesson)} title="Edit lesson" style={{ ...iconBtn, color: B.mutedMid }}>✎</button>
           </div>
         )}
@@ -6225,6 +6331,8 @@ function LessonEditor({ lesson, T, allowed, lessons = [], games = [], school, on
           <div><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>Concept <span style={{ color: B.muted, fontWeight: 400 }}>(one line — what this lesson teaches)</span></div><textarea value={d.concept || ""} onChange={e => set({ concept: e.target.value })} rows={2} style={inp.input} /></div>
           <div style={secH}>2 · Content & look</div>
           <div><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>📖 Theory <span style={{ color: B.muted, fontWeight: 400 }}>(optional reading — students read it first; it unlocks the mentor/activities. Markdown ok.)</span></div><textarea value={d.theory || ""} onChange={e => set({ theory: e.target.value })} rows={4} placeholder="The core reading for this lesson. Leave empty if the mentor teaches the theory through conversation." style={inp.input} /></div>
+          <div><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>▶ Theory video / embed <span style={{ color: B.muted, fontWeight: 400 }}>(optional — YouTube, Vimeo, Twitch or any link; shown at the top of the theory)</span></div><input value={d.theoryVideo || ""} onChange={e => set({ theoryVideo: e.target.value.trim() || undefined })} placeholder="https://youtube.com/watch?v=…" style={inp.input} /></div>
+          {d.theoryVideo && <div><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>Video transcript <span style={{ color: B.muted, fontWeight: 400 }}>(optional, recommended — the mentor then teaches from exactly what the video says)</span></div><textarea value={d.theoryTranscript || ""} onChange={e => set({ theoryTranscript: e.target.value || undefined })} rows={3} placeholder="Paste the transcript here (not mandatory)…" style={inp.input} /></div>}
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
             <div style={{ flex: 2, minWidth: 180 }}><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>Cover image URL (optional)</div><input value={d.cover || ""} onChange={e => set({ cover: e.target.value })} placeholder="https://…" style={inp.input} /></div>
             <div><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>Accent color</div>
@@ -6242,6 +6350,29 @@ function LessonEditor({ lesson, T, allowed, lessons = [], games = [], school, on
               <PassLogicEditor value={d.passLogic} hasActs={(d.blocks || []).length > 0} onChange={pl => set({ passLogic: pl })} /></div>
           </div>
           <div><div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>Pass criteria <span style={{ color: B.muted, fontWeight: 400 }}>(what the mentor/AI checks for)</span></div><textarea value={d.passCriteria || ""} onChange={e => set({ passCriteria: e.target.value })} rows={2} style={inp.input} /></div>
+
+          <div style={secH}>3.5 · Access & routing <span style={{ textTransform: "none", letterSpacing: 0, fontWeight: 400, color: B.muted }}>— who can open it, and where passing leads (A → B)</span></div>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ flex: "0 0 210px", minWidth: 190 }}>
+              <div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>Access</div>
+              <select value={d.open ? "open" : "gated"} onChange={e => set({ open: e.target.value === "open" ? true : false })} style={{ ...inp.input, cursor: "pointer" }}>
+                <option value="gated">Locked — opens in sequence</option>
+                <option value="open">Always unlocked (everyone)</option>
+              </select>
+            </div>
+            <div style={{ flex: 1, minWidth: 210 }}>
+              <div style={{ fontSize: 11, color: B.muted, marginBottom: 5 }}>When passed, this unlocks…</div>
+              <select value={d.unlocks || ""} onChange={e => set({ unlocks: e.target.value || undefined })} style={{ ...inp.input, cursor: "pointer" }}>
+                <option value="">The next lesson in order (default)</option>
+                {otherLessons.map(l => <option key={l.id} value={l.id}>→ {l.title}</option>)}
+              </select>
+            </div>
+          </div>
+          {(d.unlocks || d.open) && <div style={{ fontSize: 11, color: T.hi, lineHeight: 1.5, display: "flex", alignItems: "center", gap: 6 }}><Ico name="arrowR" size={12} /> {d.open ? "This lesson is open to everyone from day one." : ""} {d.unlocks ? `Passing "${d.title}" opens "${otherLessons.find(l => l.id === d.unlocks)?.title || "?"}" — students skip the normal order.` : ""}</div>}
+          <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: B.white, cursor: "pointer" }}>
+            <input type="checkbox" checked={!!d.discussion} onChange={e => set({ discussion: e.target.checked || undefined })} />
+            💬 Class discussion inside this lesson — a conversation space after the activities where students and you can talk
+          </label>
 
           <div style={secH}>4 · Completion reward</div>
           {/* Completion reward — a downloadable the student unlocks when they pass this lesson. */}
@@ -6794,7 +6925,7 @@ function StatChip({ icon, value, label, T, delay }) {
 }
 
 // THE REVEAL — a calm, proud unveiling (no confetti): proof → mentor → what's next.
-function SchoolReveal({ school, T, onClose, onTour, onExplore }) {
+function SchoolReveal({ school, T, onClose, onStudentPreview, onTryLesson, onCustomize }) {
   const st = schoolWowStats(school);
   const fallback = school.mentor?.sampleLine
     ? `I'm ${st.mentor}. ${school.mentor.sampleLine}`
@@ -6832,7 +6963,7 @@ function SchoolReveal({ school, T, onClose, onTour, onExplore }) {
           <button onClick={onClose} title="Skip" style={{ position: "absolute", top: 12, right: 12, background: "rgba(0,0,0,0.25)", border: "none", borderRadius: 8, color: "#fff", width: 28, height: 28, cursor: "pointer", fontSize: 14 }}>✕</button>
           <div style={{ display: "flex", justifyContent: "center", marginBottom: 12 }}><SenseitoMark size={44} /></div>
           <div style={{ fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: 2.5, color: T.hi, marginBottom: 7 }}>Your school is ready</div>
-          <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: "clamp(22px,5vw,30px)", fontWeight: 800, color: B.white, letterSpacing: -0.8, lineHeight: 1.1 }}>{school.emoji || "🏫"} {school.name}</div>
+          <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: "clamp(22px,5vw,30px)", fontWeight: 800, color: B.white, letterSpacing: -0.8, lineHeight: 1.1 }}>{school.emojiChosen && school.emoji ? `${school.emoji} ` : ""}{school.name}</div>
           {school.tagline && <div style={{ fontSize: 13.5, color: B.mutedMid, marginTop: 8, fontStyle: "italic" }}>{flattenText(school.tagline)}</div>}
         </div>
 
@@ -6876,10 +7007,20 @@ function SchoolReveal({ school, T, onClose, onTour, onExplore }) {
             ))}
           </div>
 
-          {/* CTAs */}
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 2 }}>
-            <button onClick={onExplore} style={{ flex: "2 1 200px", background: T.grad, border: "none", borderRadius: 12, color: "#fff", padding: "13px", cursor: "pointer", fontSize: 14, fontWeight: 800, fontFamily: "inherit", boxShadow: `0 8px 26px ${T.pg}` }}>Explore your school →</button>
-            <button onClick={onTour} style={{ flex: "1 1 150px", background: B.surface2, border: `1px solid ${T.ba}`, borderRadius: 12, color: T.hi, padding: "13px", cursor: "pointer", fontSize: 13.5, fontWeight: 700, fontFamily: "inherit" }}>🧭 Take a quick tour</button>
+          {/* CTAs — three ways in: feel it as a student, live the first lesson, or shape it */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 9, marginTop: 2 }}>
+            {[
+              ["eye", "Preview as a student", "See exactly what your students will see", onStudentPreview, false],
+              ["play", "Try the first lesson", "Step inside and live it yourself", onTryLesson, true],
+              ["palette", "Customize", "Shape the look, lessons & mentor", onCustomize, false],
+            ].map(([ic, title, desc, act, primary]) => (
+              <button key={title} onClick={act} style={{ textAlign: "left", background: primary ? T.grad : B.surface2, border: primary ? "none" : `1px solid ${T.ba}`, borderRadius: 15, padding: "14px 14px 13px", cursor: "pointer", fontFamily: "inherit", boxShadow: primary ? `0 10px 30px ${T.pg}` : "none", transition: "transform 0.15s, box-shadow 0.2s" }}
+                onMouseEnter={e => { e.currentTarget.style.transform = "translateY(-3px)"; }} onMouseLeave={e => { e.currentTarget.style.transform = "none"; }}>
+                <span style={{ width: 30, height: 30, borderRadius: 10, background: primary ? "rgba(255,255,255,0.18)" : T.ps, border: primary ? "none" : `1px solid ${T.ba}`, color: primary ? "#fff" : T.hi, display: "inline-flex", alignItems: "center", justifyContent: "center", marginBottom: 9 }}><Ico name={ic} size={15} /></span>
+                <div style={{ fontSize: 13, fontWeight: 800, color: primary ? "#fff" : B.white, lineHeight: 1.25, marginBottom: 3 }}>{title}</div>
+                <div style={{ fontSize: 10.5, color: primary ? "rgba(255,255,255,0.8)" : B.muted, lineHeight: 1.45 }}>{desc}</div>
+              </button>
+            ))}
           </div>
         </div>
       </div>
@@ -6888,16 +7029,26 @@ function SchoolReveal({ school, T, onClose, onTour, onExplore }) {
 }
 
 // The steps the guide walks through — each anchors to a [data-guide] element.
-const GUIDE_STEPS = [
-  { key: "chat", icon: "🪄", title: "Your magic wand", body: "This is the build chat — your direct line to Senseito. Type any change in plain English (“make it 8 lessons”, “add a community tab”, “warmer tone”) and the whole school rebuilds. No menus to hunt through." },
-  { key: "hero", icon: "✏️", title: "Everything is editable", body: "Click any text here — the name, tagline, description — to edit it inline. If there's a cover image, hover it to set the focal point." },
-  { key: "tabs", icon: "🧭", title: "Sections", body: "Each tab is a section — Lessons, Mentor, Tools, dashboards, community. Drag to reorder, double-click to rename, and press ＋ to add a new one." },
-  { key: "publish", icon: "🌐", title: "Go live", body: "Publish gives you a shareable public link, a claimable custom URL, and live signup + student analytics right on this page." },
-];
+// Steps adapt to the school's learning EXPERIENCE (lessons/mentorship/community/classroom).
+const GUIDE_STEPS_FOR = (school) => {
+  const exp = experienceOf(school);
+  const expStep =
+    exp === "mentorship" ? { key: "tabs", icon: "🎓", title: "A mentor-led journey", body: "In this school the MENTOR advances students: they talk, and it unlocks each step when they're truly ready. Tune the pace, pacing note and journey layout in the Mentor tab — and feed it your material in Train." }
+      : exp === "community" ? { key: "tabs", icon: "💬", title: "Your private community", body: "Rooms live in the Community tab — add or remove rooms, and switch the style any time by telling the chat: “discord style”, “Skool-style top menu”, or “classic feed”." }
+        : exp === "classroom" ? { key: "tabs", icon: "🎥", title: "Your live classroom", body: "Paste your Zoom or stream link in the Classroom tab — YouTube/Vimeo/Twitch embed right in the broadcast frame. Schedule sessions on its calendar; the class discussion sits underneath." }
+          : { key: "tabs", icon: "📚", title: "Lessons & progression", body: "Open any lesson's ✎ to edit it — including who can access it and what passing unlocks (A → B routing). The ⓘ on each lesson shows students exactly how to pass. Or just tell the chat: “lock lessons 3–7”." };
+  return [
+    { key: "chat", icon: "🪄", title: "Your magic wand", body: "This is the build chat — your direct line to Senseito. Type any change in plain English (“make it 8 lessons”, “add a discussion to lesson 2”, “completion circle in the hero”, “warmer tone”) and it happens." },
+    { key: "hero", icon: "✏️", title: "Everything is editable", body: "Click any text here — the name, tagline, description — to edit it inline. If there's a cover image, hover it to set the focal point." },
+    expStep,
+    { key: "setup", icon: "🧭", title: "Set up before you publish", body: "Set up walks you through confirming every lesson, your mentor, tools and design — with shortcuts, or “Skip everything & publish” if you're in a hurry. Publish unlocks after setup." },
+    { key: "publish", icon: "🌐", title: "Go live", body: "Publishing gives you a shareable public link, a claimable custom URL, and live signup + student analytics right on this page." },
+  ];
+};
 
 // THE CREATOR GUIDE — spotlight walkthrough + its own contextual AI chat.
 function CreatorGuide({ school, T, onClose, onSetup, onPublish }) {
-  const steps = GUIDE_STEPS;
+  const steps = GUIDE_STEPS_FOR(school);
   const [i, setI] = useState(0);
   const [rect, setRect] = useState(null);
   const [chatOpen, setChatOpen] = useState(false);
@@ -7335,7 +7486,7 @@ function SchoolWizard({ school, T, media, published, rec, onUpdate, saveLesson, 
     heading = "🚀 Publish"; sup = "Share your school with the world";
     body = (<>
       <div style={{ fontSize: 13, color: B.mutedMid, lineHeight: 1.6 }}>Your school is set up. Publish it to get a public link and start enrolling students. <span style={{ color: B.muted }}>(Pricing & payments come next.)</span></div>
-      <button onClick={() => { onPublish(); onClose(); }} style={{ ...pBtn(T), background: published ? "rgba(74,222,128,0.15)" : "linear-gradient(135deg,#059669,#047857)" }}>{published ? "✓ Published — copy link" : "🌐 Publish my school"}</button>
+      <button onClick={() => { onUpdate({ data: { ...school, setupDone: true } }); onPublish(); onClose(); }} style={{ ...pBtn(T), background: published ? "rgba(74,222,128,0.15)" : "linear-gradient(135deg,#059669,#047857)" }}>{published ? "✓ Published — copy link" : "🌐 Publish my school"}</button>
     </>);
   }
 
@@ -7351,7 +7502,10 @@ function SchoolWizard({ school, T, media, published, rec, onUpdate, saveLesson, 
       <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 480, background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 20, overflow: "hidden", boxShadow: `0 30px 90px rgba(0,0,0,0.6)` }}>
         <div style={{ padding: "14px 18px", background: T.gr, borderBottom: `1px solid ${B.border}`, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div><div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.5, color: T.hi }}>Set up · {WIZ_PHASE_LABEL[phase]}</div>{sup && <div style={{ fontSize: 12, color: B.mutedMid, marginTop: 2 }}>{sup}</div>}</div>
-          <button onClick={onClose} title="Close" style={{ background: "rgba(0,0,0,0.25)", border: "none", borderRadius: 8, color: "#fff", width: 28, height: 28, cursor: "pointer", fontSize: 14 }}>✕</button>
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            {!published && <button onClick={() => { onUpdate({ data: { ...school, setupDone: true } }); onPublish(); onClose(); }} title="Skip the whole setup and go live right now" style={{ background: "rgba(0,0,0,0.25)", border: "1px solid rgba(255,255,255,0.25)", borderRadius: 8, color: "#fff", padding: "5px 11px", cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit", whiteSpace: "nowrap" }}>Skip everything & publish →</button>}
+            <button onClick={onClose} title="Close" style={{ background: "rgba(0,0,0,0.25)", border: "none", borderRadius: 8, color: "#fff", width: 28, height: 28, cursor: "pointer", fontSize: 14 }}>✕</button>
+          </div>
         </div>
         {/* phase dots + live in-phase progress */}
         <div style={{ display: "flex", gap: 4, padding: "10px 18px 0" }}>{WIZ_PHASES.map((p, i) => <div key={p} title={WIZ_PHASE_LABEL[p]} style={{ flex: 1, height: 4, borderRadius: 2, background: i < phaseIdx ? "#4ADE80" : i === phaseIdx ? T.p : B.surface3, transition: "background 0.3s" }} />)}</div>
@@ -7622,9 +7776,13 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const [certOpen, setCertOpen] = useState(false); // certificate designer / earned-certificate modal
   const [iconEdit, setIconEdit] = useState(false); // school-icon edit popover
   const [iconPick, setIconPick] = useState(false); // school-icon image picker open
+  // School icon: photo → the photo; creator-chosen emoji → that emoji; else a modern
+  // SVG monogram tile (no default emojis).
   const schoolIcon = (size) => school.iconImage
     ? <img src={school.iconImage} alt="" style={{ width: size, height: size, borderRadius: Math.round(size / 4), objectFit: "cover", display: "inline-block", verticalAlign: "middle" }} />
-    : <span style={{ fontSize: size }}>{school.emoji || "🏫"}</span>;
+    : school.emojiChosen && school.emoji
+      ? <span style={{ fontSize: size }}>{school.emoji}</span>
+      : <Monogram name={school.name} T={T} size={Math.round(size * 1.15)} radius={Math.round(size / 3.2)} inline />;
   const navKind = shell === "lms" ? "sidebar" : (school.navStyle || ts.nav); // LMS forces the two-column sidebar
   let nv = navStyles(navKind, T); // navStyle = add-anywhere override of the template's nav
   if (school.navGrad) nv = { ...nv, bar: { ...nv.bar, background: school.navGrad } }; // custom nav/sidebar gradient
@@ -7678,6 +7836,18 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   })();
   const [gamelabOpen, setGamelabOpen] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
+  const [toolbarOn, setToolbarOn] = useState(() => { try { return localStorage.getItem("sx_toolbar") !== "0"; } catch { return true; } }); // studio toolbar toggle
+  const [openReports, setOpenReports] = useState(0); // Counselor's Office: open student reports (creator notification)
+  const [studentView, setStudentView] = useState(false); // creator previews the school AS a student
+  const [magicFx, setMagicFx] = useState(false); // one-shot "step into your school" effect
+  if (studentView) readOnly = true; // student-preview: render EXACTLY what a student sees
+  // Counselor's Office: creators get notified of open reports even without visiting the section.
+  useEffect(() => {
+    if (readOnly || !viewer?.token || !rec?.id) return;
+    let dead = false;
+    (async () => { try { const r = await supaFetch(`/rest/v1/school_reports?school_id=eq.${encodeURIComponent(rec.id)}&status=eq.open&select=id&limit=100`, { token: viewer.token }); if (!dead) setOpenReports((r || []).length); } catch { } })();
+    return () => { dead = true; };
+  }, [rec.id, readOnly, viewer?.token]); // eslint-disable-line
   const [landingOpen, setLandingOpen] = useState(false);
   const [tab, setTab] = useState(() => SECTIONS[0]?.id || "mentor");
   const [addSecOpen, setAddSecOpen] = useState(false);
@@ -7904,6 +8074,14 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
     if (forked) { onUpdate({ progress: next, xp: nextXp }); return; }
     // Mentorship experience: the MENTOR opens the next lesson (in conversation), never the app.
     if (experienceOf(school) === "mentorship") { onUpdate({ progress: next, xp: nextXp }); return; }
+    // Custom A→B routing: the creator wired this lesson to open a SPECIFIC lesson on pass.
+    const allLessons = (school.semesters || []).flatMap(s => s.lessons || []);
+    const passedLesson = allLessons.find(l => l.number === lessonNumber);
+    if (passedLesson?.unlocks) {
+      const target = allLessons.find(l => l.id === passedLesson.unlocks);
+      if (target && next[target.number] !== "passed") next[target.number] = "active";
+      onUpdate({ progress: next, xp: nextXp }); return;
+    }
     // Unlock the next locked lesson WITHIN THE SAME CLASS (classes advance independently).
     const sems = school.semesters || [];
     let cls = "__main"; sems.forEach(s => { if ((s.lessons || []).some(l => l.number === lessonNumber)) cls = s.classId || "__main"; });
@@ -8064,10 +8242,11 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const pwCircle = pw.style === "circle" && total > 0;
   const pwPlace = pwCircle ? (pw.placement || "hero") : null;
   const pwDetail = `${passedCount}/${total} lessons${school.gamification ? ` · ${xp} ${curLabel(school)}` : ""}`;
-  const TABS = SECTIONS.map(s => [s.id, sectionTitle(s) + (s.kind === "tools" && rec.tools?.length ? ` (${rec.tools.length})` : "")]);
+  // Tabs carry the section KIND so the bar can render an SVG icon (no emojis).
+  const TABS = SECTIONS.map(s => [s.id, (s.title || SECTION_META[s.kind]?.title || "Section") + (s.kind === "tools" && rec.tools?.length ? ` (${rec.tools.length})` : ""), s.kind]);
   // Shared LessonView render — used as a modal (cards/arcade) or inline (LMS shell).
   const renderLessonView = (l, inline) => (
-    <LessonView school={classes ? { ...school, mentor: classMentor(school, lessonClassId(school, l.number)) } : school} lesson={l} T={T} inline={inline}
+    <LessonView school={classes ? { ...school, mentor: classMentor(school, lessonClassId(school, l.number)) } : school} lesson={l} T={T} inline={inline} schoolId={rec.id} viewer={viewer}
       onClose={() => {
         const finished = l; setActiveLesson(null);
         if (!inline && school.progression === "arcade" && finished && progress[finished.number] === "passed" && !(finished.forks || []).length) {
@@ -8085,8 +8264,46 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   return (
     <div style={{ position: "relative", fontFamily: fontStack(school) }}>
       <SchoolEffects effect={school.effect} T={T} />
+      {/* hoverFx: lesson cards & bricks marked data-hv get a lift + glow on hover */}
+      {school.hoverFx && <style>{`[data-hv]{transition:transform 0.18s ease, box-shadow 0.18s ease}[data-hv]:hover{transform:translateY(-3px);box-shadow:0 14px 38px rgba(0,0,0,0.35), 0 0 22px ${T.pg}}`}</style>}
       <Toast toast={toast} />
-      {!readOnly && reveal && <SchoolReveal school={school} T={T} onClose={() => { setReveal(false); onRevealSeen?.(); }} onExplore={() => { setReveal(false); onRevealSeen?.(); setWizardOpen(true); }} onTour={() => { setReveal(false); onRevealSeen?.(); openGuide(); }} />}
+      {!readOnly && reveal && <SchoolReveal school={school} T={T} onClose={() => { setReveal(false); onRevealSeen?.(); }}
+        onStudentPreview={() => { setReveal(false); onRevealSeen?.(); setStudentView(true); }}
+        onTryLesson={() => {
+          const first = (school.semesters || []).flatMap(s => s.lessons || [])[0];
+          setReveal(false); onRevealSeen?.(); setStudentView(true); setMagicFx(true);
+          setTimeout(() => { if (first) enterLesson(first); }, 950);
+          setTimeout(() => setMagicFx(false), 1700);
+        }}
+        onCustomize={() => { setReveal(false); onRevealSeen?.(); let guided = false; try { guided = !!localStorage.getItem("sx_guided"); localStorage.setItem("sx_guided", "1"); } catch { } if (!guided) openGuide(); }} />}
+      {/* Student-preview mode: a floating pill to step back out */}
+      {studentView && (
+        <div style={{ position: "fixed", top: 12, left: "50%", transform: "translateX(-50%)", zIndex: 400, display: "flex", alignItems: "center", gap: 10, background: "rgba(10,10,20,0.94)", border: `1px solid ${T.ba}`, borderRadius: 100, padding: "8px 10px 8px 16px", boxShadow: "0 10px 40px rgba(0,0,0,0.5)", maxWidth: "94vw" }}>
+          <span style={{ color: T.hi, display: "inline-flex" }}><Ico name="eye" size={14} /></span>
+          <span style={{ fontSize: 12.5, color: B.white, fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>Student preview — exactly what your students see</span>
+          <button onClick={() => { setStudentView(false); setActiveLesson(null); }} style={{ background: T.grad, border: "none", borderRadius: 100, color: "#fff", padding: "6px 14px", cursor: "pointer", fontSize: 12, fontWeight: 800, fontFamily: "inherit", flexShrink: 0 }}>Exit preview</button>
+        </div>
+      )}
+      {/* Contact-the-coach — a direct line from the student to the human creator (DM). */}
+      {readOnly && school.contact?.enabled && viewer && rec.owner && viewer.user?.id !== rec.owner && (
+        <button onClick={() => openDM(rec.owner, school.contact.name || "The coach")} title="Message the coach directly"
+          style={{ position: "fixed", bottom: 18, left: 18, zIndex: 210, display: "inline-flex", alignItems: "center", gap: 8, background: T.grad, border: "none", borderRadius: 100, color: "#fff", padding: "11px 18px", cursor: "pointer", fontSize: 13, fontWeight: 800, fontFamily: "'Inter',sans-serif", boxShadow: `0 10px 30px ${T.pg}` }}>
+          <Ico name="chat" size={15} /> {school.contact.label || "Contact the coach"}
+        </button>
+      )}
+      {/* "Try the first lesson" — a brief magical crossing into the student world */}
+      {magicFx && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 390, pointerEvents: "none" }}>
+          <style>{`@keyframes sxMagic{0%{opacity:0}20%{opacity:1}70%{opacity:1}100%{opacity:0}}`}</style>
+          <div style={{ position: "absolute", inset: 0, background: `radial-gradient(circle at 50% 45%, ${T.pg} 0%, rgba(8,8,16,0.9) 72%)`, animation: "sxMagic 1.6s ease forwards", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 14 }}>
+            <SenseitoMark size={72} />
+            <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 18, fontWeight: 800, color: "#fff", letterSpacing: -0.4 }}>Stepping into your school…</div>
+            <div style={{ position: "relative", width: 0, height: 0 }}>
+              {[0, 1, 2, 3, 4, 5].map(i => <span key={i} style={{ position: "absolute", left: (i - 3) * 34, bottom: 0, fontSize: 15, animation: `sxBurst 1.3s ${i * 0.12}s ease-out both`, color: T.hi }}>✦</span>)}
+            </div>
+          </div>
+        </div>
+      )}
       {!readOnly && landingOpen && <LandingStudio school={school} T={T} media={media} publicUrl={rec.published && rec.published_slug ? `${publicBase}/s/${rec.published_slug}` : null} onUpdate={onUpdate} onClose={() => setLandingOpen(false)} />}
       {!readOnly && wizardOpen && <SchoolWizard school={school} T={T} media={media} published={!!rec.published} rec={rec}
         onUpdate={onUpdate} saveLesson={saveLesson} authorBlock={(type, ctx) => authorBlock(ctx || {}, type, "")}
@@ -8106,7 +8323,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 14 }}>
               <div style={{ width: 56, height: 56, borderRadius: 14, background: T.ps, border: `1px solid ${T.ba}`, display: "flex", alignItems: "center", justifyContent: "center", overflow: "hidden" }}>{schoolIcon(school.iconImage ? 56 : 30)}</div>
-              <input value={school.iconImage ? "" : (school.emoji || "")} onChange={e => onUpdate({ data: { ...school, emoji: e.target.value.slice(0, 4), iconImage: undefined } })} placeholder="Type an emoji 🎯" style={{ flex: 1, background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, fontFamily: "inherit", fontSize: 18, padding: "8px 11px", textAlign: "center" }} />
+              <input value={school.iconImage ? "" : (school.emojiChosen ? school.emoji || "" : "")} onChange={e => onUpdate({ data: { ...school, emoji: e.target.value.slice(0, 4), emojiChosen: !!e.target.value.trim(), iconImage: undefined } })} placeholder="Type an emoji (optional)" style={{ flex: 1, background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, fontFamily: "inherit", fontSize: 18, padding: "8px 11px", textAlign: "center" }} />
             </div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {media ? <button onClick={() => { setIconPick(true); setIconEdit(false); }} style={{ ...pBtn(T), flex: 1 }}>🖼️ Pick a photo</button>
@@ -8141,7 +8358,8 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
           return (
           <div style={{ padding: "14px 0 12px", position: "sticky", top: 8, zIndex: 40 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 2, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: 6, flexWrap: "wrap", boxShadow: "0 6px 24px rgba(0,0,0,0.28)", backdropFilter: "blur(6px)" }}>
-              <button onClick={() => setWizardOpen(true)} title="Guided setup — review every lesson, your mentor, tools, design & publish" style={{ display: "inline-flex", alignItems: "center", gap: 6, height: 30, background: T.grad, border: "none", borderRadius: 9, color: "#fff", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, padding: "0 14px", cursor: "pointer", boxShadow: `0 4px 14px ${T.pg}`, whiteSpace: "nowrap" }}><Ico name="wand" /> Set up</button>
+              <button data-guide="setup" onClick={() => setWizardOpen(true)} title="Guided setup — review every lesson, your mentor, tools, design & publish" style={{ display: "inline-flex", alignItems: "center", gap: 6, height: 30, background: T.grad, border: "none", borderRadius: 9, color: "#fff", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, padding: "0 14px", cursor: "pointer", boxShadow: `0 4px 14px ${T.pg}`, whiteSpace: "nowrap" }}><Ico name="wand" /> Set up{school.setupDone ? "" : " ✦"}</button>
+              {toolbarOn && <>
               {sep}
               <button onClick={() => { setStylesOpen(o => !o); setBgOpen(false); }} title="Theme, vibe, font & spacing" style={ghost(stylesOpen)} {...(stylesOpen ? {} : hover)}><Ico name="palette" /> Styles</button>
               <button onClick={() => { setBgOpen(o => !o); setStylesOpen(false); }} title="Background — colour, photo, tint" style={ghost(bgOpen)} {...(bgOpen ? {} : hover)}><Ico name="image" /> Background</button>
@@ -8153,9 +8371,13 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
               <button onClick={() => setTrainOpen(true)} title="Train your school's mentor AI — feed it books/notes, set directives" style={ghost(false)} {...hover}><Ico name="brain" /> Train{(school.training?.sources?.length) ? ` · ${school.training.sources.length}` : ""}</button>
               <button onClick={() => setAnalyticsOpen(true)} title="Student analytics — progress, mastery, RSVPs, emails" style={ghost(false)} {...hover}><Ico name="chart" /> Analytics</button>
               <button onClick={() => setPricingOpen(true)} title="Pricing & PayPal — charge for your school, free trials" style={ghost(false)} {...hover}><Ico name="card" /> Pricing{school.pricing?.enabled && Number(school.pricing?.price) > 0 ? ` · ${CURR_SYM[school.pricing.currency || "USD"] || ""}${school.pricing.price}` : ""}</button>
+              </>}
               <div style={{ flex: 1, minWidth: 6 }} />
-              <button data-guide="publish" onClick={() => onPublish(rec)} disabled={publishing} style={{ display: "inline-flex", alignItems: "center", gap: 6, height: 30, background: rec.published ? "rgba(74,222,128,0.12)" : "linear-gradient(135deg,#059669,#047857)", border: rec.published ? "1px solid rgba(74,222,128,0.35)" : "none", borderRadius: 9, color: rec.published ? "#4ADE80" : "#fff", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, padding: "0 14px", cursor: "pointer", whiteSpace: "nowrap" }}>
-                {publishing ? <><Ico name="check" /> Published</> : rec.published ? <><Ico name="check" /> Published</> : <><Ico name="publish" /> Publish</>}
+              <button onClick={() => setStudentView(true)} title="Preview as a student — see exactly what they see" style={ghost(false)} {...hover}><Ico name="eye" /> Preview</button>
+              <button onClick={() => setToolbarOn(o => { try { localStorage.setItem("sx_toolbar", o ? "0" : "1"); } catch { } return !o; })} title={toolbarOn ? "Hide the editing tools" : "Show the editing tools"} style={ghost(false)} {...hover}><span style={{ display: "inline-block", transform: toolbarOn ? "rotate(180deg)" : "none", transition: "transform 0.2s", fontSize: 9 }}>▼</span></button>
+              {/* Publish lives BEHIND Set up: first setup (or explicitly skip it there), then go live. */}
+              <button data-guide="publish" onClick={() => { if (!rec.published && !school.setupDone) { setWizardOpen(true); showToast("Set up comes first — you can skip everything & publish from inside"); return; } onPublish(rec); }} disabled={publishing} style={{ display: "inline-flex", alignItems: "center", gap: 6, height: 30, background: rec.published ? "rgba(74,222,128,0.12)" : "linear-gradient(135deg,#059669,#047857)", border: rec.published ? "1px solid rgba(74,222,128,0.35)" : "none", borderRadius: 9, color: rec.published ? "#4ADE80" : "#fff", fontFamily: "inherit", fontSize: 12.5, fontWeight: 700, padding: "0 14px", cursor: "pointer", whiteSpace: "nowrap", opacity: !rec.published && !school.setupDone ? 0.75 : 1 }}>
+                {publishing ? <><Ico name="check" /> Published</> : rec.published ? <><Ico name="check" /> Published</> : <><Ico name="publish" /> {school.setupDone ? "Publish" : "Set up & publish"}</>}
               </button>
             </div>
             {stylesOpen && (
@@ -8296,6 +8518,19 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
             </div>
           )}
           <BrandBar school={school} T={T} readOnly={readOnly} onUpdate={onUpdate} />
+          {/* Counselor's Office notification — open student reports land right in the creator's face. */}
+          {!readOnly && openReports > 0 && (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", background: "rgba(251,191,36,0.07)", border: "1px solid rgba(251,191,36,0.4)", borderRadius: 13, padding: "11px 15px" }}>
+              <span style={{ color: "#FBBF24", display: "inline-flex" }}><Ico name="shield" size={16} /></span>
+              <span style={{ flex: 1, fontSize: 13, color: "#FBBF24", fontWeight: 700 }}>{openReports} student report{openReports > 1 ? "s" : ""} waiting in the Counselor's Office</span>
+              <button onClick={() => {
+                const sec = SECTIONS.find(s => s.kind === "counselor");
+                if (sec) { setTab(sec.id); return; }
+                onUpdate({ data: { ...school, sections: [...getSections(school), { id: "counselor", kind: "counselor", title: "Counselor's Office", icon: "🛡️" }] } });
+                setTimeout(() => setTab("counselor"), 60);
+              }} style={{ background: T.grad, border: "none", borderRadius: 9, color: "#fff", padding: "7px 14px", cursor: "pointer", fontSize: 12, fontWeight: 800, fontFamily: "inherit" }}>View →</button>
+            </div>
+          )}
           {(() => {
             if (readOnly || ckDismissed) return null;
             const firstLesson = (school.semesters || []).flatMap(s => s.lessons || [])[0];
@@ -8303,7 +8538,8 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
               { label: "Your school is built", done: true },
               { label: "Preview your first lesson", done: previewed, cta: "Try it", act: () => firstLesson && enterLesson(firstLesson) },
               { label: "Make it yours — tweak it in the left chat", done: (rec.revision || 0) > 0 || !!rec.chatUsed },
-              { label: rec.published ? "Published 🌐" : "Publish & share your school", done: !!rec.published, cta: "Publish", act: () => onPublish(rec) },
+              { label: "Set up your school — confirm every lesson (or skip inside)", done: !!school.setupDone, cta: "Set up", act: () => setWizardOpen(true) },
+              { label: rec.published ? "Published 🌐" : "Publish & share your school", done: !!rec.published, cta: "Publish", act: () => { if (!school.setupDone) { setWizardOpen(true); showToast("Set up comes first — you can skip everything & publish inside"); } else onPublish(rec); } },
             ];
             if (ckItems.every(i => i.done)) return null;
             return <CreatorChecklist items={ckItems} T={T} collapsed={ckCollapsed} onToggle={() => setCkCollapsed(c => !c)} onDismiss={dismissCk} />;
@@ -8326,7 +8562,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
           )}
           {/* Banner — varies by the school's visual skin. With the "rail" completion ring the hero shrinks left and the ring gets its own column. */}
           <div style={pwPlace === "rail" ? { display: "flex", gap: 14, alignItems: "stretch" } : undefined}>
-          <div data-guide="hero" style={{ ...(pwPlace === "rail" ? { flex: 1, minWidth: 0 } : {}), background: B.surface, overflow: "hidden", animation: "fadeUp 0.5s ease", ...((school.cover && pwPlace !== "rail") ? { marginLeft: -20, marginRight: -20, borderRadius: 0, borderBottom: `1px solid ${B.border}` } : { border: `1px solid ${B.border}`, borderRadius: sk.radius }) }}>
+          <div data-guide="hero" style={{ ...(pwPlace === "rail" ? { flex: 1, minWidth: 0 } : {}), background: B.surface, overflow: "hidden", animation: "fadeUp 0.5s ease", ...((school.cover && pwPlace !== "rail" && !school.heroCard) ? { marginLeft: -20, marginRight: -20, borderRadius: 0, borderBottom: `1px solid ${B.border}` } : { border: `1px solid ${B.border}`, borderRadius: sk.radius }) }}>
             {/* A full cover image IS the header — bleeds edge-to-edge; the title sits on it; no duplicated title/description below. */}
             {school.cover ? <div style={{ position: "relative" }}>
               <img src={school.cover} alt="" style={{ width: "100%", height: Number(school.coverHeight) > 0 ? Number(school.coverHeight) : "clamp(200px,30vw,300px)", objectFit: "cover", objectPosition: school.coverPos || "center", display: "block" }} />
@@ -8424,13 +8660,13 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
           )}
           {/* Tabs + section content — two-column when navStyle is "sidebar" */}
           <div style={{ display: "flex", flexDirection: sidebar ? "row" : "column", gap: sidebar ? 16 : dens, alignItems: "flex-start" }}>
-          {!stepsShell && (<div style={{ position: "sticky", top: 10, zIndex: 80, ...(sidebar ? { width: Math.round(200 * (school.tabScale || 1)), flexShrink: 0 } : { width: "100%" }) }}>
+          {!stepsShell && (<div style={{ ...((school.navSticky === false || navKind === "header") ? {} : { position: "sticky", top: 10 }), zIndex: 80, ...(sidebar ? { width: Math.round(200 * (school.tabScale || 1)), flexShrink: 0 } : { width: "100%" }) }}>
             {/* "nav" — the completion ring above the section nav / left sidebar */}
             {pwPlace === "nav" && (sidebar
               ? <div style={{ marginBottom: 10, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 12, padding: "14px 10px", display: "flex", justifyContent: "center" }}><CompletionCircle pct={pct} size={104} T={T} detail={pwDetail} /></div>
               : <div style={{ marginBottom: 8, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 12, padding: "8px 14px", display: "flex", alignItems: "center", gap: 12 }}><CompletionCircle pct={pct} size={62} T={T} label="" /><div><div style={{ fontSize: 12.5, fontWeight: 800, color: B.white }}>{pct}% complete</div><div style={{ fontSize: 11, color: B.muted }}>{pwDetail}</div></div></div>)}
             <div data-guide="tabs" style={{ ...nv.bar, zoom: school.tabScale || 1 }}>
-              {TABS.map(([k, l], ti) => (
+              {TABS.map(([k, l, kind], ti) => (
                 <button key={k} draggable={!readOnly}
                   onDragStart={() => { dragIdx.current = ti; }}
                   onDragOver={e => { if (!readOnly) e.preventDefault(); }}
@@ -8438,7 +8674,9 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
                   onClick={() => { const sec = SECTIONS.find(s => s.id === k); if (sec?.kind === "calendar") { setCalPopup(true); return; } setTab(k); }}
                   onDoubleClick={() => { if (readOnly) return; const cur = SECTIONS.find(s => s.id === k); const t = window.prompt("Rename this tab:", cur?.title || ""); if (t && t.trim()) renameSection(k, t.trim()); }}
                   title={readOnly ? "" : "Drag to reorder · double-click to rename"}
-                  style={{ ...nv.tab(activeTab === k), cursor: readOnly ? "pointer" : "grab" }}>{l}</button>
+                  style={{ ...nv.tab(activeTab === k), cursor: readOnly ? "pointer" : "grab" }}>
+                  <span style={{ display: "inline-flex", alignItems: "center", justifyContent: sidebar ? "flex-start" : "center", gap: 7, width: "100%" }}><Ico name={SECTION_ICO[kind] || "cards"} size={14} />{l}</span>
+                </button>
               ))}
               {!readOnly && <button onClick={() => setAddSecOpen(o => !o)} title="Add or manage sections" style={{ flexShrink: 0, width: 40, padding: "10px 0", borderRadius: 10, border: `1px dashed ${B.borderMid}`, background: addSecOpen ? T.ps : "transparent", color: addSecOpen ? T.hi : B.mutedMid, fontFamily: "inherit", fontSize: 17, fontWeight: 700, cursor: "pointer" }}>＋</button>}
             </div>
@@ -8483,6 +8721,8 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
                     {!hasKind("community") && <button onClick={() => addSection("community")} style={mi}>💬 Community — discussion board</button>}
                     {!hasKind("students") && <button onClick={() => addSection("students")} style={mi}>👥 Students — everyone enrolled</button>}
                     {!hasKind("calendar") && <button onClick={() => addSection("calendar")} style={mi}>📅 Calendar — events popup</button>}
+                    {!hasKind("classroom") && <button onClick={() => addSection("classroom")} style={mi}>🎥 Classroom — live stream & sessions</button>}
+                    {!hasKind("counselor") && <button onClick={() => addSection("counselor")} style={mi}>🛡️ Counselor's Office — private student reports</button>}
                     <button onClick={() => addFeatureSection("library", "library", "Library", "📚")} style={mi}>📚 Library — files & links</button>
                     <button onClick={() => addFeatureSection("events", "events", "Events", "📅")} style={mi}>📅 Events — lives & RSVP</button>
                     <button onClick={() => addFeatureSection("showroom", "showroom", "Showroom", "🎬")} style={mi}>🎬 Showroom — slide deck</button>
@@ -8700,6 +8940,9 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
           {SECTIONS.filter(s => s.kind === "classroom").map(sec => activeTab === sec.id
             ? <ClassroomSection key={sec.id} school={school} schoolId={rec.id} T={T} viewer={viewer} onSignIn={onSignIn} isCreator={!readOnly} onUpdate={onUpdate} />
             : null)}
+          {SECTIONS.filter(s => s.kind === "counselor").map(sec => activeTab === sec.id
+            ? <CounselorSection key={sec.id} school={school} schoolId={rec.id} T={T} viewer={viewer} isCreator={!readOnly} onCountChange={setOpenReports} />
+            : null)}
           {SECTIONS.filter(s => s.kind === "dashboard").map(sec => activeTab === sec.id
             ? <DashboardSection key={sec.id} section={sec} rec={rec} T={T} onUpdate={onUpdate} readOnly={readOnly} school={school} onIngest={ingestOutput} />
             : null)}
@@ -8916,19 +9159,34 @@ function Home({ onCreated, autofocus, onAutofocusDone, session, onRequireAuth })
     setGated(true); onRequireAuth?.(); return true;
   }
 
-  // "Build it yourself" — drop into an empty-but-scaffolded school and assemble it by hand.
-  function buildManual() {
+  // "Build it yourself" — pick a learning experience first (popup of the 4 cards), then
+  // drop into an empty-but-scaffolded school for THAT experience. No "school is ready"
+  // reveal (they're building from scratch) — the build-from-scratch guide opens instead.
+  const [manualPick, setManualPick] = useState(false);
+  function buildManual(exp) {
     if (needsAuth()) return;
+    if (!exp) { setManualPick(true); return; }
     const name = prompt.trim().slice(0, 60) || "My School";
+    const secByExp = {
+      lessons: [{ id: "lessons", kind: "lessons", title: "Lessons", icon: "📚" }, { id: "mentor", kind: "mentor", title: "Mentor", icon: "🎓" }],
+      mentorship: [{ id: "mentor", kind: "mentor", title: "Mentor", icon: "🎓" }, { id: "lessons", kind: "lessons", title: "The Journey", icon: "📚" }],
+      community: [{ id: "community", kind: "community", title: "Community", icon: "💬" }],
+      classroom: [{ id: "classroom", kind: "classroom", title: "Classroom", icon: "🎥" }, { id: "community", kind: "community", title: "Discussion", icon: "💬" }],
+    };
     const content = {
-      name, emoji: "🏫", description: "", category: "Custom", duration: "", learningPath: "mixed", voicePreset: "sage",
+      name, description: "", category: "Custom", duration: "", learningPath: "mixed", voicePreset: "sage",
+      experience: exp,
+      ...(exp === "mentorship" ? { mentorship: { layout: "sidebar", pace: "mentor" } } : {}),
+      ...(exp === "community" ? { communityStyle: "topbar", community: { rooms: [{ title: "General", icon: "💬", about: "The main discussion" }] } } : {}),
+      ...(exp === "classroom" ? { classroom: { events: [] } } : {}),
       mentorName: "Your Mentor", mentorPersonality: "A supportive guide — shape their name, voice and style.", sampleLine: "",
-      semesters: [{ number: 1, title: "Part 1", lessons: [] }],
-      sections: [{ id: "lessons", kind: "lessons", title: "Lessons", icon: "📚" }, { id: "mentor", kind: "mentor", title: "Mentor", icon: "🎓" }],
+      semesters: (exp === "lessons" || exp === "mentorship") ? [{ number: 1, title: "Part 1", lessons: [] }] : [],
+      sections: secByExp[exp] || secByExp.lessons,
       concepts: [], theme: "violet", skin: "aurora",
     };
     const built = composeSchool(content, null);
     built.manual = true; built.genMode = "manual";
+    setManualPick(false);
     onCreated(built);
   }
 
@@ -9056,7 +9314,7 @@ function Home({ onCreated, autofocus, onAutofocusDone, session, onRequireAuth })
       {(phase === "idle" || phase === "error") && (
         <div style={{ marginTop: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, fontSize: 12.5, color: B.muted }}>
           <span>Prefer full control?</span>
-          <button onClick={buildManual} style={{ background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 100, color: "#A78BFA", padding: "6px 14px", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}>✍️ Build it yourself manually →</button>
+          <button onClick={() => buildManual()} style={{ display: "inline-flex", alignItems: "center", gap: 7, background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 100, color: "#A78BFA", padding: "6px 14px", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit" }}><Ico name="wand" size={13} /> Build it yourself manually →</button>
         </div>
       )}
       {phase === "idle" && (
@@ -9122,6 +9380,31 @@ function Home({ onCreated, autofocus, onAutofocusDone, session, onRequireAuth })
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
             <button onClick={() => setPhase("idle")} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 10, color: B.mutedMid, padding: "10px 18px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>← Back</button>
             <button onClick={() => runBuild(sourceText(clarifyA))} disabled={!clarifyA.trim()} style={{ background: clarifyA.trim() ? "linear-gradient(135deg,#7C3AED,#6D28D9)" : "rgba(124,58,237,0.3)", border: "none", borderRadius: 10, padding: "10px 22px", color: "white", fontFamily: "inherit", fontSize: 14, fontWeight: 700, cursor: clarifyA.trim() ? "pointer" : "not-allowed" }}>⚡ Continue Building</button>
+          </div>
+        </div>
+      )}
+      {/* Manual build: choose the learning experience first — same 4 cards, as a popup. */}
+      {manualPick && (
+        <div onClick={() => setManualPick(false)} style={{ position: "fixed", inset: 0, zIndex: 500, background: "rgba(2,2,8,0.78)", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 560, background: B.surface, border: `1px solid ${B.borderMid}`, borderRadius: 20, padding: 22, animation: "fadeUp 0.25s ease" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+              <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 17, fontWeight: 800, color: B.white }}>What are you building?</div>
+              <button onClick={() => setManualPick(false)} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "5px 10px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>✕</button>
+            </div>
+            <div style={{ fontSize: 12.5, color: B.muted, marginBottom: 14 }}>Pick the learning experience — you'll start from a clean scaffold and the build-from-scratch guide opens for it.</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              {Object.entries(EXPERIENCES).map(([k, e]) => (
+                <button key={k} onClick={() => buildManual(k)} style={{ textAlign: "left", background: B.surface2, border: `1.5px solid ${B.borderMid}`, borderRadius: 15, padding: "12px 13px", cursor: "pointer", fontFamily: "inherit", transition: "border-color 0.2s, transform 0.15s" }}
+                  onMouseEnter={ev => { ev.currentTarget.style.transform = "translateY(-2px)"; ev.currentTarget.style.borderColor = "rgba(103,232,249,0.55)"; }} onMouseLeave={ev => { ev.currentTarget.style.transform = "none"; ev.currentTarget.style.borderColor = B.borderMid; }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 3, color: B.white }}>
+                    <Ico name={EXP_ICONS[k]} size={16} />
+                    <span style={{ fontSize: 13, fontWeight: 800 }}>{e.label}</span>
+                  </div>
+                  <div style={{ fontSize: 10.5, color: B.muted, marginBottom: 8 }}>{e.desc}</div>
+                  <ExpWire kind={k} on={false} />
+                </button>
+              ))}
+            </div>
           </div>
         </div>
       )}
@@ -9732,6 +10015,86 @@ function CommunityBoard({ school, schoolId, T, viewer, onSignIn, isCreator, onUp
         : tops.length === 0 ? <div style={{ textAlign: "center", color: B.muted, fontSize: 13, padding: 26, border: `1px dashed ${B.borderMid}`, borderRadius: 14 }}>No posts yet — {isCreator ? "start the first discussion topic." : "be the first to say hi 👋"}</div>
         : tops.map(p => <PostCard key={p.id} p={p} />)}
       {!hideExtras && onUpdate && <CommunityBlocks school={school} T={T} isCreator={isCreator} onUpdate={onUpdate} zone="bottom" />}
+    </div>
+  );
+}
+
+// ── COUNSELOR'S OFFICE — a private channel: students file reports/complaints/suggestions
+//    about the school; only they and the creator can see them. Reports surface on the
+//    creator's studio as a notification banner + inside this section. ──
+const REPORT_CATS = [["report", "🛎 Report a problem"], ["complaint", "📣 Complaint"], ["suggestion", "💡 Suggestion"], ["praise", "💚 Praise"]];
+function CounselorSection({ school, schoolId, T, viewer, isCreator, onCountChange }) {
+  const [rows, setRows] = useState(null);
+  const [body, setBody] = useState("");
+  const [cat, setCat] = useState("report");
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(false);
+  const load = async () => {
+    if (!viewer) { setRows([]); return; }
+    try {
+      const q = isCreator ? `school_id=eq.${encodeURIComponent(schoolId)}` : `school_id=eq.${encodeURIComponent(schoolId)}&user_id=eq.${viewer.user.id}`;
+      const r = await supaFetch(`/rest/v1/school_reports?${q}&select=id,user_id,name,category,body,status,reply,created_at&order=created_at.desc&limit=100`, { token: viewer.token });
+      setRows(r || []);
+      onCountChange?.((r || []).filter(x => x.status === "open").length);
+    } catch { setRows([]); }
+  };
+  useEffect(() => { load(); }, [schoolId, viewer?.user?.id]); // eslint-disable-line
+  async function submit() {
+    const t = body.trim(); if (!t || !viewer || busy) return;
+    setBusy(true);
+    try {
+      await supaFetch(`/rest/v1/school_reports`, { method: "POST", token: viewer.token, headers: { Prefer: "return=minimal" }, body: [{ school_id: schoolId, user_id: viewer.user.id, name: viewerName(viewer), category: cat, body: t.slice(0, 3000) }] });
+      setBody(""); setSent(true); setTimeout(() => setSent(false), 3500); await load();
+    } catch { }
+    setBusy(false);
+  }
+  const patchReport = async (id, p) => { try { await supaFetch(`/rest/v1/school_reports?id=eq.${id}`, { method: "PATCH", token: viewer.token, headers: { Prefer: "return=minimal" }, body: { ...p, updated_at: new Date().toISOString() } }); await load(); } catch { } };
+  const catLabel = (k) => (REPORT_CATS.find(([c]) => c === k) || [])[1] || k;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 680 }}>
+      <div style={{ display: "flex", gap: 12, alignItems: "flex-start", background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 16, padding: "15px 17px" }}>
+        <span style={{ width: 38, height: 38, borderRadius: 12, background: T.ps, border: `1px solid ${T.ba}`, color: T.hi, display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Ico name="shield" size={19} /></span>
+        <div style={{ fontSize: 12.5, color: B.mutedMid, lineHeight: 1.65 }}>
+          <b style={{ color: B.white }}>Counselor's Office.</b> {isCreator ? "Students come here to tell you privately when something's wrong (or right). Open reports also appear as a notification on your studio." : "Something not working? Unfair? Confusing? Tell the creator privately — only they can read what you write here."}
+        </div>
+      </div>
+      {!isCreator && (viewer ? (
+        <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 16, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 9 }}>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {REPORT_CATS.map(([k, l]) => <button key={k} onClick={() => setCat(k)} style={{ background: cat === k ? T.ps : B.surface2, border: `1px solid ${cat === k ? T.ba : B.borderMid}`, borderRadius: 100, color: cat === k ? T.hi : B.mutedMid, padding: "5px 12px", cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit" }}>{l}</button>)}
+          </div>
+          <textarea value={body} onChange={e => setBody(e.target.value)} rows={4} placeholder="Tell it like it is — what happened, where, and what would make it right…" style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 10, color: B.white, fontFamily: "inherit", fontSize: 13, lineHeight: 1.6, padding: "10px 12px", resize: "vertical" }} />
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <button onClick={submit} disabled={busy || !body.trim()} style={{ ...pBtn(T), opacity: busy || !body.trim() ? 0.5 : 1 }}>{busy ? "Sending…" : "Send privately →"}</button>
+            {sent && <span style={{ fontSize: 12, color: "#4ADE80", fontWeight: 700 }}>✓ Sent — the creator has been notified.</span>}
+          </div>
+        </div>
+      ) : (
+        <div style={{ fontSize: 13, color: B.mutedMid, background: B.surface, border: `1px solid ${B.border}`, borderRadius: 14, padding: "14px 16px" }}>Sign in to send a private report.</div>
+      ))}
+      {rows === null ? <div style={{ fontSize: 12.5, color: B.muted, padding: 10 }}>Loading…</div> : rows.length > 0 && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.3, color: B.muted }}>{isCreator ? `Reports (${rows.filter(r => r.status === "open").length} open)` : "Your reports"}</div>
+          {rows.map(r => (
+            <div key={r.id} style={{ background: B.surface, border: `1px solid ${r.status === "open" ? (isCreator ? "rgba(251,191,36,0.4)" : B.border) : B.border}`, borderRadius: 12, padding: "11px 14px", opacity: r.status === "resolved" ? 0.75 : 1 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginBottom: 5 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: T.hi }}>{catLabel(r.category)}</span>
+                {isCreator && <span style={{ fontSize: 11, color: B.muted }}>from {r.name || "a student"}</span>}
+                <span style={{ fontSize: 10.5, color: B.muted }}>{new Date(r.created_at).toLocaleDateString()}</span>
+                <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 800, color: r.status === "open" ? "#FBBF24" : "#4ADE80" }}>{r.status === "open" ? "OPEN" : "✓ RESOLVED"}</span>
+              </div>
+              <div style={{ fontSize: 13, color: B.white, lineHeight: 1.6, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{r.body}</div>
+              {r.reply && <div style={{ marginTop: 8, background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 9, padding: "8px 11px", fontSize: 12.5, color: B.white, lineHeight: 1.55 }}><b style={{ color: T.hi }}>Creator:</b> {r.reply}</div>}
+              {isCreator && r.status === "open" && (
+                <div style={{ display: "flex", gap: 7, marginTop: 9 }}>
+                  <button onClick={() => { const rep = window.prompt("Reply to the student (they'll see it here):", r.reply || ""); if (rep != null) patchReport(r.id, { reply: rep.trim() || null }); }} style={{ background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "5px 12px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit" }}>↩ Reply</button>
+                  <button onClick={() => patchReport(r.id, { status: "resolved" })} style={{ background: "rgba(74,222,128,0.1)", border: "1px solid rgba(74,222,128,0.35)", borderRadius: 8, color: "#4ADE80", padding: "5px 12px", cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit" }}>✓ Resolve</button>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -11069,7 +11432,7 @@ function PublicSchool({ slug }) {
         const rows = await supaFetch(`/rest/v1/schools?select=*&published_slug=eq.${encodeURIComponent(slug)}&published=eq.true&limit=1`);
         if (!rows || !rows.length) { setStatus("notfound"); return; }
         const r = rows[0];
-        setRec({ id: r.id, data: r.data, tools: r.tools || [], revision: r.revision || 0 });
+        setRec({ id: r.id, data: r.data, tools: r.tools || [], revision: r.revision || 0, owner: r.user_id });
         setStatus("ok");
       } catch { setStatus("notfound"); }
     })();
@@ -11454,7 +11817,10 @@ export default function Senseito() {
 
   function createSchool(composed) {
     const rec = { id: uid(), data: composed, tools: [], toolStates: {}, progress: {}, xp: 0, revision: 0, mentorChat: [], advisorChat: [], published: false, published_slug: null, createdAt: Date.now(), _owner: session?.user?.id || null };
-    setSchools(s => [rec, ...s]); setView(rec.id); setJustBuiltId(rec.id);
+    setSchools(s => [rec, ...s]); setView(rec.id);
+    // Manual builds skip the "your school is ready" reveal (nothing was generated) —
+    // the build-from-scratch guide opens for their chosen experience instead.
+    if (composed.manual) setGuideOpen(true); else setJustBuiltId(rec.id);
   }
   function updateSchool(id, patch) { setSchools(s => s.map(r => r.id === id ? { ...r, ...patch } : r)); }
   function renameSchool(id, currentName) {
@@ -11541,10 +11907,18 @@ export default function Senseito() {
     pushMsg({ role: "assistant", content: "↩ Reverted to the previous version." });
     showAToast("↩ Reverted");
   }
+  // Lock every lesson back to sequential gating (first active, rest locked, no forced-open flags).
+  function lockAllFor(rec) {
+    const p = {}; let first = true;
+    rec.data.semesters?.forEach(s => s.lessons?.forEach(l => { p[l.number] = (rec.progress || {})[l.number] === "passed" ? "passed" : first ? "active" : "locked"; first = false; }));
+    const data = { ...rec.data, semesters: (rec.data.semesters || []).map(s => ({ ...s, lessons: (s.lessons || []).map(l => ({ ...l, open: false })) })) };
+    updateSchool(rec.id, { progress: p, data });
+  }
   // Low-level edit executor: applies a one-line directive to the school (plan-level).
   async function coreEdit(rec, inst) {
     const school = rec.data;
     if (/\b(unlock|open|free)\b.*\b(all|every)\b/i.test(inst) && /lesson/i.test(inst)) { unlockAllFor(rec); return { ok: true, msg: "All lessons unlocked" }; }
+    if (/\b(lock|close|gate)\b.*\b(all|every)\b/i.test(inst) && /lesson/i.test(inst)) { lockAllFor(rec); return { ok: true, msg: "All lessons locked back to sequential order" }; }
     if (/\breset\b.*\bprogress\b/i.test(inst)) { const p = {}; school.semesters?.forEach((s, si) => s.lessons?.forEach((l, i) => { p[l.number] = (si === 0 && i === 0) ? "active" : "locked"; })); updateSchool(rec.id, { progress: p, xp: 0 }); return { ok: true, msg: "Progress reset" }; }
     const payload = `CURRENT SCHOOL (plan):\n${JSON.stringify(planOnly(school))}\n\nEDIT INSTRUCTION: ${inst}`;
     setIterProg({ pct: 22, label: "Re-architecting your school…" });
@@ -11591,7 +11965,7 @@ export default function Senseito() {
   function applyDesign(rec, d) {
     if (!d || typeof d !== "object") return false;
     const cur = rec.data; const patch = {};
-    for (const k of ["theme", "skin", "density", "font", "fontScale", "cover", "coverPos", "minimal", "progression", "navStyle", "navGrad", "effect", "lessonGrid", "tabScale", "communityStyle"]) if (k in d) patch[k] = d[k];
+    for (const k of ["theme", "skin", "density", "font", "fontScale", "cover", "coverPos", "minimal", "progression", "navStyle", "navGrad", "effect", "lessonGrid", "tabScale", "communityStyle", "heroCard", "hoverFx", "navSticky"]) if (k in d) patch[k] = d[k];
     if ("progressWidget" in d) patch.progressWidget = d.progressWidget === null ? undefined : { style: "circle", placement: ["hero", "rail", "nav", "meta"].includes(d.progressWidget?.placement) ? d.progressWidget.placement : "hero" };
     if ("mentorship" in d && d.mentorship && typeof d.mentorship === "object") patch.mentorship = { ...(cur.mentorship || {}), ...d.mentorship };
     if ("classroom" in d && d.classroom && typeof d.classroom === "object") patch.classroom = { ...(cur.classroom || {}), ...d.classroom };
@@ -11628,6 +12002,14 @@ export default function Senseito() {
         showAToast(`✓ ${target.title} ${un ? "unstuck" : "sticky"}`, "ok");
         return;
       }
+    }
+    // Deterministic shortcut: unlock/lock ALL lessons — never depends on the AI's mood.
+    if (/\b(unlock|open|lock|close|gate)\b/i.test(text) && /\b(all|every)\b/i.test(text) && /lesson/i.test(text)) {
+      const lock = /\b(lock|close|gate)/i.test(text.replace(/unlock/gi, ""));
+      pushMsg({ role: "user", content: text });
+      if (lock) { lockAllFor(rec); pushMsg({ role: "assistant", content: "✓ All lessons locked back to sequential order — students progress one by one again." }); showAToast("✓ All lessons locked", "ok"); }
+      else { unlockAllFor(rec); pushMsg({ role: "assistant", content: "✓ Every lesson is now unlocked for all students." }); showAToast("✓ All lessons unlocked", "ok"); }
+      return;
     }
     // "make/create a (beautiful) PDF / handout / worksheet from lesson N → add to media"
     if (session && /\b(pdf|hand-?out|worksheet|workbook)\b/i.test(text) && /\b(make|create|generate|build|turn|export|produce|add|design)\b/i.test(text)) {
@@ -11764,10 +12146,13 @@ export default function Senseito() {
               {active && <button onClick={() => setSideCollapsed(true)} title="Hide the chat — focus on editing" style={{ background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "6px 10px", cursor: "pointer", fontSize: 13, fontFamily: "inherit" }}>«</button>}
             </div>
           </div>
+          {/* Side-by-side so the chat below gets more room */}
           {active
-            ? <button onClick={() => setAddClassNonce(n => n + 1)} title="Create a new class (its own teacher + curriculum) in this school" style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "1px dashed rgba(124,58,237,0.5)", background: "rgba(124,58,237,0.1)", color: "#A78BFA", fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", textAlign: "left" }}>＋ Add a class</button>
+            ? <div style={{ display: "flex", gap: 6 }}>
+                <button onClick={() => setAddClassNonce(n => n + 1)} title="Create a new class (its own teacher + curriculum) in this school" style={{ flex: 1, minWidth: 0, padding: "9px 8px", borderRadius: 10, border: "1px dashed rgba(124,58,237,0.5)", background: "rgba(124,58,237,0.1)", color: "#A78BFA", fontFamily: "inherit", fontSize: 12, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>＋ Add a class</button>
+                <button onClick={() => { setView("home"); setSideOpen(false); setScrollHome(true); }} title="Start a brand-new school" style={{ flex: 1, minWidth: 0, padding: "9px 8px", borderRadius: 10, border: "none", background: "rgba(124,58,237,0.1)", color: "#A78BFA", fontFamily: "inherit", fontSize: 12, fontWeight: 700, cursor: "pointer", whiteSpace: "nowrap" }}>＋ New School</button>
+              </div>
             : <button onClick={() => { setView("home"); setSideOpen(false); setScrollHome(true); }} style={{ width: "100%", padding: "10px 14px", borderRadius: 10, border: "none", background: view === "home" ? "linear-gradient(135deg,#7C3AED,#6D28D9)" : "rgba(124,58,237,0.1)", color: view === "home" ? "white" : "#A78BFA", fontFamily: "inherit", fontSize: 13, fontWeight: 700, cursor: "pointer", textAlign: "left", boxShadow: view === "home" ? "0 0 18px rgba(124,58,237,0.25)" : "none" }}>＋ New School</button>}
-          {active && <button onClick={() => { setView("home"); setSideOpen(false); setScrollHome(true); }} style={{ width: "100%", marginTop: 6, padding: "7px 14px", borderRadius: 10, border: "none", background: "none", color: B.muted, fontFamily: "inherit", fontSize: 12, cursor: "pointer", textAlign: "left" }}>＋ New School</button>}
         </div>
         {active ? (
           <Boundary resetKey={view} fallback={() => <div style={{ flex: 1, padding: 16, fontSize: 12, color: B.muted }}>Chat hit an error. <button onClick={() => setView("home")} style={{ background: "none", border: "none", color: "#A78BFA", cursor: "pointer", fontFamily: "inherit", fontSize: 12 }}>← Back to schools</button></div>}>
@@ -11786,7 +12171,11 @@ export default function Senseito() {
             return (
               <div key={r.id} onClick={() => { setView(r.id); setSideOpen(false); }} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 10px", borderRadius: 10, cursor: "pointer", marginBottom: 4, background: isActive ? "rgba(124,58,237,0.1)" : "transparent", border: `1px solid ${isActive ? "rgba(124,58,237,0.35)" : "transparent"}` }}
                 onMouseEnter={e => !isActive && (e.currentTarget.style.background = "rgba(255,255,255,0.03)")} onMouseLeave={e => !isActive && (e.currentTarget.style.background = "transparent")}>
-                <div style={{ width: 32, height: 32, borderRadius: 9, background: T.ps, border: `1px solid ${T.ba}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, flexShrink: 0 }}>{r.data.emoji || "🏫"}</div>
+                {r.data.iconImage
+                  ? <img src={r.data.iconImage} alt="" style={{ width: 32, height: 32, borderRadius: 9, objectFit: "cover", flexShrink: 0 }} />
+                  : r.data.emojiChosen && r.data.emoji
+                    ? <div style={{ width: 32, height: 32, borderRadius: 9, background: T.ps, border: `1px solid ${T.ba}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, flexShrink: 0 }}>{r.data.emoji}</div>
+                    : <Monogram name={r.data.name} T={T} size={32} />}
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 12.5, fontWeight: 600, color: B.white, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{r.data.name}{r.published ? " 🌐" : ""}</div>
                   <div style={{ fontSize: 10.5, color: B.muted }}>{done}/{total} lessons</div>
