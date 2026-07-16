@@ -97,6 +97,16 @@ until then. The studio toolbar is collapsible (`sx_toolbar` in localStorage); th
 steps are generated per experience (`GUIDE_STEPS_FOR`). Manual builds ("Build it yourself") pick
 an experience from a 4-card popup, scaffold for it, skip the reveal, and open the guide.
 
+**Introduction ("lesson zero")** — `school.intro` (`{on, title, headline, sub, welcome,
+journey[], how[], expectations[], pledge, cta}`), authored by `genIntro()`/`INTRO_SYS` in
+parallel with EVERY generated build. `IntroPage` renders it themed (school cover as hero,
+typed mentor welcome via `TypeLine`, clickable journey map, pledge stored in
+`toolStates.__introPledge`). Students see it ONCE (`toolStates.__introSeen`) before the school;
+creators land on it from "Try the first lesson" and the toolbar ▶ Intro button (which also
+generates one on demand for schools without it). Renameable inline, removable, regenerable —
+"regenerate the introduction" is a deterministic `chatSend` shortcut; `intro` is a CHAT_SYS
+design key ({title} rename, {on:false} remove) and preserved by ITERATE_SYS.
+
 **Counselor's Office** — section kind `counselor` (`CounselorSection`): students file private
 reports/complaints/suggestions → `school_reports` table (RLS: student inserts/reads own; school
 owner reads/replies/resolves). Creators see an in-studio notification banner with the open count

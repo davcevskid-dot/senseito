@@ -1022,7 +1022,7 @@ function trainingPreamble(school) {
 }
 
 const ITERATE_SYS = `You are the Senseito School Editor AI. You receive an existing school PLAN as JSON (lessons describe activities as "blockTypes": [type strings] only — NOT full block data) and an edit instruction.
-Return the FULL updated plan as JSON with the EXACT same structure and field names. Apply ONLY the requested change; preserve everything else exactly, including each lesson's "blockTypes" array, the "sections" array, the "concepts" array, "layout", "experience" (lessons|mentorship|community|classroom) and its companion objects ("mentorship", "community", "communityStyle", "classroom"), and learningPath/voicePreset/gamiPreset/theme (change those only if asked). If the change introduces a genuinely new concept, you may add it to "concepts". Also refresh "suggestions" to 3-4 NEW specific ideas that fit after this change.
+Return the FULL updated plan as JSON with the EXACT same structure and field names. Apply ONLY the requested change; preserve everything else exactly, including each lesson's "blockTypes" array, the "sections" array, the "concepts" array, "layout", "experience" (lessons|mentorship|community|classroom) and its companion objects ("mentorship", "community", "communityStyle", "classroom"), the "intro" object (the lesson-zero Introduction page — you may edit its text fields on request, set intro.title to rename it, or intro.on=false to remove it), and learningPath/voicePreset/gamiPreset/theme (change those only if asked). If the change introduces a genuinely new concept, you may add it to "concepts". Also refresh "suggestions" to 3-4 NEW specific ideas that fit after this change.
 NUMBERING & MOVING LESSONS: lesson "number" values are assigned AUTOMATICALLY by position — the app renumbers every lesson sequentially across the parts after your edit, so you do NOT need to keep them consistent. What matters is WHICH PART a lesson sits in and its ORDER within that part.
 - "Add a lesson to part 1" → insert it into part 1's "lessons" array at the right spot. Do NOT move it to another part. (It will get the next number in that part automatically; the rest shift down.)
 - "Change lesson X's number to N" → this means MOVE it so it becomes the Nth lesson overall — reorder it into that position, keeping it in the part that position falls in. Don't just relabel.
@@ -1150,6 +1150,7 @@ YOU CAN DO ALMOST ANYTHING here — if a request doesn't match a listed design k
 - "mentorship": { "layout":"focus"|"sidebar"|"topcards"|"minibar"|"bigbar"|"icons", "pace":"mentor"|"strict"|"relaxed" } — ONLY for mentorship-experience schools: how the mentor-led journey is displayed (mentor only / lesson titles in a side rail / small cards on top / compact bar / stretched big bar / gamified icon trail) and how demanding the mentor is before unlocking the next step.
 - "communityStyle": "classic"|"discord"|"topbar" — ONLY for community-experience schools: feed with widgets / left rail of rooms (Discord-like) / Skool-style top menu (not sticky).
 - "classroom": { "streamUrl":"https…", "title":"…", "about":"…" } — ONLY for classroom-experience schools: the live stream/Zoom link shown in the broadcast frame and its labels.
+- "intro": { "title":"…" } renames the Introduction (lesson-zero) page; { "on": false } removes it; { "on": true } brings it back. To REWRITE its content, use an "action" like "regenerate the introduction" instead (the app re-authors it fresh).
 - "certificate": patch object for the diploma students earn at 100% completion — include ONLY changed keys: { "title":"...", "org":"<awarding name>", "body":"<the recognition sentence>", "accent":"#hex", "signature":"<name>", "signatureRole":"<e.g. Instructor>", "photoUrl":"<https logo/photo>", "on":true|false }. Use for "design/redesign the certificate", "make the certificate gold", "change the certificate wording", "turn the certificate off".
 - "soul": "<a short description of a bespoke animated 'signature' centerpiece for the hero — e.g. 'a glowing constellation of the key ideas', 'an animated crest', 'drifting particles that form the topic'>", OR "remove" to take it away. A hidden delight — use ONLY when they explicitly ask for a hero/signature visual, a 'soul', or something special/animated at the top.
 - "genImage": { "prompt":"<a rich visual description to GENERATE an AI image from — expand their idea into a great image prompt>", "target":"cover"|"background"|"hero" } — use when they ask you to CREATE/generate an image ("generate a cover of…", "make me a background photo of a forest"). target: cover = the big banner image, background = the page background photo, hero = behind the title. The image is generated and placed automatically.
@@ -1285,6 +1286,31 @@ ${dna}${trainingPreamble(school)}${busContext(bus, school)}${journey}${gatekeepe
 THE SCHOOL: ${school.description} Lessons: ${school.semesters?.flatMap(s => s.lessons?.map(l => l.title)).join("; ")}
 The student can ask you ANYTHING related to this subject. Stay fully in character. Connect answers back to the school's lessons and missions when relevant. HONOR THEIR PROGRESS: only treat lessons they've completed as known ground; for a STILL-LOCKED lesson, don't dump its full content — give a short teaser and point them to the lesson(s) that unlock it. If they ask "what's next" or "what can I do now", name the lessons currently open to them, not locked ones. Push them toward action, not consumption. Never bullet lists. Replies under 150 words.
 ${MENTOR_WIDGET_NOTE}${schoolHasGarden(school) ? `\n${MENTOR_GARDEN_NOTE}` : ""}`;
+}
+
+// ─────────────────────────────────────────────────────────────
+// INTRODUCTION ("lesson zero") — the first page a student meets after enrolling,
+// before any lesson: an interactive, school-flavored welcome that primes them.
+// Authored in parallel with every build; regenerable; renameable; removable.
+// ─────────────────────────────────────────────────────────────
+const INTRO_SYS = `You are the Senseito Introduction Designer. Write the content of a school's INTRODUCTION page — "lesson zero": the very first thing a new student sees after enrolling, before any lesson. It must make them feel they're in exactly the right place, show them the road ahead, and prime them to start. This is also the first thing the CREATOR experiences — it has to feel 10/10.
+Return JSON ONLY:
+{
+ "headline": "<a magnetic 3-8 word welcome headline — subject-flavored, never generic>",
+ "sub": "<1-2 sentences: the promise of this school, in its voice>",
+ "welcome": "<the MENTOR speaking directly to the new student — 2-3 sentences in their EXACT voice; warm, personal, sets the bar>",
+ "journey": [3-5 of { "label": "<a milestone, 2-5 words>", "blurb": "<one vivid sentence on what happens/changes there>" }] — the arc from day one to transformation, in order,
+ "how": [3-4 of { "icon": "book"|"chat"|"bolt"|"target"|"people"|"gradcap"|"camera", "title": "<3-5 words>", "text": "<one sentence>" }] — how THIS school actually works; match its experience (lessons curriculum / mentor-led unlocking / community rooms / live classroom),
+ "expectations": [3-5 short phrases — what's honestly expected of the student, motivating not scary],
+ "pledge": { "prompt": "<one question asking them to commit or name their goal, subject-flavored>", "placeholder": "<hint text for their answer>", "button": "<2-4 word commit label>" },
+ "cta": "<the start-button label, subject-flavored, e.g. 'Step into Lesson 1 →'>"
+}
+Ground every word in the school's subject, mentor voice and experience. Vivid, specific, zero filler. Output ONLY the JSON.`;
+async function genIntro(school) {
+  const ctx = `SCHOOL: ${school.name} — ${flattenText(school.description) || ""}\nEXPERIENCE: ${school.experience || "lessons"}\nMENTOR: ${school.mentorName || school.mentor?.name || "The Mentor"} (${school.voicePreset || "sage"}) — voice sample: "${school.sampleLine || school.mentor?.sampleLine || ""}"\nTRANSFORMATION: ${flattenText(school.transformation) || ""}\nLESSONS: ${(school.semesters || []).flatMap(s => (s.lessons || []).map(l => l.title)).slice(0, 12).join("; ") || "—"}\nCONCEPTS: ${(school.concepts || []).map(c => c.label).join(", ") || "—"}`;
+  const out = await apiJSON(INTRO_SYS, [{ role: "user", content: ctx }], 1600, "sonnet");
+  if (!out || !out.headline) return null;
+  return { on: true, title: "Introduction", ...out };
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -6924,6 +6950,138 @@ function StatChip({ icon, value, label, T, delay }) {
   );
 }
 
+// Types a line once, like the mentor is speaking it live.
+function TypeLine({ text = "", speed = 24, style }) {
+  const [n, setN] = useState(0);
+  useEffect(() => { setN(0); if (!text) return; const id = setInterval(() => setN(x => x >= text.length ? x : x + 1), speed); return () => clearInterval(id); }, [text, speed]);
+  return <span style={style}>{text.slice(0, n)}{n < text.length && <span style={{ display: "inline-block", width: 2, height: "1em", background: "currentColor", verticalAlign: "text-bottom", marginLeft: 1, animation: "blink 1s steps(2) infinite" }} />}</span>;
+}
+
+// ── INTRODUCTION PAGE ("lesson zero") — students meet it once after enrolling, before
+//    lesson 1; creators land on it from "Try the first lesson" and the Intro toolbar
+//    button. Interactive (journey map, pledge), themed to the school, creator-editable
+//    inline, renameable, removable, regenerable. ──
+function IntroPage({ school, T, rec, readOnly, onUpdate, onSeen, onStart, onClose, onRegen, regenBusy }) {
+  const intro = school.intro || {};
+  const canEdit = !readOnly && !!onUpdate;
+  const setIntro = (patch) => onUpdate?.({ data: { ...school, intro: { ...intro, ...patch } } });
+  const [ji, setJi] = useState(0);
+  const [pledge, setPledge] = useState("");
+  const savedPledge = (rec?.toolStates || {}).__introPledge;
+  const savePledge = () => { const t = pledge.trim(); if (!t) return; onUpdate?.({ toolStates: { ...(rec?.toolStates || {}), __introPledge: t } }); };
+  const journey = (intro.journey || []).slice(0, 6);
+  const mentorName = school.mentor?.name || "Your mentor";
+  const heroBg = school.cover
+    ? `linear-gradient(180deg, rgba(6,6,14,0.35) 0%, rgba(6,6,14,0.78) 78%, var(--bg) 100%), url("${school.cover}") center/cover`
+    : (T.heroGrad || T.gr);
+  const card = { background: B.surface, border: `1px solid ${B.border}`, borderRadius: 18, padding: "18px 20px" };
+  const lbl = { fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.6, color: T.hi, marginBottom: 10 };
+  return (
+    <div style={{ position: "fixed", inset: 0, zIndex: 350, background: B.bg, overflowY: "auto", fontFamily: fontStack(school) }}>
+      <SchoolEffects effect={school.effect} T={T} />
+      {/* Top bar — rename (creator), regenerate/remove (creator), skip (student) */}
+      <div style={{ position: "sticky", top: 0, zIndex: 5, display: "flex", alignItems: "center", gap: 10, padding: "10px 16px", background: "rgba(8,8,16,0.72)", backdropFilter: "blur(8px)", borderBottom: `1px solid ${B.border}` }}>
+        <Monogram name={school.name} T={T} size={26} />
+        <div style={{ fontSize: 13, fontWeight: 800, color: B.white, display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+          <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{school.name}</span>
+          <span style={{ color: B.muted, fontWeight: 400 }}>·</span>
+          <span style={{ color: T.hi }}><EditableText value={intro.title || "Introduction"} readOnly={!canEdit} onSave={v => setIntro({ title: v || "Introduction" })} /></span>
+        </div>
+        <div style={{ flex: 1 }} />
+        {canEdit && <>
+          {onRegen && <button onClick={onRegen} disabled={regenBusy} style={{ background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "6px 11px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit", opacity: regenBusy ? 0.6 : 1 }}>{regenBusy ? <><Spinner size={11} /> Rewriting…</> : "↻ Regenerate"}</button>}
+          <button onClick={() => { if (window.confirm("Remove the Introduction page? Students will go straight to the school. You can generate a new one any time from the toolbar.")) { onUpdate({ data: { ...school, intro: undefined } }); onClose(); } }} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: "#F87171", padding: "6px 11px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit" }}>Remove</button>
+        </>}
+        <button onClick={onClose} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "6px 12px", cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>{readOnly ? "Skip →" : "✕ Close"}</button>
+      </div>
+      <div style={{ maxWidth: 780, margin: "0 auto", padding: "0 18px 70px" }}>
+        {/* Hero — the school's own imagery carries the first impression */}
+        <div style={{ margin: "18px -2px 16px", borderRadius: 22, overflow: "hidden", border: `1px solid ${T.ba}`, background: heroBg, padding: "clamp(46px,9vw,84px) 28px clamp(30px,6vw,52px)", textAlign: "center", position: "relative", animation: "fadeUp 0.5s ease both" }}>
+          <div style={{ fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: 2.6, color: "rgba(255,255,255,0.85)", marginBottom: 12 }}>Welcome to {school.name}</div>
+          <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: "clamp(26px,5.4vw,40px)", fontWeight: 800, letterSpacing: -1, color: "#fff", lineHeight: 1.12, textShadow: "0 2px 22px rgba(0,0,0,0.5)", maxWidth: 620, margin: "0 auto" }}>
+            <EditableText value={intro.headline || "Your journey starts here"} readOnly={!canEdit} onSave={v => setIntro({ headline: v })} />
+          </div>
+          <div style={{ fontSize: 14.5, color: "rgba(255,255,255,0.88)", lineHeight: 1.65, maxWidth: 520, margin: "14px auto 0", textShadow: "0 1px 12px rgba(0,0,0,0.5)" }}>
+            <EditableText value={intro.sub || ""} readOnly={!canEdit} onSave={v => setIntro({ sub: v })} />
+          </div>
+        </div>
+        {/* Mentor welcome — spoken live */}
+        <div style={{ ...card, display: "flex", gap: 14, alignItems: "flex-start", marginBottom: 14, animation: "fadeUp 0.5s 0.12s ease both" }}>
+          <div style={{ width: 46, height: 46, borderRadius: "50%", background: T.grad, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 19, fontWeight: 800, color: "#fff", flexShrink: 0, boxShadow: `0 6px 20px ${T.pg}` }}>{(mentorName[0] || "M").toUpperCase()}</div>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ fontSize: 10, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.5, color: T.hi, marginBottom: 3 }}>{mentorName} — your mentor</div>
+            <div style={{ fontSize: 14, color: B.white, lineHeight: 1.7, fontStyle: "italic" }}>
+              {canEdit ? <EditableText value={intro.welcome || ""} onSave={v => setIntro({ welcome: v })} /> : <TypeLine text={intro.welcome || ""} />}
+            </div>
+          </div>
+        </div>
+        {/* The journey — interactive milestone path */}
+        {journey.length > 0 && (
+          <div style={{ ...card, marginBottom: 14, animation: "fadeUp 0.5s 0.2s ease both" }}>
+            <div style={lbl}>The journey ahead — tap each stop</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 4, overflowX: "auto", paddingBottom: 6 }}>
+              {journey.map((j, i) => (
+                <Fragment key={i}>
+                  {i > 0 && <span style={{ flex: "1 0 14px", height: 2, borderRadius: 1, background: i <= ji ? T.p : B.surface3 }} />}
+                  <button onClick={() => setJi(i)} style={{ flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center", gap: 5, background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", padding: "2px 2px" }}>
+                    <span style={{ width: 34, height: 34, borderRadius: "50%", border: `2px solid ${i === ji ? T.p : i < ji ? T.ba : B.borderMid}`, background: i === ji ? T.ps : B.surface2, color: i === ji ? T.hi : B.muted, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, boxShadow: i === ji ? `0 0 16px ${T.pg}` : "none", transition: "all 0.25s" }}>{i + 1}</span>
+                    <span style={{ fontSize: 10.5, fontWeight: 700, color: i === ji ? B.white : B.muted, maxWidth: 92, lineHeight: 1.25, textAlign: "center" }}>{j.label}</span>
+                  </button>
+                </Fragment>
+              ))}
+            </div>
+            <div key={ji} style={{ marginTop: 10, background: B.surface2, border: `1px solid ${T.ba}`, borderRadius: 12, padding: "12px 15px", fontSize: 13.5, color: B.white, lineHeight: 1.65, animation: "fadeUp 0.3s ease" }}>{journey[ji]?.blurb}</div>
+          </div>
+        )}
+        {/* How this school works */}
+        {(intro.how || []).length > 0 && (
+          <div style={{ ...card, marginBottom: 14, animation: "fadeUp 0.5s 0.28s ease both" }}>
+            <div style={lbl}>How this school works</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 10 }}>
+              {(intro.how || []).slice(0, 4).map((h, i) => (
+                <div key={i} style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 13, padding: "13px 14px" }}>
+                  <span style={{ width: 30, height: 30, borderRadius: 10, background: T.ps, border: `1px solid ${T.ba}`, color: T.hi, display: "inline-flex", alignItems: "center", justifyContent: "center", marginBottom: 8 }}><Ico name={ICO_PATHS[h.icon] ? h.icon : "sparkle"} size={15} /></span>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: B.white, marginBottom: 4, lineHeight: 1.3 }}>{h.title}</div>
+                  <div style={{ fontSize: 11.5, color: B.mutedMid, lineHeight: 1.55 }}>{h.text}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {/* Expectations */}
+        {(intro.expectations || []).length > 0 && (
+          <div style={{ ...card, marginBottom: 14, animation: "fadeUp 0.5s 0.34s ease both" }}>
+            <div style={lbl}>What's expected of you</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+              {(intro.expectations || []).slice(0, 6).map((x, i) => <span key={i} style={{ fontSize: 12.5, color: B.white, background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 100, padding: "6px 14px" }}>✓ {x}</span>)}
+            </div>
+          </div>
+        )}
+        {/* The pledge — an interactive commitment that persists with their enrollment */}
+        {intro.pledge?.prompt && (
+          <div style={{ ...card, border: `1px solid ${T.ba}`, marginBottom: 18, animation: "fadeUp 0.5s 0.4s ease both" }}>
+            <div style={lbl}>Your commitment</div>
+            <div style={{ fontSize: 14, color: B.white, lineHeight: 1.6, marginBottom: 10 }}>{intro.pledge.prompt}</div>
+            {savedPledge ? (
+              <div style={{ background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.35)", borderRadius: 11, padding: "11px 14px", fontSize: 13.5, color: "#6EE7B7", lineHeight: 1.6 }}>✓ Locked in: “{savedPledge}”</div>
+            ) : (
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <input value={pledge} onChange={e => setPledge(e.target.value)} onKeyDown={e => { if (e.key === "Enter") savePledge(); }} placeholder={intro.pledge.placeholder || "Write it down…"} style={{ flex: 1, minWidth: 200, background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 11, color: B.white, fontFamily: "inherit", fontSize: 13.5, padding: "11px 14px" }} />
+                <button onClick={savePledge} disabled={!pledge.trim()} style={{ ...pBtn(T), opacity: pledge.trim() ? 1 : 0.5 }}>{intro.pledge.button || "I'm in"}</button>
+              </div>
+            )}
+          </div>
+        )}
+        {/* CTA */}
+        <div style={{ textAlign: "center", animation: "fadeUp 0.5s 0.46s ease both" }}>
+          <button onClick={onStart} style={{ background: T.grad, border: "none", borderRadius: 14, color: "#fff", padding: "15px 34px", cursor: "pointer", fontSize: 15.5, fontWeight: 800, fontFamily: "inherit", boxShadow: `0 12px 36px ${T.pg}` }}>{intro.cta || "Begin Lesson 1 →"}</button>
+          <div style={{ marginTop: 10 }}><button onClick={onClose} style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 12, fontFamily: "inherit", textDecoration: "underline" }}>{readOnly ? "Skip for now — take me to the school" : "Close preview"}</button></div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // THE REVEAL — a calm, proud unveiling (no confetti): proof → mentor → what's next.
 function SchoolReveal({ school, T, onClose, onStudentPreview, onTryLesson, onCustomize }) {
   const st = schoolWowStats(school);
@@ -7838,9 +7996,21 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const [wizardOpen, setWizardOpen] = useState(false);
   const [toolbarOn, setToolbarOn] = useState(() => { try { return localStorage.getItem("sx_toolbar") !== "0"; } catch { return true; } }); // studio toolbar toggle
   const [openReports, setOpenReports] = useState(0); // Counselor's Office: open student reports (creator notification)
+  // Introduction ("lesson zero") — auto-shown ONCE to students; creators open it on demand.
+  const [introOpen, setIntroOpen] = useState(false);
+  const [introBusy, setIntroBusy] = useState(false);
   const [studentView, setStudentView] = useState(false); // creator previews the school AS a student
   const [magicFx, setMagicFx] = useState(false); // one-shot "step into your school" effect
   if (studentView) readOnly = true; // student-preview: render EXACTLY what a student sees
+  const intro = rec.data.intro && rec.data.intro.on !== false ? rec.data.intro : null;
+  const introSeen = !!(rec.toolStates || {}).__introSeen;
+  const showIntro = !!intro && (introOpen || (readOnly && !introSeen));
+  const markIntroSeen = () => { setIntroOpen(false); if (!introSeen) onUpdate({ toolStates: { ...(rec.toolStates || {}), __introSeen: true } }); };
+  async function regenIntro() {
+    if (introBusy) return; setIntroBusy(true);
+    try { const i = await genIntro(rec.data); if (i) onUpdate({ data: { ...rec.data, intro: { ...i, title: rec.data.intro?.title || i.title } } }); } catch { }
+    setIntroBusy(false);
+  }
   // Counselor's Office: creators get notified of open reports even without visiting the section.
   useEffect(() => {
     if (readOnly || !viewer?.token || !rec?.id) return;
@@ -8272,7 +8442,8 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
         onTryLesson={() => {
           const first = (school.semesters || []).flatMap(s => s.lessons || [])[0];
           setReveal(false); onRevealSeen?.(); setStudentView(true); setMagicFx(true);
-          setTimeout(() => { if (first) enterLesson(first); }, 950);
+          // The Introduction IS the first thing a student meets — land there when it exists.
+          setTimeout(() => { if (intro) setIntroOpen(true); else if (first) enterLesson(first); }, 950);
           setTimeout(() => setMagicFx(false), 1700);
         }}
         onCustomize={() => { setReveal(false); onRevealSeen?.(); let guided = false; try { guided = !!localStorage.getItem("sx_guided"); localStorage.setItem("sx_guided", "1"); } catch { } if (!guided) openGuide(); }} />}
@@ -8284,6 +8455,12 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
           <button onClick={() => { setStudentView(false); setActiveLesson(null); }} style={{ background: T.grad, border: "none", borderRadius: 100, color: "#fff", padding: "6px 14px", cursor: "pointer", fontSize: 12, fontWeight: 800, fontFamily: "inherit", flexShrink: 0 }}>Exit preview</button>
         </div>
       )}
+      {/* INTRODUCTION ("lesson zero") — students meet it once before the school; creators preview/edit it. */}
+      {showIntro && <IntroPage school={school} T={T} rec={rec} readOnly={readOnly} onUpdate={onUpdate}
+        onSeen={markIntroSeen}
+        onStart={() => { markIntroSeen(); const first = (school.semesters || []).flatMap(s => s.lessons || [])[0]; if (first) { const lessonsSec = SECTIONS.find(s => s.kind === "lessons"); if (shell === "lms" && lessonsSec) setTab(lessonsSec.id); enterLesson(first); } else { const m = SECTIONS.find(s => s.kind === "mentor") || SECTIONS[0]; if (m) setTab(m.id); } }}
+        onClose={markIntroSeen}
+        onRegen={!readOnly ? regenIntro : null} regenBusy={introBusy} />}
       {/* Contact-the-coach — a direct line from the student to the human creator (DM). */}
       {readOnly && school.contact?.enabled && viewer && rec.owner && viewer.user?.id !== rec.owner && (
         <button onClick={() => openDM(rec.owner, school.contact.name || "The coach")} title="Message the coach directly"
@@ -8365,6 +8542,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
               <button onClick={() => { setBgOpen(o => !o); setStylesOpen(false); }} title="Background — colour, photo, tint" style={ghost(bgOpen)} {...(bgOpen ? {} : hover)}><Ico name="image" /> Background</button>
               {sep}
               <button onClick={() => setLandingOpen(true)} title="Design a high-converting landing page" style={ghost(false)} {...hover}><Ico name="rocket" /> Landing{school.landing?.sections?.length && school.landing?.on !== false ? <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#4ADE80", display: "inline-block" }} /> : null}</button>
+              <button onClick={async () => { if (intro) { setIntroOpen(true); return; } if (introBusy) return; setIntroBusy(true); try { const i = await genIntro(school); if (i) { onUpdate({ data: { ...school, intro: i } }); setIntroOpen(true); } else showToast("Couldn't write the intro — try again", "err"); } catch (e) { showToast("✕ " + e.message, "err"); } setIntroBusy(false); }} title="Introduction — the 'lesson zero' page students see once before lesson 1" style={ghost(false)} {...hover}>{introBusy ? <Spinner size={12} /> : <Ico name="play" />} Intro{intro ? <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#4ADE80", display: "inline-block" }} /> : null}</button>
               <button onClick={() => onOpenMedia?.()} title="Your media library" style={ghost(false)} {...hover}><Ico name="folder" /> Media</button>
               <button onClick={() => setGamelabOpen(true)} title="Build games, then drop them in with a Game brick" style={ghost(false)} {...hover}><Ico name="game" /> Game Lab{(school.games || []).length ? ` · ${school.games.length}` : ""}</button>
               <button onClick={() => setShowroomOpen(true)} title="Build a Showroom slider, then drop it in with a Showroom brick" style={ghost(false)} {...hover}><Ico name="cards" /> Showroom{(school.showroom?.slides?.length) ? ` · ${school.showroom.slides.length}` : ""}</button>
@@ -9125,6 +9303,9 @@ function Home({ onCreated, autofocus, onAutofocusDone, session, onRequireAuth })
         genProgressSkin(content).then(code => { if (code) content.progressSkin = { code }; }).catch(() => { }),
         genCurrency(content).then(c => { if (c) content.currency = c; }).catch(() => { }),
       ] : [];
+      // EVERY generated school gets an Introduction ("lesson zero") page, authored in parallel —
+      // the first thing a student meets after enrolling, and the creator's first impression.
+      extraP.push(genIntro(content).then(i => { if (i) content.intro = i; }).catch(() => { }));
       // Bespoke AI imagery, sized for its slot: a 16:9 school cover for every build (Normal+Super),
       // and per-lesson 16:9 covers in SUPER — each themed to ITS topic, so no two schools look alike.
       // All land in the creator's media library too. Failures are silent (the build never blocks on art).
@@ -11967,6 +12148,7 @@ export default function Senseito() {
     const cur = rec.data; const patch = {};
     for (const k of ["theme", "skin", "density", "font", "fontScale", "cover", "coverPos", "minimal", "progression", "navStyle", "navGrad", "effect", "lessonGrid", "tabScale", "communityStyle", "heroCard", "hoverFx", "navSticky"]) if (k in d) patch[k] = d[k];
     if ("progressWidget" in d) patch.progressWidget = d.progressWidget === null ? undefined : { style: "circle", placement: ["hero", "rail", "nav", "meta"].includes(d.progressWidget?.placement) ? d.progressWidget.placement : "hero" };
+    if ("intro" in d) patch.intro = d.intro === null ? undefined : { ...(cur.intro || {}), ...d.intro };
     if ("mentorship" in d && d.mentorship && typeof d.mentorship === "object") patch.mentorship = { ...(cur.mentorship || {}), ...d.mentorship };
     if ("classroom" in d && d.classroom && typeof d.classroom === "object") patch.classroom = { ...(cur.classroom || {}), ...d.classroom };
     if (d.template && TEMPLATES[d.template]) { const t = TEMPLATES[d.template]; patch.template = d.template; patch.theme = t.theme; patch.skin = t.skin; patch.font = t.font; patch.density = t.density; }
@@ -12010,6 +12192,16 @@ export default function Senseito() {
       if (lock) { lockAllFor(rec); pushMsg({ role: "assistant", content: "✓ All lessons locked back to sequential order — students progress one by one again." }); showAToast("✓ All lessons locked", "ok"); }
       else { unlockAllFor(rec); pushMsg({ role: "assistant", content: "✓ Every lesson is now unlocked for all students." }); showAToast("✓ All lessons unlocked", "ok"); }
       return;
+    }
+    // Deterministic: regenerate the Introduction ("lesson zero") page with a fresh AI pass.
+    if (/\bintro(duction)?\b/i.test(text) && /\b(regenerat|rewrite|redo|refresh|re-?author|make a new)/i.test(text)) {
+      pushMsg({ role: "user", content: text }); setChatThinking(true);
+      try {
+        const i = await genIntro(rec.data);
+        if (i) { pushVersion(rec.id, rec.data); updateSchool(rec.id, { data: { ...rec.data, intro: { ...i, title: rec.data.intro?.title || i.title } } }); pushMsg({ role: "assistant", content: "✓ Wrote a fresh Introduction page — open it from the ▶ Intro button in the toolbar." }); showAToast("✓ Introduction regenerated", "ok"); }
+        else pushMsg({ role: "assistant", content: "✕ Couldn't write the intro this time — try once more." });
+      } catch (e) { pushMsg({ role: "assistant", content: `✕ ${e.message}` }); }
+      setChatThinking(false); return;
     }
     // "make/create a (beautiful) PDF / handout / worksheet from lesson N → add to media"
     if (session && /\b(pdf|hand-?out|worksheet|workbook)\b/i.test(text) && /\b(make|create|generate|build|turn|export|produce|add|design)\b/i.test(text)) {
