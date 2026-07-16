@@ -72,16 +72,48 @@ local time) and `school.mentorLimits.msgsPerDay` (per-student daily message cap,
 chat timestamps) are enforced in `MentorOffice` for students only; creators are never locked out.
 
 **Sections are dynamic**, not a fixed 3-tab spine: `school.data.sections` (kinds: `lessons`,
-`mentor`, `tools`, `dashboard`, `community`, `students`, `calendar`, `classroom`, …).
+`mentor`, `tools`, `dashboard`, `community`, `students`, `calendar`, `classroom`, `counselor`, …).
 `getSections()` derives legacy schools for back-compat. Never reintroduce a hardcoded
 Lessons/Mentor/Tools structure — a yoga school might be dashboard+mentor only; a philosophy
-school might be lessons+tools+community.
+school might be lessons+tools+community. Tabs render **SVG icons** per kind (`SECTION_ICO` +
+`Ico`), never emojis; the default school mark is an SVG `Monogram` (an emoji only shows if the
+creator explicitly typed one — `school.emojiChosen`); lessons without covers get numbered tiles.
+
+**Lesson access & routing** — per lesson: `open` (unlocked for everyone), `unlocks` (the **id**
+of the lesson opened on pass — A→B routing, honored in `handlePass`, shown as a chip to the
+creator), `discussion` (a per-lesson class board after the activities, `community_posts.room =
+"lesson-<n>"`), plus `theoryVideo`/`theoryTranscript` (media above the theory reading; both are
+fed into `mentorSys` so the lesson mentor knows the video's content — no transcript → the mentor
+is told to ask rather than assume). Every lesson row has an ⓘ (`LessonInfoModal`): concept, pass
+logic, the exact student steps. ITERATE/CHAT handle **bulk** lock/unlock/routing commands;
+"unlock/lock all lessons" is intercepted deterministically in `chatSend` and never refused.
+
+**Creator flow** — the post-build reveal offers 3 cards: *Preview as a student* (`studentView`
+state forces `readOnly` inside `SchoolPage`, floating exit pill), *Try the first lesson*
+(magical overlay then opens lesson 1 as a student), *Customize* (first-timers auto-open the
+guide). **Publish is gated behind Set up**: `school.setupDone` is set by the wizard's publish
+step or its "Skip everything & publish" header button; the toolbar/checklist route to the wizard
+until then. The studio toolbar is collapsible (`sx_toolbar` in localStorage); the Creator Guide
+steps are generated per experience (`GUIDE_STEPS_FOR`). Manual builds ("Build it yourself") pick
+an experience from a 4-card popup, scaffold for it, skip the reveal, and open the guide.
+
+**Counselor's Office** — section kind `counselor` (`CounselorSection`): students file private
+reports/complaints/suggestions → `school_reports` table (RLS: student inserts/reads own; school
+owner reads/replies/resolves). Creators see an in-studio notification banner with the open count
+(fetched in `SchoolPage`) whose View button adds/opens the section.
+
+**Contact the coach** — `school.contact = {enabled, label}` (toggle in `MentorOffice`'s
+availability card) renders a floating DM button for students (`openDM(rec.owner)`;
+`PublicSchool` passes `owner: r.user_id`).
 
 **Editing model** — the whole app is "Lovable for schools": the left sidebar (`ProjectChat`) is
 a persistent build assistant. Every message can either just talk, apply a **design** patch
 (theme/palette/cover/hero/layout — direct, no re-authoring, see `applyDesign`), or apply a
 **content** edit (routed through the iterate pipeline above). `CHAT_SYS` classifies which. Design
-edits are ~free; content edits cost a real AI call and get an Undo snapshot.
+edits are ~free; content edits cost a real AI call and get an Undo snapshot. Newer design keys:
+`heroCard` (hero as an inset card even with a cover), `hoverFx` (lift+glow on `[data-hv]`),
+`navSticky:false` and `navStyle:"header"` (a classic website top menu that is deliberately
+NOT sticky). `CHAT_SYS` carries never-refuse + reply-honesty rules — don't weaken them.
 
 **Overseer** — a non-blocking "linter" for schools. Deterministic checks (prereq order, uncovered
 concepts, contrast) are free graph queries (`lintSchool`); a debounced semantic pass
