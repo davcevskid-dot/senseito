@@ -461,6 +461,7 @@ const ICO_PATHS = {
   cards: "M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z",
   steps: "M4 19h4v-5h4v-5h4v-5h4",
   arcade: "M7 11h4M9 9v4M15 10h.01M18 12h.01M7 7h10a4 4 0 014 4v2a4 4 0 01-7 3l-1-1h-2l-1 1a4 4 0 01-7-3v-2a4 4 0 014-4z",
+  pages: "M8 3h10a1 1 0 011 1v14a1 1 0 01-1 1H8a1 1 0 01-1-1V4a1 1 0 011-1zM4 6v13a1 1 0 001 1h11M11 8h4M11 12h4",
   brain: "M9 3a3 3 0 00-3 3 3 3 0 00-2 5 3 3 0 001 5 3 3 0 005 2V4.5A2.5 2.5 0 009 3zM15 3a3 3 0 013 3 3 3 0 012 5 3 3 0 01-1 5 3 3 0 01-5 2V4.5A2.5 2.5 0 0115 3z",
   chart: "M4 20V4M4 20h16M8 20v-6M13 20V9M18 20v-9",
   heading: "M6 5v14M18 5v14M6 12h12M6 5h4M14 5h4M6 19h4M14 19h4",
@@ -1602,6 +1603,69 @@ function shellOf(school) {
   return "cards";
 }
 const SHELLS = [["lms", "🗂️ LMS — sidebar + inline lessons"], ["cards", "🗃️ Cards — nav + lesson cards"], ["arcade", "🎮 Arcade — gamified run"], ["steps", "🪜 Steps — linear, no nav"], ["pages", "📄 Pages — every lesson a full page"]];
+// The layout picker shows all five, with a one-line "what it feels like" description.
+const SHELL_OPTIONS = [
+  ["cards", "cards", "Cards", "Lessons as a grid of cards; each opens in a focused window."],
+  ["lms", "lms", "LMS", "A left sidebar of lessons; they open inline beside it — classic course."],
+  ["pages", "pages", "Pages", "Every lesson is a full editable page with prev/next paging."],
+  ["steps", "steps", "Steps", "One linear path, no nav — do them strictly in order."],
+  ["arcade", "arcade", "Arcade", "A gamified single-run screen with an XP/streak HUD."],
+];
+// Tiny SVG wireframe preview of each shell — so creators SEE the layout before choosing.
+function ShellWire({ kind, T, active }) {
+  const line = active ? T.p : "var(--borderMid)";
+  const fill = active ? T.ps : "var(--surface2)";
+  const dot = active ? T.p : "var(--muted)";
+  const R = ({ x, y, w, h, r = 1.5, f = "none", s = line, sw = 1 }) => <rect x={x} y={y} width={w} height={h} rx={r} fill={f} stroke={s} strokeWidth={sw} />;
+  const common = { width: "100%", height: 54, viewBox: "0 0 96 54", style: { display: "block", borderRadius: 8, background: "var(--surface3)" } };
+  if (kind === "cards") return (
+    <svg {...common}><R x={6} y={6} w={84} h={9} f={fill} r={2} />{[0, 1, 2, 3].map(i => <R key={i} x={6 + (i % 2) * 44} y={20 + Math.floor(i / 2) * 15} w={40} h={12} f="var(--surface)" r={2} />)}</svg>
+  );
+  if (kind === "lms") return (
+    <svg {...common}><R x={6} y={6} w={22} h={42} f={fill} r={2} />{[0, 1, 2].map(i => <line key={i} x1={10} y1={13 + i * 8} x2={24} y2={13 + i * 8} stroke={dot} strokeWidth={1.4} strokeLinecap="round" />)}<R x={33} y={6} w={57} h={42} f="var(--surface)" r={2} /><line x1={38} y1={16} x2={80} y2={16} stroke={line} strokeWidth={1.4} /><line x1={38} y1={24} x2={72} y2={24} stroke={dot} strokeWidth={1.2} /></svg>
+  );
+  if (kind === "pages") return (
+    <svg {...common}><R x={12} y={5} w={72} h={20} f={fill} r={2} /><line x1={30} y1={15} x2={66} y2={15} stroke={active ? "#fff" : dot} strokeWidth={2} strokeLinecap="round" /><line x1={12} y1={31} x2={84} y2={31} stroke={dot} strokeWidth={1.2} /><line x1={12} y1={37} x2={72} y2={37} stroke={dot} strokeWidth={1.2} />{[0, 1, 2].map(i => <circle key={i} cx={40 + i * 8} cy={47} r={1.6} fill={i === 1 ? dot : "var(--borderMid)"} />)}</svg>
+  );
+  if (kind === "steps") return (
+    <svg {...common}>{[0, 1, 2].map(i => <g key={i}><circle cx={16} cy={13 + i * 15} r={3.2} fill={i === 0 ? T.p : "none"} stroke={line} strokeWidth={1.4} />{i < 2 && <line x1={16} y1={17 + i * 15} x2={16} y2={25 + i * 15} stroke={line} strokeWidth={1.2} />}<R x={26} y={9 + i * 15} w={60} h={9} f={i === 0 ? fill : "var(--surface)"} r={2} /></g>)}</svg>
+  );
+  // arcade
+  return (
+    <svg {...common}><R x={6} y={6} w={84} h={30} f={fill} r={2} /><path d="M42 15l10 6-10 6z" fill={active ? T.p : dot} /><R x={6} y={40} w={40} h={8} f="var(--surface)" r={2} /><R x={50} y={40} w={40} h={8} f="var(--surface)" r={2} /></svg>
+  );
+}
+// Compact toolbar layout picker: a chip that opens a dropdown of previewed layout cards.
+function LayoutPicker({ school, T, onPick }) {
+  const [open, setOpen] = useState(false);
+  const cur = shellOf(school);
+  const curLabel = (SHELL_OPTIONS.find(o => o[0] === cur) || [, , "Cards"])[2];
+  return (
+    <div style={{ position: "relative", display: "inline-flex" }}>
+      <button onClick={() => setOpen(o => !o)} title="Lesson layout — how students move through lessons" style={{ display: "inline-flex", alignItems: "center", gap: 6, background: open ? T.ps : "none", border: `1px solid ${open ? T.ba : B.borderMid}`, borderRadius: 8, color: open ? T.hi : B.mutedMid, padding: "5px 11px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 700 }}>
+        <Ico name="cards" size={14} /> Layout: {curLabel} <span style={{ fontSize: 9, transform: open ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>▼</span>
+      </button>
+      {open && createPortal(
+        <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 410, background: "rgba(2,2,8,0.5)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 16, padding: 16, width: 460, maxWidth: "94vw", maxHeight: "86vh", overflowY: "auto", boxShadow: "0 26px 74px rgba(0,0,0,0.55)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+              <div style={{ fontSize: 13, fontWeight: 800, color: B.white }}>Choose a lesson layout</div>
+              <button onClick={() => setOpen(false)} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 7, color: B.mutedMid, padding: "3px 9px", cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>✕</button>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 9 }}>
+              {SHELL_OPTIONS.map(([k, ic, l, desc]) => { const on = cur === k; return (
+                <button key={k} onClick={() => { onPick(k); setOpen(false); }} style={{ textAlign: "left", background: on ? T.ps : B.surface2, border: `1.5px solid ${on ? T.ba : B.borderMid}`, borderRadius: 12, padding: 9, cursor: "pointer", fontFamily: "inherit" }}>
+                  <ShellWire kind={k} T={T} active={on} />
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, color: on ? T.hi : B.white }}><Ico name={ic} size={13} /><span style={{ fontSize: 12.5, fontWeight: 800 }}>{l}</span>{on && <span style={{ marginLeft: "auto", color: T.hi }}><Ico name="check" size={12} /></span>}</div>
+                  <div style={{ fontSize: 10, color: B.muted, lineHeight: 1.4, marginTop: 3 }}>{desc}</div>
+                </button>
+              ); })}
+            </div>
+          </div>
+        </div>, document.body)}
+    </div>
+  );
+}
 function normalizeSections(content) {
   let secs = (Array.isArray(content.sections) && content.sections.length) ? content.sections : null;
   if (!secs && LAYOUTS[content.layout]) secs = LAYOUTS[content.layout].kinds.map(k => ({ kind: k }));
@@ -7810,8 +7874,15 @@ function SchoolWizard({ school, T, media, published, rec, onUpdate, saveLesson, 
   } else if (phase === "design") {
     heading = "🎨 Design"; sup = "Pick a layout & polish";
     body = (<>
-      <div style={sub}>Layout</div>
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>{[["lms", "LMS", "lms"], ["cards", "Cards", "cards"], ["steps", "Steps", "steps"], ["arcade", "Arcade", "arcade"]].map(([k, l, ic]) => <button key={k} onClick={() => onUpdate({ data: { ...school, shell: k, ...(k === "arcade" ? { progression: "arcade" } : k === "cards" ? { progression: "list" } : {}) } })} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: shellOf(school) === k ? T.ps : B.surface2, border: `1px solid ${shellOf(school) === k ? T.ba : B.borderMid}`, borderRadius: 8, color: shellOf(school) === k ? T.hi : B.mutedMid, padding: "6px 12px", cursor: "pointer", fontSize: 12, fontWeight: 700, fontFamily: "inherit" }}><Ico name={ic} size={14} /> {l}</button>)}</div>
+      <div style={sub}>Lesson layout — this is how students move through your lessons</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(140px,1fr))", gap: 9 }}>{SHELL_OPTIONS.map(([k, ic, l, desc]) => { const on = shellOf(school) === k; return (
+        <button key={k} onClick={() => onUpdate({ data: { ...school, shell: k, ...(k === "arcade" ? { progression: "arcade" } : k === "cards" ? { progression: "list" } : {}) } })} title={desc}
+          style={{ textAlign: "left", background: on ? T.ps : B.surface2, border: `1.5px solid ${on ? T.ba : B.borderMid}`, borderRadius: 12, padding: 8, cursor: "pointer", fontFamily: "inherit", transition: "border-color 0.15s" }}>
+          <ShellWire kind={k} T={T} active={on} />
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, color: on ? T.hi : B.white }}><Ico name={ic} size={13} /><span style={{ fontSize: 12.5, fontWeight: 800 }}>{l}</span>{on && <span style={{ marginLeft: "auto", color: T.hi }}><Ico name="check" size={12} /></span>}</div>
+          <div style={{ fontSize: 10, color: B.muted, lineHeight: 1.4, marginTop: 3 }}>{desc}</div>
+        </button>
+      ); })}</div>
       {(school.suggestions || []).length > 0 && <>
         <div style={{ ...sub, marginTop: 6 }}>✨ Improvement ideas (tap to apply)</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>{school.suggestions.slice(0, 4).map((s, i) => <button key={i} onClick={() => { onIterate(s); }} style={{ textAlign: "left", background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 9, color: T.hi, padding: "8px 11px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", lineHeight: 1.4 }}>✨ {s}</button>)}</div>
@@ -9140,8 +9211,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
           <div key={activeTab} className="sx-stagger" style={{ flex: 1, minWidth: 0, width: "100%", display: "flex", flexDirection: "column", gap: dens, ...(SECTIONS.find(s => s.id === activeTab)?.sticky ? { position: "sticky", top: 64, alignSelf: "flex-start", maxHeight: "calc(100vh - 80px)", overflowY: "auto" } : {}) }}>
           {activeTab === "lessons" && !readOnly && (
             <div style={{ display: "flex", gap: 6, alignItems: "center", justifyContent: "flex-end", flexWrap: "wrap" }}>
-              <span style={{ fontSize: 11, color: B.muted }}>Layout</span>
-              {[["lms", "LMS", "lms"], ["cards", "Cards", "cards"], ["steps", "Steps", "steps"], ["arcade", "Arcade", "arcade"]].map(([k, l, ic]) => <button key={k} onClick={() => onUpdate({ data: { ...school, shell: k, ...(k === "arcade" ? { progression: "arcade" } : k === "cards" ? { progression: "list" } : {}) } })} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: shell === k ? T.ps : "none", border: `1px solid ${shell === k ? T.ba : B.borderMid}`, borderRadius: 8, color: shell === k ? T.hi : B.mutedMid, padding: "5px 11px", cursor: "pointer", fontSize: 12, fontFamily: "inherit", fontWeight: 700 }}><Ico name={ic} size={14} /> {l}</button>)}
+              <LayoutPicker school={school} T={T} onPick={(k) => onUpdate({ data: { ...school, shell: k, ...(k === "arcade" ? { progression: "arcade" } : k === "cards" ? { progression: "list" } : {}) } })} />
             </div>
           )}
           {activeTab === "lessons" && certConfig(school).on && (() => {
