@@ -170,11 +170,11 @@ async function saveProfile(token, userId, patch) {
 
 // ── AI via secure Edge proxy. structured=true → guaranteed JSON object. ──
 // model: "haiku" (default, fast+cheap) | "sonnet" (creative) — proxy falls back safely.
-async function api(system, messages, maxTokens = 4000, model) {
+async function api(system, messages, maxTokens = 4000, model, temperature) {
   const res = await fetch(PROXY, {
     method: "POST",
     headers: { "Content-Type": "application/json", apikey: SUPA_KEY, Authorization: `Bearer ${SUPA_KEY}` },
-    body: JSON.stringify({ system, messages, maxTokens, model }),
+    body: JSON.stringify({ system, messages, maxTokens, model, ...(typeof temperature === "number" ? { temperature } : {}) }),
   });
   const data = await res.json().catch(() => ({}));
   if (!res.ok || data.error) throw new Error(data.error || `Proxy ${res.status}`);
@@ -1012,13 +1012,42 @@ async function ingestTrainingSource({ name, url, text, isPdf }) {
   else content = `SOURCE NAME: ${name || "Untitled"}${url ? ` (${url})` : ""}. No text was provided — infer a reasonable chapter outline for a source with this title, and note that the full text wasn't available.`;
   return apiJSON(TRAINING_SYS, [{ role: "user", content }], 3200, "sonnet");
 }
-// Always-honor training directives + remembered facts, injected into the mentor & build AI prompts.
+// ── AI LAB — the creator manufactures a replica of THEMSELVES: writing samples →
+//    extracted Voice DNA, banned words, sentence/style rules, creativity lever.
+//    Everything below rides trainingPreamble → mentor + build chat automatically. ──
+const VOICE_DNA_SYS = `You are the Senseito Voice Lab. You receive WRITING SAMPLES all by ONE author (their articles, posts, emails, transcripts). Extract a precise VOICE DNA — a style guide that lets an AI speak EXACTLY like this person, not "like a good writer". Return markdown only:
+# VOICE DNA
+## Tone & energy
+## Sentence structure & rhythm
+(typical sentence length, punctuation habits, paragraph shape — be specific)
+## Vocabulary & signature phrases
+(words and expressions they ACTUALLY use — quote them verbatim)
+## What they NEVER do
+(clichés, hedging, words and styles conspicuously absent from their writing)
+## How they open & close
+## Quirks
+Max ~500 words. Concrete and quotable — zero generic writing advice. Output only the markdown.`;
+// Mentor-call temperature from the Lab's creativity lever (undefined = provider default).
+function labTemp(school) { const t = Number(school?.training?.lab?.temperature); return isFinite(t) && t >= 0 && t <= 1 ? t : undefined; }
+function labPreamble(school) {
+  const lab = school?.training?.lab; if (!lab) return "";
+  const bits = [];
+  if ((lab.voiceDNA || "").trim()) bits.push(`VOICE REPLICA — the creator trained you to speak EXACTLY like THEM. This voice guide was extracted from their own writing; it OVERRIDES any generic style:\n${String(lab.voiceDNA).slice(0, 2600)}`);
+  if ((lab.avoid || "").trim()) bits.push(`BANNED WORDS & PHRASES (the creator never uses these — neither do you): ${String(lab.avoid).trim().slice(0, 500)}`);
+  if ((lab.styleNotes || "").trim()) bits.push(`SENTENCE & STYLE RULES from the creator: ${String(lab.styleNotes).trim().slice(0, 600)}`);
+  if (lab.replyLength === "short") bits.push("LENGTH: keep replies SHORT — 1-3 punchy sentences unless doing a formal evaluation.");
+  if (lab.replyLength === "long") bits.push("LENGTH: fuller, richer replies are welcome (5-8 sentences) when teaching.");
+  return bits.length ? `\n${bits.join("\n")}\n` : "";
+}
+// Always-honor training directives + remembered facts + the AI Lab's voice replica,
+// injected into the mentor & build AI prompts.
 function trainingPreamble(school) {
   const t = school?.training; if (!t) return "";
   const dir = (t.directives || "").trim();
   const mem = (t.memory || []).filter(Boolean);
-  if (!dir && !mem.length) return "";
-  return `\nTRAINING DIRECTIVES for this school (ALWAYS honor these — the creator set them):\n${dir ? dir + "\n" : ""}${mem.length ? mem.map(m => `- ${m}`).join("\n") + "\n" : ""}`;
+  const lab = labPreamble(school);
+  if (!dir && !mem.length && !lab) return "";
+  return `${lab}${dir || mem.length ? `\nTRAINING DIRECTIVES for this school (ALWAYS honor these — the creator set them):\n${dir ? dir + "\n" : ""}${mem.length ? mem.map(m => `- ${m}`).join("\n") + "\n" : ""}` : ""}`;
 }
 
 const ITERATE_SYS = `You are the Senseito School Editor AI. You receive an existing school PLAN as JSON (lessons describe activities as "blockTypes": [type strings] only — NOT full block data) and an edit instruction.
@@ -1134,6 +1163,7 @@ YOU CAN DO ALMOST ANYTHING here — if a request doesn't match a listed design k
 - "cover": an https image URL for a hero banner, or "" to remove. "coverPos": CSS object-position for the cover focal point (e.g. "50% 25%", "left top"). "coverHeight": a number 120–560 (pixels) for the cover's height — use for "make the cover taller/shorter/bigger", null to reset to default.
 - "fontScale": a number 0.8–1.4 for overall text size (1 = default).
 - "minimal": true/false — minimalist mode. When true, deliberately terse/short activities are shown as-is and never hidden or flagged as empty. Use for "keep it minimal", "distilled one-liner lessons", "don't pad the content".
+- "shell": "lms" | "cards" | "arcade" | "steps" | "pages" — the lessons SHELL. "pages" = every lesson is a FULL PAGE (hero + content + prev/next paging, editable in place like the Introduction) — use for "make each lesson a page", "pages layout", "lessons as full pages".
 - "progression": "list" | "map" | "arcade" — how the lessons section is laid out. "map" = a Duolingo-style winding path of lesson nodes ("make the lessons a map/journey/path"). "arcade" = a gamified single "run" screen with an XP/streak HUD that auto-advances to the next lesson as you clear each ("make it a game", "arcade mode", "play it like a game", "one continuous game"). (Add-anywhere — works on any theme.)
 - "effect": an ambient animated background effect for the whole school — one of ${EFFECT_KEYS.join(", ")}. Use when the user asks for atmosphere/vibes ("add an aurora effect", "make it feel cosmic/starry" → starfield, "add a glow", "floating embers/sparks" → embers, "subtle grid", "flowing gradient" → mesh). Set "effect": "none" to remove it.
 - "navStyle": "pills" | "topbar" | "header" | "chunky" | "minimal" | "soft" | "sidebar" — override the section navigation style independently of the theme. "sidebar" = a left vertical nav with content beside it (two-column). "header" = a classic website top menu that is NOT sticky (it scrolls away with the page) — use for "make the sections a normal website header/menu on top, not sticky".
@@ -1306,6 +1336,14 @@ Return JSON ONLY:
  "cta": "<the start-button label, subject-flavored, e.g. 'Step into Lesson 1 →'>"
 }
 Ground every word in the school's subject, mentor voice and experience. Vivid, specific, zero filler. Output ONLY the JSON.`;
+// Targeted AI edits to an existing intro ("make the journey 5 stops", "rewrite the welcome
+// warmer", "add a section about my story") — applies ONLY the instruction, keeps the rest.
+const INTRO_EDIT_SYS = `You edit the JSON of a school's Introduction ("lesson zero") page. Apply ONLY the given instruction; keep every other field EXACTLY as it is. You may add/remove/reword items in journey/how/expectations, rewrite any text, and add entries to "sections" (each { "id": short slug, "type": "text", "title", "text" }) when asked for new content sections. Return the FULL updated intro JSON with the same field names (title, on, headline, sub, welcome, journey[], how[], expectations[], pledge{}, cta, sections[]). Output ONLY the JSON.`;
+async function editIntro(school, intro, instruction) {
+  const out = await apiJSON(INTRO_EDIT_SYS, [{ role: "user", content: `SCHOOL: ${school.name} — ${flattenText(school.description) || ""}\nMENTOR: ${school.mentor?.name || school.mentorName || ""} (${school.voicePreset || "sage"})\nCURRENT INTRO JSON:\n${JSON.stringify(intro)}\n\nINSTRUCTION: ${instruction}` }], 2200, "sonnet");
+  if (!out || !out.headline) return null;
+  return { ...intro, ...out, on: intro.on !== false, title: out.title || intro.title || "Introduction" };
+}
 async function genIntro(school) {
   const ctx = `SCHOOL: ${school.name} — ${flattenText(school.description) || ""}\nEXPERIENCE: ${school.experience || "lessons"}\nMENTOR: ${school.mentorName || school.mentor?.name || "The Mentor"} (${school.voicePreset || "sage"}) — voice sample: "${school.sampleLine || school.mentor?.sampleLine || ""}"\nTRANSFORMATION: ${flattenText(school.transformation) || ""}\nLESSONS: ${(school.semesters || []).flatMap(s => (s.lessons || []).map(l => l.title)).slice(0, 12).join("; ") || "—"}\nCONCEPTS: ${(school.concepts || []).map(c => c.label).join(", ") || "—"}`;
   const out = await apiJSON(INTRO_SYS, [{ role: "user", content: ctx }], 1600, "sonnet");
@@ -1558,12 +1596,12 @@ function getSections(school) {
 //  arcade = gamified single-run screen.
 function shellOf(school) {
   const s = school?.shell;
-  if (s === "lms" || s === "cards" || s === "arcade" || s === "steps") return s;
+  if (s === "lms" || s === "cards" || s === "arcade" || s === "steps" || s === "pages") return s;
   if (school?.progression === "arcade") return "arcade";
   if (["corporate", "academy"].includes(school?.template)) return "lms";
   return "cards";
 }
-const SHELLS = [["lms", "🗂️ LMS — sidebar + inline lessons"], ["cards", "🗃️ Cards — nav + lesson cards"], ["arcade", "🎮 Arcade — gamified run"], ["steps", "🪜 Steps — linear, no nav"]];
+const SHELLS = [["lms", "🗂️ LMS — sidebar + inline lessons"], ["cards", "🗃️ Cards — nav + lesson cards"], ["arcade", "🎮 Arcade — gamified run"], ["steps", "🪜 Steps — linear, no nav"], ["pages", "📄 Pages — every lesson a full page"]];
 function normalizeSections(content) {
   let secs = (Array.isArray(content.sections) && content.sections.length) ? content.sections : null;
   if (!secs && LAYOUTS[content.layout]) secs = LAYOUTS[content.layout].kinds.map(k => ({ kind: k }));
@@ -2494,6 +2532,27 @@ function TrainingGround({ school, T, media, onUpdate, onClose }) {
   const fileRef = useRef(null);
   const setTraining = (patch) => onUpdate({ data: { ...school, training: { ...(school.training || {}), ...patch } } });
   const memory = t.memory || [];
+  // ── AI Lab (voice replica) state ──
+  const lab = t.lab || {};
+  const setLab = (patch) => setTraining({ lab: { ...(t.lab || {}), ...patch } });
+  const [labSample, setLabSample] = useState("");
+  const [labBusy, setLabBusy] = useState(false);
+  const [labErr, setLabErr] = useState("");
+  const [showVoiceDNA, setShowVoiceDNA] = useState(false);
+  const labSamples = lab.samples || [];
+  async function extractVoice() {
+    const all = [...labSamples, ...(labSample.trim() ? [{ title: `Sample ${labSamples.length + 1}`, text: labSample.trim() }] : [])];
+    if (!all.length || labBusy) { setLabErr("Paste at least one piece of your writing first."); return; }
+    setLabBusy(true); setLabErr("");
+    try {
+      const joined = all.map((s, i) => `── SAMPLE ${i + 1}: ${s.title} ──\n${s.text}`).join("\n\n").slice(0, 42000);
+      const dna = await api(VOICE_DNA_SYS, [{ role: "user", content: joined }], 1500, "sonnet");
+      if (!dna || !dna.trim()) throw new Error("Empty result — try again.");
+      setTraining({ lab: { ...(t.lab || {}), samples: all, voiceDNA: dna.trim() } });
+      setLabSample(""); setShowVoiceDNA(true);
+    } catch (e) { setLabErr(e.message || "Extraction failed — try again."); }
+    setLabBusy(false);
+  }
   const trained = !!(school.knowledgeDNA || sources.length);
   async function train() {
     if (busy) return;
@@ -2590,6 +2649,91 @@ function TrainingGround({ school, T, media, onUpdate, onClose }) {
           <div style={sub}>Always-honor instructions for how the AI should build & tweak THIS school and mentor. Be as specific as you like — this is surgical control. e.g. “Never use jargon.” “Always tie lessons back to the 80/20 rule.” “Keep the mentor tough but warm.”</div>
           <textarea defaultValue={t.directives || ""} onBlur={e => setTraining({ directives: e.target.value })} rows={4} placeholder="Write the rules your AI should always follow for this school…" style={{ ...inp, resize: "vertical" }} />
           <div style={{ fontSize: 11, color: B.muted, marginTop: 6 }}>Saved when you click away · applied to the mentor, lessons and the Senseito build chat.</div>
+        </div>
+
+        {/* ── AI LAB — manufacture a replica of yourself ── */}
+        <div style={{ ...card, border: `1px solid ${T.ba}`, position: "relative", overflow: "hidden" }}>
+          <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 3, background: T.grad }} />
+          <div style={h}>🧬 AI Lab — clone your voice</div>
+          <div style={sub}>Feed it YOUR writing — articles, posts, emails, transcripts — and it extracts a <b style={{ color: T.hi }}>Voice DNA</b>: how you build sentences, the words you actually use, the ones you never would. Your mentor stops sounding like an AI and starts sounding like you.</div>
+
+          {/* Writing samples */}
+          {labSamples.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 9 }}>
+              {labSamples.map((s, i) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 9, padding: "7px 11px" }}>
+                  <span style={{ color: T.hi, display: "inline-flex" }}><Ico name="file" size={13} /></span>
+                  <span style={{ flex: 1, fontSize: 12, color: B.white }}>{s.title} <span style={{ color: B.muted }}>· {Math.round((s.text || "").length / 1000)}k chars</span></span>
+                  <button onClick={() => setLab({ samples: labSamples.filter((_, j) => j !== i) })} style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 12 }}>✕</button>
+                </div>
+              ))}
+            </div>
+          )}
+          <textarea value={labSample} onChange={e => setLabSample(e.target.value)} rows={4} placeholder="Paste a piece of YOUR writing here — an article, a long post, a newsletter… (add several for a sharper clone)" style={{ ...inp, resize: "vertical", marginBottom: 8 }} />
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+            <button onClick={() => { const s = labSample.trim(); if (!s) return; setLab({ samples: [...labSamples, { title: `Sample ${labSamples.length + 1}`, text: s }] }); setLabSample(""); }} disabled={!labSample.trim()} style={{ background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.mutedMid, padding: "9px 14px", cursor: "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", opacity: labSample.trim() ? 1 : 0.5 }}>＋ Add as sample</button>
+            <button onClick={extractVoice} disabled={labBusy} style={{ flex: 1, minWidth: 170, background: T.grad, border: "none", borderRadius: 9, color: "#fff", padding: "9px 14px", cursor: "pointer", fontSize: 12.5, fontWeight: 800, fontFamily: "inherit", opacity: labBusy ? 0.6 : 1 }}>{labBusy ? <><Spinner color="#fff" /> Studying your voice…</> : lab.voiceDNA ? "🧬 Re-extract my Voice DNA" : "🧬 Extract my Voice DNA"}</button>
+          </div>
+          {labErr && <div style={{ fontSize: 12, color: "#F87171", marginBottom: 8 }}>{labErr}</div>}
+          {lab.voiceDNA && (
+            <div style={{ background: B.surface2, border: "1px solid rgba(74,222,128,0.35)", borderRadius: 10, padding: "10px 12px", marginBottom: 12 }}>
+              <div onClick={() => setShowVoiceDNA(v => !v)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }}>
+                <span style={{ fontSize: 12.5, fontWeight: 700, color: "#4ADE80" }}>✓ Voice DNA active — your mentor speaks like you</span>
+                <span style={{ color: T.p, fontSize: 12, transform: showVoiceDNA ? "rotate(180deg)" : "none", transition: "transform 0.2s" }}>▾</span>
+              </div>
+              {showVoiceDNA && <textarea defaultValue={lab.voiceDNA} onBlur={e => setLab({ voiceDNA: e.target.value })} rows={9} style={{ ...inp, resize: "vertical", marginTop: 9, fontFamily: "'Space Grotesk',monospace", fontSize: 11.5, lineHeight: 1.6 }} />}
+            </div>
+          )}
+
+          {/* Style surgery */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(230px,1fr))", gap: 10, marginBottom: 12 }}>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: B.muted, marginBottom: 5 }}>🚫 Words & phrases you NEVER use</div>
+              <textarea defaultValue={lab.avoid || ""} onBlur={e => setLab({ avoid: e.target.value })} rows={2} placeholder={`e.g. "unleash", "game-changer", "folks", em-dashes…`} style={{ ...inp, resize: "vertical" }} />
+            </div>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: B.muted, marginBottom: 5 }}>✒️ Sentence structure & style rules</div>
+              <textarea defaultValue={lab.styleNotes || ""} onBlur={e => setLab({ styleNotes: e.target.value })} rows={2} placeholder="e.g. Short sentences. One idea each. Start with the point. Occasional one-word lines." style={{ ...inp, resize: "vertical" }} />
+            </div>
+          </div>
+
+          {/* Advanced levers */}
+          <div style={{ borderTop: `1px solid ${B.border}`, paddingTop: 11 }}>
+            <div style={{ fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: 1.2, color: B.muted, marginBottom: 9 }}>Advanced levers</div>
+            <div style={{ display: "flex", gap: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
+              <div style={{ flex: "1 1 240px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: B.mutedMid, marginBottom: 4 }}>
+                  <span>🌡️ Creativity (temperature)</span>
+                  <b style={{ color: B.white }}>{lab.temperature == null ? "default" : Number(lab.temperature).toFixed(2)}</b>
+                </div>
+                <input type="range" min="0" max="1" step="0.05" value={lab.temperature ?? 0.7} onChange={e => setLab({ temperature: Number(e.target.value) })} style={{ width: "100%" }} />
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9.5, color: B.muted }}><span>faithful</span><span>inventive</span></div>
+                {Number(lab.temperature) >= 0.9 && <div style={{ fontSize: 11, color: "#FBBF24", marginTop: 5, lineHeight: 1.5 }}>⚠️ Very high — replies get colorful but may drift from your trained voice and facts.</div>}
+                {lab.temperature != null && Number(lab.temperature) <= 0.2 && <div style={{ fontSize: 11, color: B.muted, marginTop: 5 }}>Very literal — consistent, but can feel flat.</div>}
+                {lab.temperature != null && <button onClick={() => setLab({ temperature: undefined })} style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 10.5, fontFamily: "inherit", textDecoration: "underline", padding: 0, marginTop: 4 }}>reset to default</button>}
+              </div>
+              <div style={{ flex: "0 1 200px" }}>
+                <div style={{ fontSize: 11.5, color: B.mutedMid, marginBottom: 5 }}>📏 Reply length</div>
+                <div style={{ display: "flex", gap: 5 }}>
+                  {[["short", "Short"], ["", "Natural"], ["long", "Rich"]].map(([k, l]) => (
+                    <button key={l} onClick={() => setLab({ replyLength: k || undefined })} style={{ flex: 1, background: (lab.replyLength || "") === k ? T.ps : B.surface2, border: `1px solid ${(lab.replyLength || "") === k ? T.ba : B.borderMid}`, borderRadius: 8, color: (lab.replyLength || "") === k ? T.hi : B.mutedMid, padding: "7px 4px", cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit" }}>{l}</button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            {/* ElevenLabs — stored now, spoken later */}
+            <div style={{ marginTop: 13, background: B.surface2, border: `1px dashed ${B.borderMid}`, borderRadius: 10, padding: "11px 13px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 7 }}>
+                <span style={{ fontSize: 12.5, fontWeight: 800, color: B.white }}>🎙️ Your real voice (ElevenLabs)</span>
+                <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: 1, color: T.hi, background: T.ps, border: `1px solid ${T.ba}`, borderRadius: 100, padding: "2px 8px" }}>COMING SOON</span>
+              </div>
+              <div style={{ fontSize: 11.5, color: B.muted, lineHeight: 1.55, marginBottom: 8 }}>Cloned your voice on ElevenLabs? Connect it here — when voice replies launch, your mentor will literally speak as you. Stored safely with this school until then.</div>
+              <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
+                <input defaultValue={lab.elevenVoiceId || ""} onBlur={e => setLab({ elevenVoiceId: e.target.value.trim() || undefined })} placeholder="ElevenLabs Voice ID" style={{ ...inp, flex: 1, minWidth: 150 }} />
+                <input type="password" defaultValue={lab.elevenKey || ""} onBlur={e => setLab({ elevenKey: e.target.value.trim() || undefined })} placeholder="ElevenLabs API key (optional)" style={{ ...inp, flex: 1, minWidth: 150 }} />
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Memory */}
@@ -2699,7 +2843,7 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, onChooseFork, c
     setMsgs(m => [...m, { role: "user", content: userMsg }]); setLoading(true);
     try {
       const activityStatus = total ? `${passedBlocks}/${total} activities done —${acts.map((b, i) => ` (${i + 1}) ${outputs[i]?.passed ? "✓" : "✗"} ${b.data?.title || BLOCK_META[b.type]?.label || b.type}`).join(",")}` : "this lesson has no activities";
-      let reply = await api(mentorSys(school, lesson, bus, { np, activityStatus }), toApiMessages(convo), 2000);
+      let reply = await api(mentorSys(school, lesson, bus, { np, activityStatus }), toApiMessages(convo), 2000, undefined, labTemp(school));
       // Capture any limiting belief the mentor flagged (WEED:) into the Garden, strip it from view.
       const wd = reply.match(/WEED:\s*(.+)/i);
       if (wd) { onIngest?.({ title: lesson?.title, lessonId: lesson?.number }, { type: "mindset", weed: wd[1].trim() }); reply = reply.replace(/\n?\s*WEED:\s*.+/i, "").trim(); }
@@ -3016,7 +3160,7 @@ function MentorOffice({ school, T, chat, onChat, bus, onIngest, progress, onUpda
     const next = [...msgs, { role: "user", content: userMsg, ts: Date.now() }];
     onChat(next); setLoading(true);
     try {
-      let reply = await api(mentorOfficeSys(school, bus, journeyContext(school, progress), mentorship ? progress : null), toApiMessages(next), 2000);
+      let reply = await api(mentorOfficeSys(school, bus, journeyContext(school, progress), mentorship ? progress : null), toApiMessages(next), 2000, undefined, labTemp(school));
       const wd = reply.match(/WEED:\s*(.+)/i);
       if (wd) { onIngest?.({ title: "Office hours" }, { type: "mindset", weed: wd[1].trim() }); reply = reply.replace(/\n?\s*WEED:\s*.+/i, "").trim(); }
       // Mentorship gatekeeping: the mentor marks the step passed and opens the next one.
@@ -5890,7 +6034,7 @@ function MentorFab({ school, bus, T, progress }) {
   async function send() {
     const t = input.trim(); if (!t || loading) return; setInput("");
     const next = [...msgs, { role: "user", content: t }]; setMsgs(next); setLoading(true);
-    try { const r = await api(mentorOfficeSys(school, bus, journeyContext(school, progress)), toApiMessages(next), 2000); setMsgs([...next, { role: "assistant", content: r }]); }
+    try { const r = await api(mentorOfficeSys(school, bus, journeyContext(school, progress)), toApiMessages(next), 2000, undefined, labTemp(school)); setMsgs([...next, { role: "assistant", content: r }]); }
     catch (e) { setMsgs([...next, { role: "assistant", content: "Error: " + e.message }]); }
     setLoading(false);
   }
@@ -6969,6 +7113,26 @@ function IntroPage({ school, T, rec, readOnly, onUpdate, onSeen, onStart, onClos
   const [pledge, setPledge] = useState("");
   const savedPledge = (rec?.toolStates || {}).__introPledge;
   const savePledge = () => { const t = pledge.trim(); if (!t) return; onUpdate?.({ toolStates: { ...(rec?.toolStates || {}), __introPledge: t } }); };
+  // Creator editing: every list item is editable/removable/addable; visuals + AI edits below.
+  const media = useContext(MediaAuthCtx);
+  const [aiText, setAiText] = useState("");
+  const [aiBusy, setAiBusy] = useState(false);
+  const [imgBusy, setImgBusy] = useState(false);
+  const setItem = (key, i, patch) => setIntro({ [key]: (intro[key] || []).map((x, j) => j === i ? (typeof x === "string" ? patch : { ...x, ...patch }) : x) });
+  const delItem = (key, i) => setIntro({ [key]: (intro[key] || []).filter((_, j) => j !== i) });
+  async function aiEdit() {
+    const t = aiText.trim(); if (!t || aiBusy) return;
+    setAiBusy(true);
+    try { const next = await editIntro(school, intro, t); if (next) { onUpdate({ data: { ...school, intro: next } }); setAiText(""); } else alert("Couldn't apply that — try rephrasing."); } catch (e) { alert(e.message); }
+    setAiBusy(false);
+  }
+  async function genSectionImage() {
+    if (!media || imgBusy) return;
+    const p = window.prompt("Describe the image to generate for this page:"); if (!p || !p.trim()) return;
+    setImgBusy(true);
+    try { const m = await genImageToMedia(`${p.trim()} — for the introduction page of "${school.name}". Premium, cinematic, atmospheric. Absolutely no text or logos.`, media.token, media.userId, "16:9"); setIntro({ sections: [...(intro.sections || []), { id: `img-${Date.now().toString(36)}`, type: "image", url: m.url }] }); } catch (e) { alert("Image generation failed: " + e.message); }
+    setImgBusy(false);
+  }
   const journey = (intro.journey || []).slice(0, 6);
   const mentorName = school.mentor?.name || "Your mentor";
   const heroBg = school.cover
@@ -7015,45 +7179,86 @@ function IntroPage({ school, T, rec, readOnly, onUpdate, onSeen, onStart, onClos
             </div>
           </div>
         </div>
-        {/* The journey — interactive milestone path */}
-        {journey.length > 0 && (
+        {/* The journey — interactive milestone path (creator: edit every label/blurb, add/remove stops) */}
+        {(journey.length > 0 || canEdit) && (
           <div style={{ ...card, marginBottom: 14, animation: "fadeUp 0.5s 0.2s ease both" }}>
             <div style={lbl}>The journey ahead — tap each stop</div>
             <div style={{ display: "flex", alignItems: "center", gap: 4, overflowX: "auto", paddingBottom: 6 }}>
               {journey.map((j, i) => (
                 <Fragment key={i}>
                   {i > 0 && <span style={{ flex: "1 0 14px", height: 2, borderRadius: 1, background: i <= ji ? T.p : B.surface3 }} />}
-                  <button onClick={() => setJi(i)} style={{ flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center", gap: 5, background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", padding: "2px 2px" }}>
-                    <span style={{ width: 34, height: 34, borderRadius: "50%", border: `2px solid ${i === ji ? T.p : i < ji ? T.ba : B.borderMid}`, background: i === ji ? T.ps : B.surface2, color: i === ji ? T.hi : B.muted, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, boxShadow: i === ji ? `0 0 16px ${T.pg}` : "none", transition: "all 0.25s" }}>{i + 1}</span>
-                    <span style={{ fontSize: 10.5, fontWeight: 700, color: i === ji ? B.white : B.muted, maxWidth: 92, lineHeight: 1.25, textAlign: "center" }}>{j.label}</span>
-                  </button>
+                  <span style={{ flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center", gap: 5, padding: "2px 2px", position: "relative" }}>
+                    <button onClick={() => setJi(i)} style={{ width: 34, height: 34, borderRadius: "50%", border: `2px solid ${i === ji ? T.p : i < ji ? T.ba : B.borderMid}`, background: i === ji ? T.ps : B.surface2, color: i === ji ? T.hi : B.muted, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 13, fontWeight: 800, boxShadow: i === ji ? `0 0 16px ${T.pg}` : "none", transition: "all 0.25s", cursor: "pointer", fontFamily: "inherit" }}>{i + 1}</button>
+                    <span style={{ fontSize: 10.5, fontWeight: 700, color: i === ji ? B.white : B.muted, maxWidth: 92, lineHeight: 1.25, textAlign: "center" }}>
+                      {canEdit ? <EditableText value={j.label || ""} onSave={v => setItem("journey", i, { label: v })} /> : j.label}
+                    </span>
+                    {canEdit && journey.length > 2 && <button onClick={() => { delItem("journey", i); setJi(0); }} title="Remove stop" style={{ position: "absolute", top: -6, right: -4, background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: "50%", width: 16, height: 16, color: "#F87171", fontSize: 9, cursor: "pointer", lineHeight: 1 }}>✕</button>}
+                  </span>
                 </Fragment>
               ))}
+              {canEdit && <button onClick={() => { setIntro({ journey: [...(intro.journey || []), { label: "New milestone", blurb: "What happens here…" }] }); setJi(journey.length); }} title="Add a stop" style={{ flexShrink: 0, width: 34, height: 34, borderRadius: "50%", border: `1.5px dashed ${B.borderMid}`, background: "none", color: B.muted, fontSize: 15, cursor: "pointer", marginLeft: 6 }}>＋</button>}
             </div>
-            <div key={ji} style={{ marginTop: 10, background: B.surface2, border: `1px solid ${T.ba}`, borderRadius: 12, padding: "12px 15px", fontSize: 13.5, color: B.white, lineHeight: 1.65, animation: "fadeUp 0.3s ease" }}>{journey[ji]?.blurb}</div>
+            {journey[ji] && <div key={ji} style={{ marginTop: 10, background: B.surface2, border: `1px solid ${T.ba}`, borderRadius: 12, padding: "12px 15px", fontSize: 13.5, color: B.white, lineHeight: 1.65, animation: "fadeUp 0.3s ease" }}>
+              {canEdit ? <EditableText value={journey[ji]?.blurb || ""} onSave={v => setItem("journey", ji, { blurb: v })} /> : journey[ji]?.blurb}
+            </div>}
           </div>
         )}
-        {/* How this school works */}
-        {(intro.how || []).length > 0 && (
+        {/* How this school works (creator: edit/add/remove cards) */}
+        {((intro.how || []).length > 0 || canEdit) && (
           <div style={{ ...card, marginBottom: 14, animation: "fadeUp 0.5s 0.28s ease both" }}>
             <div style={lbl}>How this school works</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 10 }}>
-              {(intro.how || []).slice(0, 4).map((h, i) => (
-                <div key={i} style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 13, padding: "13px 14px" }}>
+              {(intro.how || []).slice(0, 6).map((h, i) => (
+                <div key={i} style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 13, padding: "13px 14px", position: "relative" }}>
+                  {canEdit && <button onClick={() => delItem("how", i)} title="Remove card" style={{ position: "absolute", top: 7, right: 8, background: "none", border: "none", color: B.muted, fontSize: 11, cursor: "pointer" }}>✕</button>}
                   <span style={{ width: 30, height: 30, borderRadius: 10, background: T.ps, border: `1px solid ${T.ba}`, color: T.hi, display: "inline-flex", alignItems: "center", justifyContent: "center", marginBottom: 8 }}><Ico name={ICO_PATHS[h.icon] ? h.icon : "sparkle"} size={15} /></span>
-                  <div style={{ fontSize: 13, fontWeight: 800, color: B.white, marginBottom: 4, lineHeight: 1.3 }}>{h.title}</div>
-                  <div style={{ fontSize: 11.5, color: B.mutedMid, lineHeight: 1.55 }}>{h.text}</div>
+                  <div style={{ fontSize: 13, fontWeight: 800, color: B.white, marginBottom: 4, lineHeight: 1.3 }}>{canEdit ? <EditableText value={h.title || ""} onSave={v => setItem("how", i, { title: v })} /> : h.title}</div>
+                  <div style={{ fontSize: 11.5, color: B.mutedMid, lineHeight: 1.55 }}>{canEdit ? <EditableText value={h.text || ""} onSave={v => setItem("how", i, { text: v })} /> : h.text}</div>
                 </div>
               ))}
+              {canEdit && (intro.how || []).length < 6 && <button onClick={() => setIntro({ how: [...(intro.how || []), { icon: "sparkle", title: "New point", text: "Explain it here…" }] })} style={{ border: `1.5px dashed ${B.borderMid}`, borderRadius: 13, background: "none", color: B.muted, fontSize: 12.5, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", minHeight: 90 }}>＋ Add card</button>}
             </div>
           </div>
         )}
-        {/* Expectations */}
-        {(intro.expectations || []).length > 0 && (
+        {/* Expectations (creator: edit/add/remove chips) */}
+        {((intro.expectations || []).length > 0 || canEdit) && (
           <div style={{ ...card, marginBottom: 14, animation: "fadeUp 0.5s 0.34s ease both" }}>
             <div style={lbl}>What's expected of you</div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
-              {(intro.expectations || []).slice(0, 6).map((x, i) => <span key={i} style={{ fontSize: 12.5, color: B.white, background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 100, padding: "6px 14px" }}>✓ {x}</span>)}
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 7, alignItems: "center" }}>
+              {(intro.expectations || []).slice(0, 8).map((x, i) => (
+                <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12.5, color: B.white, background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 100, padding: "6px 14px" }}>
+                  ✓ {canEdit ? <EditableText value={x} onSave={v => setItem("expectations", i, v)} /> : x}
+                  {canEdit && <button onClick={() => delItem("expectations", i)} style={{ background: "none", border: "none", color: B.muted, fontSize: 10, cursor: "pointer", padding: 0 }}>✕</button>}
+                </span>
+              ))}
+              {canEdit && <button onClick={() => setIntro({ expectations: [...(intro.expectations || []), "A new expectation"] })} style={{ border: `1.5px dashed ${B.borderMid}`, borderRadius: 100, background: "none", color: B.muted, fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit", padding: "6px 14px" }}>＋ Add</button>}
+            </div>
+          </div>
+        )}
+        {/* Custom sections — text blocks & visuals the creator adds (media or AI-generated) */}
+        {(intro.sections || []).map((sec, i) => (
+          <div key={sec.id || i} style={{ ...card, padding: sec.type === "image" ? 0 : card.padding, overflow: "hidden", marginBottom: 14, position: "relative", animation: "fadeUp 0.4s ease both" }}>
+            {canEdit && <button onClick={() => delItem("sections", i)} title="Remove section" style={{ position: "absolute", top: 8, right: 8, zIndex: 2, background: "rgba(0,0,0,0.5)", border: "none", borderRadius: 7, color: "#F87171", width: 24, height: 22, cursor: "pointer", fontSize: 11 }}>✕</button>}
+            {sec.type === "image"
+              ? <img src={sec.url} alt="" style={{ width: "100%", display: "block" }} />
+              : <>
+                {(sec.title || canEdit) && <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: 16, fontWeight: 800, color: B.white, marginBottom: 7 }}>{canEdit ? <EditableText value={sec.title || ""} placeholder="Section title…" onSave={v => setItem("sections", i, { title: v })} /> : sec.title}</div>}
+                <div style={{ fontSize: 13.5, color: B.mutedMid, lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{canEdit ? <EditableText value={sec.text || ""} placeholder="Write this section…" onSave={v => setItem("sections", i, { text: v })} /> : sec.text}</div>
+              </>}
+          </div>
+        ))}
+        {/* Creator tools: extend the page + talk to Senseito AI about it */}
+        {canEdit && (
+          <div style={{ ...card, border: `1px dashed ${T.ba}`, marginBottom: 14 }}>
+            <div style={lbl}>Build this page</div>
+            <div style={{ display: "flex", gap: 7, flexWrap: "wrap", marginBottom: 11 }}>
+              <button onClick={() => setIntro({ sections: [...(intro.sections || []), { id: `txt-${Date.now().toString(36)}`, type: "text", title: "New section", text: "" }] })} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, padding: "8px 13px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit" }}><Ico name="text" size={13} /> Text section</button>
+              {media && <button onClick={genSectionImage} disabled={imgBusy} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, padding: "8px 13px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", opacity: imgBusy ? 0.6 : 1 }}>{imgBusy ? <Spinner size={12} /> : <Ico name="sparkle" size={13} />} Generate a visual</button>}
+              {media && <button onClick={() => { const u = window.prompt("Image URL (https) — or use Generate a visual:", ""); if (u && /^https?:\/\//i.test(u.trim())) setIntro({ sections: [...(intro.sections || []), { id: `img-${Date.now().toString(36)}`, type: "image", url: u.trim() }] }); }} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, padding: "8px 13px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit" }}><Ico name="image" size={13} /> Image URL</button>}
+            </div>
+            <div style={{ display: "flex", gap: 7 }}>
+              <input value={aiText} onChange={e => setAiText(e.target.value)} onKeyDown={e => { if (e.key === "Enter") aiEdit(); }} placeholder='✨ Tell Senseito AI what to change — "warmer welcome", "5 journey stops", "add a section about my story"…' style={{ flex: 1, background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 10, color: B.white, fontFamily: "inherit", fontSize: 12.5, padding: "10px 12px" }} />
+              <button onClick={aiEdit} disabled={aiBusy || !aiText.trim()} style={{ background: T.grad, border: "none", borderRadius: 10, color: "#fff", padding: "0 16px", cursor: "pointer", fontSize: 12.5, fontWeight: 800, fontFamily: "inherit", opacity: aiBusy || !aiText.trim() ? 0.6 : 1 }}>{aiBusy ? <Spinner color="#fff" size={12} /> : "Apply"}</button>
             </div>
           </div>
         )}
@@ -7061,7 +7266,7 @@ function IntroPage({ school, T, rec, readOnly, onUpdate, onSeen, onStart, onClos
         {intro.pledge?.prompt && (
           <div style={{ ...card, border: `1px solid ${T.ba}`, marginBottom: 18, animation: "fadeUp 0.5s 0.4s ease both" }}>
             <div style={lbl}>Your commitment</div>
-            <div style={{ fontSize: 14, color: B.white, lineHeight: 1.6, marginBottom: 10 }}>{intro.pledge.prompt}</div>
+            <div style={{ fontSize: 14, color: B.white, lineHeight: 1.6, marginBottom: 10 }}>{canEdit ? <EditableText value={intro.pledge.prompt} onSave={v => setIntro({ pledge: { ...intro.pledge, prompt: v } })} /> : intro.pledge.prompt}</div>
             {savedPledge ? (
               <div style={{ background: "rgba(74,222,128,0.08)", border: "1px solid rgba(74,222,128,0.35)", borderRadius: 11, padding: "11px 14px", fontSize: 13.5, color: "#6EE7B7", lineHeight: 1.6 }}>✓ Locked in: “{savedPledge}”</div>
             ) : (
@@ -7075,6 +7280,10 @@ function IntroPage({ school, T, rec, readOnly, onUpdate, onSeen, onStart, onClos
         {/* CTA */}
         <div style={{ textAlign: "center", animation: "fadeUp 0.5s 0.46s ease both" }}>
           <button onClick={onStart} style={{ background: T.grad, border: "none", borderRadius: 14, color: "#fff", padding: "15px 34px", cursor: "pointer", fontSize: 15.5, fontWeight: 800, fontFamily: "inherit", boxShadow: `0 12px 36px ${T.pg}` }}>{intro.cta || "Begin Lesson 1 →"}</button>
+          {canEdit && <div style={{ marginTop: 8, fontSize: 11, color: B.muted, display: "flex", justifyContent: "center", gap: 6, flexWrap: "wrap" }}>
+            <span>Button label:</span><span style={{ color: T.hi }}><EditableText value={intro.cta || "Begin Lesson 1 →"} onSave={v => setIntro({ cta: v })} /></span>
+            <span>· commit label:</span><span style={{ color: T.hi }}><EditableText value={intro.pledge?.button || "I'm in"} onSave={v => setIntro({ pledge: { ...(intro.pledge || {}), button: v } })} /></span>
+          </div>}
           <div style={{ marginTop: 10 }}><button onClick={onClose} style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 12, fontFamily: "inherit", textDecoration: "underline" }}>{readOnly ? "Skip for now — take me to the school" : "Close preview"}</button></div>
         </div>
       </div>
@@ -8510,8 +8719,8 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
           </div>
         </div>
       )}
-      {/* LMS/Steps shells render the lesson INLINE (below the cover) instead of in this modal. */}
-      {activeLesson && shell !== "lms" && shell !== "steps" && renderLessonView(activeLesson, false)}
+      {/* LMS/Steps/Pages shells render the lesson INLINE (below the cover) instead of in this modal. */}
+      {activeLesson && shell !== "lms" && shell !== "steps" && shell !== "pages" && renderLessonView(activeLesson, false)}
       {editingLesson && !readOnly && <LessonEditor lesson={editingLesson} T={T} allowed={allowedBlocksFor(school.learningPath)}
         lessons={(school.semesters || []).flatMap(s => s.lessons || [])} games={school.games || []} school={school}
         onSave={(draft) => { saveLesson(editingLesson.number, draft); setEditingLesson(null); showToast("✓ Lesson updated"); }}
@@ -8946,7 +9155,59 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
               </div>
             );
           })()}
-          {activeTab === "lessons" && (stepsShell ? (activeLesson ? (
+          {/* PAGES shell — every lesson is a full page, editable in place like the Introduction. */}
+          {activeTab === "lessons" && shell === "pages" && (() => {
+            const list = (viewSemesters || []).flatMap(s => s.lessons || []);
+            if (!list.length) return <div style={{ textAlign: "center", color: B.muted, fontSize: 13, padding: 30, border: `1px dashed ${B.borderMid}`, borderRadius: 14 }}>No lessons yet — add your first one below.</div>;
+            const cur = (activeLesson && list.find(l => l.number === activeLesson.number)) || list.find(l => (progress[l.number] || "locked") === "active") || list[0];
+            const idx = list.indexOf(cur);
+            const stOf = l => progress[l.number] || "locked";
+            const lockedL = l => readOnly && stOf(l) === "locked" && !l.open;
+            return (
+              <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                {/* page index */}
+                <div style={{ display: "flex", gap: 6, alignItems: "center", overflowX: "auto", paddingBottom: 2 }}>
+                  {list.map((l, i) => { const on = l.number === cur.number; const lk = lockedL(l); return (
+                    <button key={l.number} disabled={lk} onClick={() => enterLesson(l)} title={l.title}
+                      style={{ flexShrink: 0, minWidth: 30, height: 30, borderRadius: 9, padding: "0 8px", border: `1.5px solid ${on ? T.p : stOf(l) === "passed" ? "rgba(74,222,128,0.5)" : B.borderMid}`, background: on ? T.ps : B.surface, color: on ? T.hi : stOf(l) === "passed" ? "#4ADE80" : lk ? B.muted : B.mutedMid, fontFamily: "'Space Grotesk',sans-serif", fontWeight: 800, fontSize: 12, cursor: lk ? "not-allowed" : "pointer", opacity: lk ? 0.55 : 1 }}>
+                      {stOf(l) === "passed" ? "✓" : i + 1}
+                    </button>
+                  ); })}
+                </div>
+                {/* full-page hero — title & concept editable in place */}
+                <div style={{ borderRadius: 20, overflow: "hidden", border: `1px solid ${T.ba}`, background: cur.cover ? `linear-gradient(180deg, rgba(6,6,14,0.32), rgba(6,6,14,0.78)), url("${cur.cover}") center/cover` : (T.heroGrad || T.gr), padding: "clamp(32px,6vw,56px) 26px", textAlign: "center", animation: "fadeUp 0.4s ease" }}>
+                  <div style={{ fontSize: 10.5, fontWeight: 800, textTransform: "uppercase", letterSpacing: 2.4, color: "rgba(255,255,255,0.85)", marginBottom: 8 }}>Lesson {cur.number || idx + 1}{cur.type ? ` · ${cur.type}` : ""}</div>
+                  <div style={{ fontFamily: "'Space Grotesk',sans-serif", fontSize: "clamp(22px,4.6vw,34px)", fontWeight: 800, letterSpacing: -0.8, color: "#fff", textShadow: "0 2px 18px rgba(0,0,0,0.5)" }}>
+                    <EditableText value={cur.title} readOnly={readOnly} onSave={v => saveLesson(cur.number, { title: v })} />
+                  </div>
+                  <div style={{ fontSize: 13.5, color: "rgba(255,255,255,0.88)", lineHeight: 1.65, maxWidth: 560, margin: "10px auto 0", textShadow: "0 1px 10px rgba(0,0,0,0.5)" }}>
+                    <EditableText value={flattenText(cur.concept)} readOnly={readOnly} placeholder="What this lesson teaches…" onSave={v => saveLesson(cur.number, { concept: v })} />
+                  </div>
+                  {!readOnly && <button onClick={() => setEditingLesson(cur)} style={{ marginTop: 12, background: "rgba(0,0,0,0.35)", border: "1px solid rgba(255,255,255,0.3)", borderRadius: 9, color: "#fff", padding: "6px 14px", cursor: "pointer", fontSize: 11.5, fontWeight: 700, fontFamily: "inherit" }}>✎ Full lesson editor</button>}
+                </div>
+                {lockedL(cur)
+                  ? <div style={{ textAlign: "center", color: B.muted, fontSize: 13, padding: 34, border: `1px dashed ${B.borderMid}`, borderRadius: 16 }}>🔒 This page unlocks when you pass the one before it.</div>
+                  : renderLessonView(cur, true)}
+                {/* creator: add modules straight onto the page */}
+                {!readOnly && !lockedL(cur) && (
+                  <div style={{ display: "flex", gap: 7, alignItems: "center", background: B.surface, border: `1px dashed ${B.borderMid}`, borderRadius: 12, padding: "9px 12px", flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 11.5, color: B.mutedMid, fontWeight: 700 }}>＋ Add a module to this page:</span>
+                    <select value="" onChange={async e => { const type = e.target.value; if (!type) return; e.target.value = ""; try { const nb = await authorBlock({ title: cur.title, concept: cur.concept }, type, ""); saveLesson(cur.number, { blocks: [...(cur.blocks || []), nb] }); showToast("✓ Module added to the page"); } catch { showToast("✕ Couldn't author that module", "err"); } }}
+                      style={{ background: B.surface3, border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.white, fontFamily: "inherit", fontSize: 12, padding: "6px 9px", cursor: "pointer" }}>
+                      <option value="">Choose a block…</option>
+                      {allowedBlocksFor(school.learningPath).map(t => <option key={t} value={t}>{BLOCK_META[t]?.label || t}</option>)}
+                    </select>
+                  </div>
+                )}
+                {/* pager */}
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                  <button disabled={idx <= 0} onClick={() => enterLesson(list[idx - 1])} style={{ background: B.surface, border: `1px solid ${B.borderMid}`, borderRadius: 10, color: idx <= 0 ? B.muted : B.mutedMid, padding: "10px 16px", cursor: idx <= 0 ? "not-allowed" : "pointer", fontSize: 12.5, fontWeight: 700, fontFamily: "inherit", opacity: idx <= 0 ? 0.5 : 1, maxWidth: "48%", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>← {list[idx - 1]?.title || "Previous"}</button>
+                  <button disabled={idx >= list.length - 1 || lockedL(list[idx + 1])} onClick={() => enterLesson(list[idx + 1])} style={{ background: (idx >= list.length - 1 || lockedL(list[idx + 1])) ? B.surface : T.grad, border: "none", borderRadius: 10, color: (idx >= list.length - 1 || lockedL(list[idx + 1])) ? B.muted : "#fff", padding: "10px 16px", cursor: (idx >= list.length - 1 || lockedL(list[idx + 1])) ? "not-allowed" : "pointer", fontSize: 12.5, fontWeight: 800, fontFamily: "inherit", maxWidth: "48%", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{list[idx + 1] ? `${list[idx + 1].title} →` : "The end 🎉"}</button>
+                </div>
+              </div>
+            );
+          })()}
+          {activeTab === "lessons" && shell !== "pages" && (stepsShell ? (activeLesson ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                 <button onClick={() => setActiveLesson(null)} style={{ background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.mutedMid, padding: "7px 13px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit", fontWeight: 700 }}>← All steps</button>
@@ -12146,7 +12407,7 @@ export default function Senseito() {
   function applyDesign(rec, d) {
     if (!d || typeof d !== "object") return false;
     const cur = rec.data; const patch = {};
-    for (const k of ["theme", "skin", "density", "font", "fontScale", "cover", "coverPos", "minimal", "progression", "navStyle", "navGrad", "effect", "lessonGrid", "tabScale", "communityStyle", "heroCard", "hoverFx", "navSticky"]) if (k in d) patch[k] = d[k];
+    for (const k of ["theme", "skin", "density", "font", "fontScale", "cover", "coverPos", "minimal", "progression", "shell", "navStyle", "navGrad", "effect", "lessonGrid", "tabScale", "communityStyle", "heroCard", "hoverFx", "navSticky"]) if (k in d) patch[k] = d[k];
     if ("progressWidget" in d) patch.progressWidget = d.progressWidget === null ? undefined : { style: "circle", placement: ["hero", "rail", "nav", "meta"].includes(d.progressWidget?.placement) ? d.progressWidget.placement : "hero" };
     if ("intro" in d) patch.intro = d.intro === null ? undefined : { ...(cur.intro || {}), ...d.intro };
     if ("mentorship" in d && d.mentorship && typeof d.mentorship === "object") patch.mentorship = { ...(cur.mentorship || {}), ...d.mentorship };

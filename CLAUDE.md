@@ -135,6 +135,21 @@ one-click fix, never a hard block.
 - **Training Ground** (`school.data.training`) — creator feeds source material (book/PDF/notes),
   gets a Knowledge-DNA summary + chapter map, sets always-honor directives + a memory list. Both
   the mentor (`mentorSys`) and build chat (`CHAT_SYS`) get `trainingPreamble(school)` injected.
+  Inside it lives the **AI Lab** (`training.lab`): writing samples → `VOICE_DNA_SYS` extracts a
+  Voice DNA (editable); banned words (`avoid`), sentence/style rules (`styleNotes`), reply
+  length; a **temperature** lever (0–1, warned above 0.9) that rides the proxy's new optional
+  `temperature` field into every mentor call (`labTemp(school)`); and an ElevenLabs voice-clone
+  stub (`elevenVoiceId`/`elevenKey`, stored for future TTS — marked "coming soon"). All of it
+  flows through `labPreamble()` → `trainingPreamble()`, so the mentor AND build chat speak as
+  the creator's replica.
+- **Introduction editing** — every intro list (journey/how/expectations) is inline-editable
+  with add/remove; `intro.sections[]` holds creator-added text blocks and images (media URL or
+  AI-generated via `genImageToMedia`); an on-page "tell Senseito AI what to change" box calls
+  `editIntro()`/`INTRO_EDIT_SYS` for surgical rewrites.
+- **Pages shell** — `school.shell = "pages"` (in `SHELLS`, settable via chat `shell` design
+  key): each lesson renders as a full page (hero with cover/number, inline `LessonView`,
+  numbered page index + prev/next pager); creator edits title/concept in place and adds
+  activity blocks from a picker right on the page.
 - **Community** (`school.data.community`) — `widgets` (folders/files/embeds/buttons, nestable,
   featured images, AI-generated workbook PDFs) render in an "Add" menu between the discussion
   board's top and bottom zones; `blocks` are decoration bricks (Title/Text/Image/Video/Iframe/
