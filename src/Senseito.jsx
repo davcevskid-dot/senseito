@@ -462,6 +462,15 @@ const ICO_PATHS = {
   steps: "M4 19h4v-5h4v-5h4v-5h4",
   arcade: "M7 11h4M9 9v4M15 10h.01M18 12h.01M7 7h10a4 4 0 014 4v2a4 4 0 01-7 3l-1-1h-2l-1 1a4 4 0 01-7-3v-2a4 4 0 014-4z",
   pages: "M8 3h10a1 1 0 011 1v14a1 1 0 01-1 1H8a1 1 0 01-1-1V4a1 1 0 011-1zM4 6v13a1 1 0 001 1h11M11 8h4M11 12h4",
+  code: "M8 6l-5 6 5 6M16 6l5 6-5 6",
+  mic: "M12 15a3 3 0 003-3V6a3 3 0 10-6 0v6a3 3 0 003 3zM5 11a7 7 0 0014 0M12 18v3M9 21h6",
+  timer: "M12 8v5l3 2M12 21a8 8 0 100-16 8 8 0 000 16zM9 2h6",
+  repeat: "M20 11a8 8 0 00-14-5L4 8M4 13a8 8 0 0014 5l2-2M4 4v4h4M20 20v-4h-4",
+  leaf: "M6 21c0-7 4-13 14-15-1 10-6 13-14 15zM6 21c1-5 4-9 9-11",
+  branch: "M7 4a2 2 0 100 4 2 2 0 000-4zM7 8v8M7 16a2 2 0 102 2 2 2 0 00-2-2zM17 4a2 2 0 100 4 2 2 0 000-4zM17 8c0 5-8 3-9 8",
+  minus: "M4 12h16",
+  help: "M9.1 9a3 3 0 015.8 1c0 2-3 2.5-3 4.5M12 17.5h.01M12 22a10 10 0 100-20 10 10 0 000 20z",
+  calc: "M6 2h12a1 1 0 011 1v18a1 1 0 01-1 1H6a1 1 0 01-1-1V3a1 1 0 011-1zM9 6h6M9 11h.01M12 11h.01M15 11h.01M9 15h.01M12 15h.01M15 15h.01M9 19h6",
   brain: "M9 3a3 3 0 00-3 3 3 3 0 00-2 5 3 3 0 001 5 3 3 0 005 2V4.5A2.5 2.5 0 009 3zM15 3a3 3 0 013 3 3 3 0 012 5 3 3 0 01-1 5 3 3 0 01-5 2V4.5A2.5 2.5 0 0115 3z",
   chart: "M4 20V4M4 20h16M8 20v-6M13 20V9M18 20v-9",
   heading: "M6 5v14M18 5v14M6 12h12M6 5h4M14 5h4M6 19h4M14 19h4",
@@ -721,6 +730,22 @@ const BLOCK_META = {
   calculator:          { label: "Calculator",          icon: "🧮", cat: "Info" },
 };
 const ALL_BLOCKS = Object.keys(BLOCK_META);
+// SVG icon per block type (replaces the emoji in every rendered surface; native <option>
+// elements can't hold SVG, so dropdowns show the plain label instead).
+const BLOCK_ICO = {
+  flashcard: "cards", reading: "book", mindmap: "brain", essay: "text", debate: "chat",
+  code_sandbox: "code", terminal: "code", sequencer: "steps",
+  journal: "file", branching_scenario: "branch", voice_journal: "mic", reflection_timer: "timer",
+  macro_tracker: "target", heatmap: "cards", habit_checker: "check", metric_tracker: "chart", weekly_planner: "cal", mood_quadrant: "target",
+  roleplay: "chat", objection_handler: "shield", interview_simulator: "user", audio_pitcher: "mic",
+  image_gate: "image", video_gate: "video",
+  review: "repeat", garden: "leaf", notebook: "file", showroom: "cards", game: "game", library: "book", events: "cal",
+  match_pairs: "cards", fill_blank: "text", order_words: "heading",
+  reading_plain: "file", video_embed: "play", embed: "iframe",
+  divider: "minus", callout: "info", image: "image", cta_button: "button", stat_grid: "chart",
+  quiz: "help", calculator: "calc",
+};
+function BIco({ type, size = 14, style }) { return <Ico name={BLOCK_ICO[type] || "sparkle"} size={size} style={style} />; }
 
 // Compact data-shape reference handed to the architect/editor AI.
 const BLOCK_SCHEMA_GUIDE = `BLOCK DATA SHAPES (each lesson block is { type, data }):
@@ -2227,7 +2252,7 @@ function Toast({ toast }) {
 // revealed when the student completes the lesson.
 function hasReward(r) { return !!(r && (r.file?.url || r.gameId || r.brick || (r.note && r.note.trim()))); }
 // Content bricks that work well as an unlockable reward (self-contained, render & edit standalone).
-const REWARD_BRICKS = [["callout", "📝 Note"], ["video_embed", "▶️ Video"], ["image", "🖼️ Image"], ["embed", "🔗 Embed"], ["cta_button", "🔘 Button"], ["library", "📚 Library"], ["showroom", "🎬 Slides"]];
+const REWARD_BRICKS = [["callout", "Note"], ["video_embed", "Video"], ["image", "Image"], ["embed", "Embed"], ["cta_button", "Button"], ["library", "Library"], ["showroom", "Slides"]];
 // Opens a reward brick (any block) in a focused modal — read-only for students.
 function RewardBrickModal({ block, school, T, onClose }) {
   return (
@@ -3050,11 +3075,11 @@ function LessonView({ school, lesson, T: Tprop, onClose, onPass, onChooseFork, c
               </div>
               {acts.map((blk, i) => {
                 const locked = !canEdit && np.sequential && i > 0 && !outputs[i - 1]?.passed; // sequential unlock (off when creator allows all)
-                if (locked) return <div key={i} style={{ background: B.surface2, border: `1px dashed ${B.borderMid}`, borderRadius: 12, padding: "14px 16px", fontSize: 12.5, color: B.muted, display: "flex", alignItems: "center", gap: 8 }}>🔒 {BLOCK_META[blk.type]?.icon} {BLOCK_META[blk.type]?.label || blk.type} — finish the activity above to unlock</div>;
+                if (locked) return <div key={i} style={{ background: B.surface2, border: `1px dashed ${B.borderMid}`, borderRadius: 12, padding: "14px 16px", fontSize: 12.5, color: B.muted, display: "flex", alignItems: "center", gap: 8 }}><Ico name="lock" size={13} /><BIco type={blk.type} size={13} /> {BLOCK_META[blk.type]?.label || blk.type} — finish the activity above to unlock</div>;
                 // Already completed (restored from a prior session) → show as done, not a fresh activity.
                 if (outputs[i]?.passed && !redo[i] && !canEdit) return (
                   <div key={i} style={{ background: "rgba(74,222,128,0.07)", border: "1px solid rgba(74,222,128,0.3)", borderRadius: 12, padding: "13px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-                    <span style={{ fontSize: 13, color: "#4ADE80", fontWeight: 600 }}>✓ {BLOCK_META[blk.type]?.icon} {blk.data?.title || BLOCK_META[blk.type]?.label || blk.type} — completed</span>
+                    <span style={{ fontSize: 13, color: "#4ADE80", fontWeight: 600, display: "inline-flex", alignItems: "center", gap: 7 }}><Ico name="check" size={13} /><BIco type={blk.type} size={13} /> {blk.data?.title || BLOCK_META[blk.type]?.label || blk.type} — completed</span>
                     <button onClick={() => setRedo(r => ({ ...r, [i]: true }))} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 8, color: B.mutedMid, padding: "4px 11px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit" }}>Redo</button>
                   </div>
                 );
@@ -5854,7 +5879,8 @@ function normalizeTool(spec) {
 // ─────────────────────────────────────────────────────────────
 // TOOLS
 // ─────────────────────────────────────────────────────────────
-function toolIcon(type) { return ({ checklist: "✅", habit: "📆", journal: "📓", timer: "⏱️", counter: "🔢", quiz: "❓" }[type]) || BLOCK_META[type]?.icon || "🛠️"; }
+// SVG tool icon (legacy tool types + any block type).
+function ToolIco({ type, size = 14, style }) { const legacy = { checklist: "check", habit: "cal", journal: "file", timer: "timer", counter: "calc", quiz: "help" }[type]; return <Ico name={legacy || BLOCK_ICO[type] || "wand"} size={size} style={style} />; }
 const DAYS = ["M", "T", "W", "T", "F", "S", "S"];
 
 function ToolFrame({ tool, T, open, onToggle, onRemove, onEdit, busy, children }) {
@@ -5862,7 +5888,7 @@ function ToolFrame({ tool, T, open, onToggle, onRemove, onEdit, busy, children }
     <div style={{ background: B.surface, border: `1px solid ${B.border}`, borderRadius: 16, overflow: "hidden" }}>
       <div onClick={onToggle} style={{ padding: "14px 20px", borderBottom: open ? `1px solid ${B.border}` : "none", background: B.surface2, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, cursor: "pointer" }}>
         <div>
-          <div style={{ fontSize: 14, fontWeight: 700, color: B.white }}>{toolIcon(tool.type)} {tool.title}</div>
+          <div style={{ fontSize: 14, fontWeight: 700, color: B.white, display: "inline-flex", alignItems: "center", gap: 7 }}><span style={{ color: T.hi, display: "inline-flex" }}><ToolIco type={tool.type} /></span> {tool.title}</div>
           <div style={{ fontSize: 12, color: B.muted, marginTop: 2 }}>{tool.description}</div>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
@@ -6045,7 +6071,7 @@ function ToolsSection({ rec, T, onUpdate, buildTool, buildingTool, readOnly, onR
                   return (
                     <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 11, padding: "11px 14px" }}>
                       <div>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: B.white }}>{toolIcon(idea.type)} {idea.name}</div>
+                        <div style={{ fontSize: 13, fontWeight: 600, color: B.white, display: "inline-flex", alignItems: "center", gap: 6 }}><ToolIco type={idea.type} size={13} /> {idea.name}</div>
                         <div style={{ fontSize: 12, color: B.muted, marginTop: 2, lineHeight: 1.45 }}>{idea.why}</div>
                       </div>
                       <button disabled={built || !!buildingTool} onClick={() => buildTool(`Build "${idea.name}" (type: ${idea.type}). Purpose: ${idea.why}`, `idea-${i}`)}
@@ -6302,7 +6328,7 @@ function LessonRow({ lesson, idx, T, progress, onEnter, onEdit, onToggleLock, re
         {lesson.concept && <div style={{ fontSize: 12.5, color: B.mutedMid, lineHeight: 1.55, marginBottom: 9 }}>{lesson.concept.slice(0, 110)}{lesson.concept.length > 110 ? "…" : ""}</div>}
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <span style={{ fontSize: 11, color: T.a, display: "flex", alignItems: "center", gap: 4 }}>💬 Guided by {mentorName || "your mentor"}</span>
-          {(lesson.blocks || []).length > 0 && <span style={{ display: "flex", gap: 4, alignItems: "center" }}><span style={{ fontSize: 10, color: B.muted }}>·</span>{lesson.blocks.map((b, bi) => <span key={bi} title={BLOCK_META[b.type]?.label || b.type} style={{ fontSize: 13 }}>{BLOCK_META[b.type]?.icon || "🧩"}</span>)}</span>}
+          {(lesson.blocks || []).length > 0 && <span style={{ display: "flex", gap: 6, alignItems: "center" }}><span style={{ fontSize: 10, color: B.muted }}>·</span>{lesson.blocks.map((b, bi) => <span key={bi} title={BLOCK_META[b.type]?.label || b.type} style={{ color: B.mutedMid, display: "inline-flex" }}><BIco type={b.type} size={13} /></span>)}</span>}
           {hasReward(lesson.reward) && <span title={lesson.reward.label || "Completion reward"} style={{ fontSize: 11, color: T.hi, display: "inline-flex", alignItems: "center", gap: 3 }}>🎁 {state === "passed" ? "Reward" : "Reward on completion"}</span>}
         </div>
         {state === "passed" && (lesson.reward?.file?.url || rewardGame?.code || lesson.reward?.brick) && <div style={{ marginTop: 9, display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -6407,7 +6433,7 @@ function CustomLessonWizard({ T, partTitle, onAdd, onClose }) {
                 <div style={{ fontSize: 10, color: B.muted, fontWeight: 700, marginBottom: 5 }}>{cat}</div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                   {ALL_BLOCKS.filter(t => (BLOCK_META[t]?.cat || "Other") === cat).map(t => { const on = picked.includes(t); return (
-                    <button key={t} onClick={() => toggle(t)} style={{ background: on ? T.ps : B.surface2, border: `1px solid ${on ? T.ba : B.borderMid}`, borderRadius: 100, color: on ? T.hi : B.mutedMid, padding: "5px 11px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit", fontWeight: 600 }}>{on ? "✓ " : ""}{BLOCK_META[t]?.icon} {BLOCK_META[t]?.label || t}</button>
+                    <button key={t} onClick={() => toggle(t)} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: on ? T.ps : B.surface2, border: `1px solid ${on ? T.ba : B.borderMid}`, borderRadius: 100, color: on ? T.hi : B.mutedMid, padding: "5px 11px", cursor: "pointer", fontSize: 11.5, fontFamily: "inherit", fontWeight: 600 }}>{on ? "✓ " : ""}<BIco type={t} size={12} /> {BLOCK_META[t]?.label || t}</button>
                   ); })}
                 </div>
               </div>
@@ -6615,7 +6641,7 @@ function LessonEditor({ lesson, T, allowed, lessons = [], games = [], school, on
             {d.reward?.brick ? (
               <div style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 10, padding: 11, display: "flex", flexDirection: "column", gap: 8 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: B.white }}>
-                  <span style={{ fontSize: 16 }}>{BLOCK_META[d.reward.brick.type]?.icon || "🧩"}</span>
+                  <span style={{ color: T.hi, display: "inline-flex" }}><BIco type={d.reward.brick.type} size={15} /></span>
                   <span style={{ flex: 1, minWidth: 0 }}>Unlock brick: {BLOCK_META[d.reward.brick.type]?.label || d.reward.brick.type}</span>
                   <button onClick={() => set({ reward: undefined })} title="Remove reward" style={{ background: "rgba(248,113,113,0.08)", border: "1px solid rgba(248,113,113,0.3)", borderRadius: 7, color: "#F87171", padding: "4px 9px", cursor: "pointer", fontSize: 11, fontFamily: "inherit" }}>Remove</button>
                 </div>
@@ -6694,7 +6720,7 @@ function LessonEditor({ lesson, T, allowed, lessons = [], games = [], school, on
                 <div key={i} style={{ background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 10, padding: 12, marginBottom: 8 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
                     <select value={b.type} onChange={e => changeBlockType(i, e.target.value)} title="Change activity type" style={{ ...inp.input, fontSize: 12, cursor: "pointer", width: "auto", flex: "1 1 150px" }}>
-                      {ALL_BLOCKS.map(t => <option key={t} value={t}>{BLOCK_META[t]?.icon} {BLOCK_META[t]?.label}</option>)}
+                      {ALL_BLOCKS.map(t => <option key={t} value={t}>{BLOCK_META[t]?.label}</option>)}
                     </select>
                     <div style={{ display: "flex", gap: 6 }}>
                       <button onClick={() => rewriteBlock(i)} disabled={busyIdx === i} title="Rewrite with AI" style={{ background: "rgba(124,58,237,0.1)", border: "1px solid rgba(124,58,237,0.4)", borderRadius: 7, color: "#C4B5FD", padding: "4px 9px", cursor: "pointer", fontSize: 11, fontFamily: "inherit", opacity: busyIdx === i ? 0.6 : 1 }}>{busyIdx === i ? "…" : "✨ AI"}</button>
@@ -6716,8 +6742,8 @@ function LessonEditor({ lesson, T, allowed, lessons = [], games = [], school, on
             <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
               <select value={addType} onChange={e => setAddType(e.target.value)} style={{ ...inp.input, fontSize: 12, cursor: "pointer", flex: 1 }}>
                 <option value="">+ Add activity (AI fills it)…</option>
-                <optgroup label="Recommended">{(allowed || ALL_BLOCKS).map(b => <option key={b} value={b}>{BLOCK_META[b]?.icon} {BLOCK_META[b]?.label}</option>)}</optgroup>
-                <optgroup label="All">{ALL_BLOCKS.map(b => <option key={b} value={b}>{BLOCK_META[b]?.icon} {BLOCK_META[b]?.label}</option>)}</optgroup>
+                <optgroup label="Recommended">{(allowed || ALL_BLOCKS).map(b => <option key={b} value={b}>{BLOCK_META[b]?.label}</option>)}</optgroup>
+                <optgroup label="All">{ALL_BLOCKS.map(b => <option key={b} value={b}>{BLOCK_META[b]?.label}</option>)}</optgroup>
               </select>
               <button disabled={!addType || adding} onClick={addBlock} style={{ ...pBtnLite(), opacity: (addType && !adding) ? 1 : 0.5 }}>{adding ? "Adding…" : "Add"}</button>
             </div>
@@ -6859,8 +6885,8 @@ function IteratePanel({ school, history, loading, onApply, onTheme, onGami, onVo
               </select>
               <select value={form.block || ""} onChange={e => setForm({ ...form, block: e.target.value })} style={selStyle}>
                 <option value="">Pick a block…</option>
-                <optgroup label={`Recommended for ${pathLabel(path)}`}>{recBlocks.map(b => <option key={b} value={b}>{BLOCK_META[b]?.icon} {BLOCK_META[b]?.label}</option>)}</optgroup>
-                <optgroup label="All blocks">{ALL_BLOCKS.map(b => <option key={b} value={b}>{BLOCK_META[b]?.icon} {BLOCK_META[b]?.label}</option>)}</optgroup>
+                <optgroup label={`Recommended for ${pathLabel(path)}`}>{recBlocks.map(b => <option key={b} value={b}>{BLOCK_META[b]?.label}</option>)}</optgroup>
+                <optgroup label="All blocks">{ALL_BLOCKS.map(b => <option key={b} value={b}>{BLOCK_META[b]?.label}</option>)}</optgroup>
               </select>
               <button disabled={!form.lesson || !form.block} onClick={() => runCmd(`Add a ${form.block} block to lesson number ${form.lesson}. Fill its data fully per the schema and keep it consistent with that lesson's concept and the ${path} path. Preserve all other lessons and blocks.`)} style={{ ...pBtnLite(), opacity: (!form.lesson || !form.block) ? 0.5 : 1 }}>Add block →</button>
             </div>
@@ -7773,14 +7799,14 @@ function SchoolWizard({ school, T, media, published, rec, onUpdate, saveLesson, 
         <div style={{ fontSize: 12, color: B.mutedMid }}>Fill in the outlined ones and add any you like — these are what the student actually does.</div>
         {blocks.map((b, i) => { const thin = isThinBlock(b); return (
           <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, background: B.surface2, border: `1px solid ${thin ? T.ba : B.border}`, borderRadius: 10, padding: "9px 11px", ...(thin ? { boxShadow: `0 0 16px ${T.pg}` } : {}) }}>
-            <span style={{ fontSize: 15 }}>{BLOCK_META[b.type]?.icon || "🧩"}</span>
+            <span style={{ color: T.hi, display: "inline-flex" }}><BIco type={b.type} size={14} /></span>
             <span style={{ flex: 1, minWidth: 0, fontSize: 12.5, color: B.white }}>{b.data?.title || BLOCK_META[b.type]?.label || b.type}{thin ? <span style={{ color: T.hi }}> · needs content</span> : null}</span>
             <button onClick={() => authorInto(b.type, i)} disabled={busy} style={{ background: thin ? T.grad : T.ps, border: thin ? "none" : `1px solid ${T.ba}`, borderRadius: 7, color: thin ? "#fff" : T.hi, padding: "4px 10px", cursor: "pointer", fontSize: 11, fontWeight: 700, fontFamily: "inherit" }}>{busy ? "…" : thin ? "✨ Generate" : "↻ Redo"}</button>
             <button onClick={() => setL({ blocks: blocks.filter((_, j) => j !== i) })} style={{ background: "none", border: "none", color: "#F87171", cursor: "pointer", fontSize: 13 }}>✕</button>
           </div>
         ); })}
         {!blocks.length && <div style={{ fontSize: 12, color: B.muted, textAlign: "center", padding: 14, border: `1px dashed ${B.borderMid}`, borderRadius: 10 }}>No activities yet — add some below (optional).</div>}
-        <select value="" onChange={e => { if (e.target.value) authorInto(e.target.value); e.target.value = ""; }} disabled={busy} style={{ ...inp, cursor: "pointer" }}><option value="">＋ Add an activity (AI fills it)…</option>{ALL_BLOCKS.map(t => <option key={t} value={t}>{BLOCK_META[t]?.icon} {BLOCK_META[t]?.label}</option>)}</select>
+        <select value="" onChange={e => { if (e.target.value) authorInto(e.target.value); e.target.value = ""; }} disabled={busy} style={{ ...inp, cursor: "pointer" }}><option value="">＋ Add an activity (AI fills it)…</option>{ALL_BLOCKS.map(t => <option key={t} value={t}>{BLOCK_META[t]?.label}</option>)}</select>
       </>);
     } else if (card === "theory") {
       heading = "📖 Theory";
@@ -7850,7 +7876,7 @@ function SchoolWizard({ school, T, media, published, rec, onUpdate, saveLesson, 
           return (
             <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, background: B.surface2, border: `1px solid ${B.border}`, borderRadius: 11, padding: "10px 13px" }}>
               <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 700, color: B.white }}>{typeof toolIcon === "function" ? toolIcon(idea.type) : "🛠️"} {idea.name}</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: B.white, display: "inline-flex", alignItems: "center", gap: 6 }}><ToolIco type={idea.type} size={13} /> {idea.name}</div>
                 <div style={{ fontSize: 11.5, color: B.muted, marginTop: 2, lineHeight: 1.45 }}>{idea.why}</div>
               </div>
               <button disabled={built || !!buildingTool || !buildTool} onClick={() => { if (!hasT) addSection("tools"); buildTool(`Build "${idea.name}" (type: ${idea.type}). Purpose: ${idea.why}`, `idea-${i}`); }}
@@ -8696,7 +8722,9 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
   const TABS = SECTIONS.map(s => [s.id, (s.title || SECTION_META[s.kind]?.title || "Section") + (s.kind === "tools" && rec.tools?.length ? ` (${rec.tools.length})` : ""), s.kind]);
   // Shared LessonView render — used as a modal (cards/arcade) or inline (LMS shell).
   const renderLessonView = (l, inline) => (
-    <LessonView school={classes ? { ...school, mentor: classMentor(school, lessonClassId(school, l.number)) } : school} lesson={l} T={T} inline={inline} schoolId={rec.id} viewer={viewer}
+    // key: inline shells (LMS/Steps/Pages) reuse this slot across lessons — without a key the
+    // component keeps the PREVIOUS lesson's mentor chat/opening line (state inits on mount only).
+    <LessonView key={l.id || l.number} school={classes ? { ...school, mentor: classMentor(school, lessonClassId(school, l.number)) } : school} lesson={l} T={T} inline={inline} schoolId={rec.id} viewer={viewer}
       onClose={() => {
         const finished = l; setActiveLesson(null);
         if (!inline && school.progression === "arcade" && finished && progress[finished.number] === "passed" && !(finished.forks || []).length) {
@@ -9172,19 +9200,25 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
                     <button onClick={() => setAddSecOpen(false)} style={{ background: "none", border: `1px solid ${B.borderMid}`, borderRadius: 7, color: B.mutedMid, padding: "3px 8px", cursor: "pointer", fontSize: 12, fontFamily: "inherit" }}>✕</button>
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    <button onClick={() => addSection("dashboard")} style={mi}>🧭 Dashboard — grid of bricks</button>
-                    {!hasKind("lessons") && <button onClick={() => addSection("lessons")} style={mi}>📚 Lessons</button>}
-                    {!hasKind("mentor") && <button onClick={() => addSection("mentor")} style={mi}>🎓 Mentor chat</button>}
-                    {!hasKind("tools") && <button onClick={() => addSection("tools")} style={mi}>🛠️ Tools</button>}
-                    {!hasKind("community") && <button onClick={() => addSection("community")} style={mi}>💬 Community — discussion board</button>}
-                    {!hasKind("students") && <button onClick={() => addSection("students")} style={mi}>👥 Students — everyone enrolled</button>}
-                    {!hasKind("calendar") && <button onClick={() => addSection("calendar")} style={mi}>📅 Calendar — events popup</button>}
-                    {!hasKind("classroom") && <button onClick={() => addSection("classroom")} style={mi}>🎥 Classroom — live stream & sessions</button>}
-                    {!hasKind("counselor") && <button onClick={() => addSection("counselor")} style={mi}>🛡️ Counselor's Office — private student reports</button>}
-                    <button onClick={() => addFeatureSection("library", "library", "Library", "📚")} style={mi}>📚 Library — files & links</button>
-                    <button onClick={() => addFeatureSection("events", "events", "Events", "📅")} style={mi}>📅 Events — lives & RSVP</button>
-                    <button onClick={() => addFeatureSection("showroom", "showroom", "Showroom", "🎬")} style={mi}>🎬 Showroom — slide deck</button>
-                    <button onClick={() => addFeatureSection("game", "gameroom", "Game Room", "🎮")} style={mi}>🎮 Game Room — playable games</button>
+                    {[
+                      ["cards", "Dashboard — grid of bricks", () => addSection("dashboard"), true],
+                      ["book", "Lessons", () => addSection("lessons"), !hasKind("lessons")],
+                      ["gradcap", "Mentor chat", () => addSection("mentor"), !hasKind("mentor")],
+                      ["wand", "Tools", () => addSection("tools"), !hasKind("tools")],
+                      ["people", "Community — discussion board", () => addSection("community"), !hasKind("community")],
+                      ["user", "Students — everyone enrolled", () => addSection("students"), !hasKind("students")],
+                      ["cal", "Calendar — events popup", () => addSection("calendar"), !hasKind("calendar")],
+                      ["camera", "Classroom — live stream & sessions", () => addSection("classroom"), !hasKind("classroom")],
+                      ["shield", "Counselor's Office — private student reports", () => addSection("counselor"), !hasKind("counselor")],
+                      ["book", "Library — files & links", () => addFeatureSection("library", "library", "Library", "📚"), true],
+                      ["cal", "Events — lives & RSVP", () => addFeatureSection("events", "events", "Events", "📅"), true],
+                      ["play", "Showroom — slide deck", () => addFeatureSection("showroom", "showroom", "Showroom", "🎬"), true],
+                      ["game", "Game Room — playable games", () => addFeatureSection("game", "gameroom", "Game Room", "🎮"), true],
+                    ].filter(([, , , show]) => show).map(([ic, label, act]) => (
+                      <button key={label} onClick={act} style={{ ...mi, display: "flex", alignItems: "center", gap: 9 }}>
+                        <span style={{ color: T.hi, display: "inline-flex", flexShrink: 0 }}><Ico name={ic} size={15} /></span>{label}
+                      </button>
+                    ))}
                   </div>
                   {SECTIONS.length > 1 && (() => {
                     const ai = SECTIONS.findIndex(s => s.id === activeTab);
@@ -9380,7 +9414,7 @@ function SchoolPage({ rec, onUpdate, readOnly = false, onPublish, publishing, pu
                     {!readOnly && (interludeOpen === si ? (
                       <div style={{ background: B.surface, border: `1px solid ${T.ba}`, borderRadius: 12, padding: 11, display: "flex", flexWrap: "wrap", gap: 7, alignItems: "center" }}>
                         <span style={{ fontSize: 11.5, color: B.mutedMid, fontWeight: 700, marginRight: 2 }}>Add a section here:</span>
-                        {[["divider", "🔤 Title"], ["callout", "📝 Text"], ["image", "🖼️ Image"], ["video_embed", "▶️ Video"], ["embed", "🔗 Iframe"], ["cta_button", "🔘 Button"]].map(([t, l]) => <button key={t} onClick={() => { addInterludeBrick(si, t); setInterludeOpen(null); }} style={{ background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, padding: "7px 11px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit" }}>{l}</button>)}
+                        {[["divider", "Title", "heading"], ["callout", "Text", "text"], ["image", "Image", "image"], ["video_embed", "Video", "video"], ["embed", "Iframe", "iframe"], ["cta_button", "Button", "button"]].map(([t, l, ic]) => <button key={t} onClick={() => { addInterludeBrick(si, t); setInterludeOpen(null); }} style={{ display: "inline-flex", alignItems: "center", gap: 6, background: B.surface2, border: `1px solid ${B.borderMid}`, borderRadius: 9, color: B.white, padding: "7px 11px", cursor: "pointer", fontSize: 12.5, fontFamily: "inherit" }}><Ico name={ic} size={13} /> {l}</button>)}
                         <button onClick={() => setInterludeOpen(null)} style={{ background: "none", border: "none", color: B.muted, cursor: "pointer", fontSize: 14, marginLeft: "auto" }}>✕</button>
                       </div>
                     ) : (
